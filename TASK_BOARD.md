@@ -39,14 +39,22 @@ Owners: **Nguyen Van An**, **Le Dinh Nghia**, or **Both**. Status values: `Not S
 | MVP scope vs. future thesis scope (Kubernetes/SIEM/fine-tuning explicitly deferred) | Both | Done — documented in `docs/diagrams/architecture.md` §5 and `docs/decisions/ADR-001-mvp-scope.md` addendum (2026-07-11) |
 | Architecture-level risks and mitigations | Both | Done — documented in `docs/diagrams/architecture.md` §6 (2026-07-11) |
 | Document ingestion data flow diagram | Both | Done — documented in `docs/diagrams/data-flow.md` §2 (2026-07-11) |
-| Synthetic red-team prompt set (prompt injection) | Nguyen Van An | In Progress — 7 test categories fully **designed** with example prompts in `docs/evaluation/red-team-test-design.md` §4; actual files under `redteam/` still Not Started |
-| Synthetic poisoned-document set (RAG poisoning) | Le Dinh Nghia | In Progress — 5 clean + 5 poisoned document categories fully **designed** with example text in `docs/evaluation/red-team-test-design.md` §2–3; actual files under `datasets/` still Not Started |
+| Synthetic red-team prompt set (prompt injection) | Nguyen Van An | Done — materialized as `redteam/prompts.jsonl` (40 test cases across 8 categories: benign, direct injection, role override, instruction hierarchy, jailbreak, sensitive extraction, RAG context manipulation, tool/action misuse), `redteam/expected-behaviors.yaml`, `redteam/attack-categories.md` |
+| Synthetic poisoned-document set (RAG poisoning) | Le Dinh Nghia | Done — materialized as 5 clean documents (`datasets/clean/*.md`) and 5 poisoned documents (`datasets/poisoned/*.md`), each with enterprise-style metadata (ID, version, owner, classification) and explicit expected guard decisions |
 | Define evaluation metrics | Both | Done (definitions) — 6 metrics (ASR, Block Rate, FPR, FNR, Latency Overhead, Reason Logging Completeness) precisely defined with formulas in `docs/evaluation/metrics-definition.md`, reconciled against Phase 1's candidate metric names; **no measurements exist**, only definitions |
 | Evaluation plan / methodology | Both | Done (planning) — `docs/evaluation/evaluation-plan.md` documents the baseline-vs-guarded methodology, roles, and constraints for the eventual Phase 7 run |
 
 **Note:** This Phase 2 pass (2026-07-11) was documentation-only — no code, no package installs, no API calls, per the explicit constraints for this session. Kubernetes, SIEM integration, and local fine-tuning were deliberately kept out of MVP requirements and recorded only as future thesis scope.
 
 **Note (Phase 2.5, 2026-07-11):** A follow-on documentation-only session designed the red-team test corpus and evaluation criteria in detail — see `docs/evaluation/`. This is still design work, not actual test-data files or code; the "Not Started" → "In Progress" transitions above reflect that the *design* exists, not that `datasets/`/`redteam/` contain files yet.
+
+**Note (Controlled Synthetic Enterprise Benchmark, 2026-07-11):** A follow-on data-only session turned the Phase 2.5 design into actual files: `datasets/clean/` (5 docs), `datasets/poisoned/` (5 docs), `redteam/prompts.jsonl` (40 prompts), `redteam/expected-behaviors.yaml`, `redteam/attack-categories.md`. This closes out the last two "In Progress" rows above. **No code was written** — no FastAPI app, no guard logic, no ingestion script, no LLM API calls; this data only becomes useful once Phase 3–7 below are implemented. Full inventory: `datasets/README.md`, `redteam/README.md`.
+
+**Next concrete implementation tasks** (unblocked by this session, not yet started):
+1. Implement FastAPI gateway skeleton — tracked below (Phase 3, "FastAPI app scaffold").
+2. Implement Input Guard — tracked below (Phase 4), will be tested against `redteam/prompts.jsonl`.
+3. Implement JSONL structured logging — tracked below (Phase 3, "JSONL structured logging"), format anticipated by FR7/NFR3 in `docs/diagrams/architecture.md`.
+4. Implement the evaluation runner — tracked below (Phase 7, "Automated red-team runner against gateway"), will consume `datasets/` and `redteam/` per `docs/evaluation/evaluation-plan.md` §4.
 
 ## Phase 3 — Gateway Skeleton
 
@@ -56,6 +64,8 @@ Owners: **Nguyen Van An**, **Le Dinh Nghia**, or **Both**. Status values: `Not S
 | Config management (pydantic settings) | Nguyen Van An | Not Started |
 | JSONL structured logging | Le Dinh Nghia | Not Started |
 | Base test harness (pytest) | Le Dinh Nghia | Not Started |
+
+**Note:** "Phase 3" in the sense of *this* task board (Gateway Skeleton — code) is distinct from the "Phase 3: Controlled Synthetic Enterprise Benchmark" label used in the 2026-07-11 data-creation session referenced above (which materialized `datasets/`/`redteam/`, not application code). That data-creation work is recorded against the Phase 2 rows above since it materializes what Phase 2/2.5 designed. This Phase 3 (Gateway Skeleton) remains **Not Started**.
 
 ## Phase 4 — Input Guard
 

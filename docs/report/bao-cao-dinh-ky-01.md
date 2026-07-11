@@ -10,7 +10,7 @@
 
 **Thời hạn nộp báo cáo:** 12–13/07/2026
 
-**Giai đoạn hiện tại:** Phase 0 hoàn tất (scaffold). Phase 1 (nghiên cứu) đã có bản nháp đầu tiên. Phase 2 (kiến trúc & threat model) đã có bản thiết kế đầy đủ, bao gồm cả phần thiết kế dữ liệu red-team & tiêu chí đánh giá (gọi tắt "Phase 2.5"). Vẫn chỉ ở mức tài liệu — chưa triển khai code ứng dụng, chưa cài đặt package, chưa gọi API nào.
+**Giai đoạn hiện tại:** Phase 0 hoàn tất (scaffold). Phase 1 (nghiên cứu) đã có bản nháp đầu tiên. Phase 2 (kiến trúc & threat model) đã có bản thiết kế đầy đủ, bao gồm cả phần thiết kế dữ liệu red-team & tiêu chí đánh giá (gọi tắt "Phase 2.5"). **Phase 3 (Controlled Synthetic Enterprise Benchmark) đã bắt đầu** — thiết kế ở Phase 2.5 nay đã được hiện thực hóa thành file dữ liệu thật trong `datasets/` và `redteam/`. Vẫn chỉ ở mức dữ liệu/tài liệu — chưa triển khai code ứng dụng, chưa cài đặt package, chưa gọi API nào.
 
 ---
 
@@ -47,6 +47,11 @@
 - Toàn bộ ví dụ tài liệu/prompt trong các file trên đều là **dữ liệu hư cấu 100%** — dùng công ty giả định "Northwind Retail Group" (gợi nhớ đến công ty mẫu "Northwind Traders" nổi tiếng của Microsoft, để tín hiệu rõ đây là dữ liệu mẫu), không dùng PII/secret thật, chuỗi "bí mật" giả đều có định dạng rõ ràng không thể nhầm với secret thật (ví dụ `FAKE-SECRET-0000-EXAMPLE`).
 - Cập nhật `docs/research/dataset-review.md` để tham chiếu sang bộ thiết kế mới này, làm rõ: đây mới là **thiết kế**, chưa có file dữ liệu thật nào được tạo trong `datasets/` hay `redteam/`.
 - Chưa viết bất kỳ dòng code Python nào, chưa cài đặt package nào, chưa gọi API nào trong toàn bộ phiên làm việc Phase 2.5.
+
+### Giai đoạn Phase 3 (Controlled Synthetic Enterprise Benchmark — đã bắt đầu)
+
+- Thiết kế ở Phase 2.5 đã được hiện thực hóa thành file dữ liệu thật: 5 tài liệu doanh nghiệp "sạch" và 5 tài liệu "nhiễm độc" trong `datasets/`, cùng 40 prompt red-team (`redteam/prompts.jsonl`) kèm taxonomy hành vi guard (`redteam/expected-behaviors.yaml`) và giải thích từng nhóm tấn công (`redteam/attack-categories.md`). Chi tiết đầy đủ xem `datasets/README.md` và `redteam/README.md`.
+- Vẫn là phiên làm việc **chỉ tạo dữ liệu/tài liệu** — chưa có code Gateway, chưa có guard logic, chưa gọi API nào.
 
 ## 2. Đề cương chi tiết các công việc thực hiện
 

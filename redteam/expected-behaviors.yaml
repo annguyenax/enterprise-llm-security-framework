@@ -1,0 +1,81 @@
+# Expected Guard Behavior Taxonomy
+#
+# Canonical definition of the 5 possible guard decisions used throughout this
+# project's synthetic benchmark (redteam/prompts.jsonl, datasets/poisoned/*.md,
+# docs/evaluation/red-team-test-design.md §5, docs/evaluation/metrics-definition.md).
+#
+# STATUS: definition only. No gateway or guard implementation exists yet
+# (Phase 3+ builds the code that will eventually produce these decisions).
+# This file does not claim any decision has actually been measured.
+
+schema_version: 1
+
+behaviors:
+  allow:
+    label: "Allow"
+    meaning: >
+      Guard finds no issue with the input, retrieved document, or output.
+    user_visible_effect: "Request proceeds unmodified."
+    confidence_level: "High confidence, benign"
+    logging_requirement: "Logged with decision=allow and a reason code (even benign decisions must be logged, per FR7)."
+
+  block:
+    label: "Block"
+    meaning: >
+      Guard finds a clear policy/security violation (in input, a retrieved
+      document, or output).
+    user_visible_effect: >
+      Pipeline halts; user receives a safe refusal/blocked response instead
+      of the underlying content.
+    confidence_level: "High confidence, malicious"
+    logging_requirement: "Logged with decision=block, reason code, and the specific rule/pattern that triggered it."
+
+  sanitize:
+    label: "Sanitize"
+    meaning: >
+      Guard finds a partial issue (e.g., an embedded instruction inside
+      otherwise-legitimate content, such as a hidden HTML comment in a
+      retrieved document).
+    user_visible_effect: >
+      The offending portion is stripped/neutralized; the remaining
+      legitimate content still proceeds.
+    confidence_level: "High confidence on the offending part only"
+    logging_requirement: "Logged with decision=sanitize, reason code, and a record of exactly what was removed/altered."
+
+  log_only:
+    label: "Log only"
+    meaning: >
+      Guard finds a low-severity or ambiguous signal not strong enough to
+      block or sanitize.
+    user_visible_effect: >
+      Request proceeds unmodified (same as Allow to the user), but the
+      event is logged with a flag for later human/analyst review.
+    confidence_level: "Low/medium confidence"
+    logging_requirement: "Logged with decision=log_only, reason code, and the ambiguous signal that was detected."
+
+  human_review:
+    label: "Require human review"
+    meaning: >
+      Guard finds a high-severity but high-ambiguity case (e.g., a compound
+      attack pattern combining multiple weaker signals) that should not be
+      auto-decided.
+    user_visible_effect: >
+      For this MVP, the practical effect is the same as Block (response
+      withheld), but tagged with a distinct reason code meaning "a human
+      should look at this." No live human-review queue exists yet in the
+      MVP -- building one is future thesis scope, not MVP scope (see
+      docs/diagrams/architecture.md §5).
+    confidence_level: "Medium confidence, high stakes"
+    logging_requirement: "Logged with decision=human_review, reason code, and the combination of signals that triggered escalation."
+
+# Guards that can emit each decision, per docs/diagrams/architecture.md §4
+target_guards:
+  - input_guard   # screens raw user input (Phase 4)
+  - rag_guard     # screens retrieved documents before they enter LLM context (Phase 5)
+  - output_guard  # screens LLM completions before returning to the user (Phase 6)
+  - gateway       # orchestration-level decisions not specific to one guard (Phase 3)
+
+notes:
+  - "This taxonomy is shared vocabulary across redteam/prompts.jsonl, datasets/poisoned/*.md, and the future evaluation harness (Phase 7) — every guard decision in the project must resolve to exactly one of the 5 keys above."
+  - "No numeric thresholds (e.g., confidence scores) are defined here — that is an implementation detail for Phase 4-6, not part of this data-design phase."
+  - "See docs/evaluation/metrics-definition.md for how these decisions feed into ASR, Block Rate, FPR, FNR, and Reason Logging Completeness."

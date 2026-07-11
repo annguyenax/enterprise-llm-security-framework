@@ -46,12 +46,25 @@ Phase 0 kickoff. Focus was entirely on scaffolding: repository structure, planni
 - Updated `docs/research/dataset-review.md` to cross-reference the new design, making clear it is design-only — no files exist yet under `datasets/` or `redteam/`.
 - No code was written, no packages were installed, and no APIs were called — documentation and data *design* only, per this session's explicit constraints.
 
+## Phase 3 — Controlled Synthetic Enterprise Benchmark (same week, 2026-07-11)
+
+- Materialized the Phase 2.5 design (`docs/evaluation/red-team-test-design.md`) into actual files:
+  - `datasets/clean/` — 5 synthetic enterprise documents (HR leave policy, IT helpdesk policy, security/data-classification guideline, product FAQ, finance reimbursement policy), each with realistic document metadata (document ID, version, owner department, last-updated date, classification `Internal Synthetic Demo`) and 5–8 Q&A-style policy reference points for RAG retrieval testing.
+  - `datasets/poisoned/` — 5 poisoned documents, one per attack pattern (hidden HTML-comment instruction, system-instruction override, fake secret leak, policy-bypass instruction, indirect injection via a fabricated support transcript), each cross-referenced to the clean document it's modeled after and annotated with attack type, expected risk, expected guard decision, and an explanation for evaluators.
+  - `redteam/prompts.jsonl` — 40 prompt-based test cases (5 each across benign, direct prompt injection, role override, instruction hierarchy attack, jailbreak, sensitive-information extraction, RAG context manipulation, and tool/action misuse), each with `id`, `category`, `prompt`, `expected_behavior`, `expected_decision`, `target_guard`, and `notes` fields — validated as syntactically correct JSON Lines with unique IDs.
+  - `redteam/expected-behaviors.yaml` — canonical definition of the 5-state guard decision taxonomy (allow/block/sanitize/log_only/human_review).
+  - `redteam/attack-categories.md` — explains every category (both the 8 prompt-based ones and the 5 document-poisoning ones), what each attack tries to do, expected guard response, and example IDs.
+- Rewrote `datasets/README.md` and `redteam/README.md` to document folder structure, metadata conventions, safety rules, and how the not-yet-built Phase 7 evaluation runner will consume this data.
+- All content uses the fictional "Northwind Retail Group" company (established in Phase 2.5), fake product ("Aurora Widget"), fake internal tool ("ServiceDesk Pro"), and obviously-fake secret markers (`FAKE-SECRET-0000-EXAMPLE`) — no real PII, credentials, or company data anywhere.
+- **No code was written this session** — no FastAPI app, no guard/detection logic, no ingestion script, no LLM API calls, no packages installed. This is a pure data/test-fixture creation session; the benchmark only becomes useful once Phase 3 (Gateway Skeleton), Phase 4–6 (guards), and Phase 7 (evaluation runner) are actually implemented.
+- Updated `TASK_BOARD.md`: the two remaining "In Progress" Phase 2 rows (synthetic prompt set, synthetic poisoned-document set) are now marked Done; added an explicit "next concrete implementation tasks" note pointing at the existing Phase 3/4/7 rows (FastAPI scaffold, JSONL logging, Input Guard, evaluation runner).
+
 ## In Progress / Not Started
 
 - LlamaIndex vs. LangChain, ChromaDB vs. alternative, and API-based LLM provider comparisons — not covered by the Gemini research pass yet, still Not Started.
 - Direct team read-through of the three academic papers logged in `related-work.md` — needed before any citation is added to `report-latex/references.bib`.
 - Standalone public red-team dataset review — still Not Started.
-- Actual synthetic red-team prompt set and poisoned-document set — now fully **designed** in `docs/evaluation/red-team-test-design.md`, but no actual files exist yet under `datasets/` or `redteam/`.
+- Gateway Skeleton (Phase 3 in `TASK_BOARD.md`'s sense — FastAPI app, config, JSONL logging) — still Not Started; this is the next phase that will actually consume the new `datasets/`/`redteam/` benchmark.
 
 ## Blockers / Open Questions
 
