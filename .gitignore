@@ -61,3 +61,7 @@ Mau-De-An-Tot-Nghiep-PTIT-2409/
 school-requirements/
 *.doc
 *.docx
+
+# Runtime logs
+logs/
+*.log
