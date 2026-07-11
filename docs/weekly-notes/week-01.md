@@ -129,6 +129,13 @@ Phase 0 kickoff. Focus was entirely on scaffolding: repository structure, planni
 - Added bypass, sanitization, severity, cross-guard, and benign enterprise false-positive coverage. Verified 23 RAG Guard/dataset tests and 2 direct gateway integration checks. HTTP `TestClient` collection remains blocked by the documented shared Starlette environment issue; no packages were installed.
 - Remaining limitation: regex rules can still miss semantic, deeply obfuscated, or encoded attacks. A semantic classifier or LLM judge remains future work, and complete prompt-injection protection is not claimed.
 
+## Phase 6 - LLM Provider Adapter and Mock Integration (same week, 2026-07-11)
+
+- Added a typed synchronous provider contract and deterministic offline `MockLLMProvider`; no provider SDK, API key, package installation, network request, or external LLM call was introduced.
+- Replaced the gateway's fixed response constant with provider generation after Input/RAG guards and before Output Guard. Block/human-review branches skip provider generation, while sanitized prompts and context are passed to it.
+- Added optional provider fields to chat responses and provider name/model/mock status to audit events. Recursive metadata redaction prevents synthetic secret markers from leaking through nested metadata.
+- Added direct provider and gateway integration tests covering deterministic output, fail-closed provider selection, skip paths, sanitized inputs, Output Guard handoff, response metadata, and audit metadata. Verified 32 provider/gateway/RAG/dataset tests plus a live local API smoke test; the full `TestClient` suite remains blocked by the documented shared Starlette issue. Phase 7 Evaluation Runner is next after the complete suite passes in a clean environment.
+
 ## Next Week Plan
 
 - Team members personally read the three logged academic papers and confirm/replace the placeholder "Summary" fields in `related-work.md` with their own understanding.

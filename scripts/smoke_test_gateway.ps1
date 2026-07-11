@@ -45,6 +45,8 @@ Write-Host "health.status:                  $($health.status)"
 Write-Host "benign guard decision:          $($benignResult.decision)"
 Write-Host "malicious guard decision:       $($maliciousResult.decision)"
 Write-Host "chat (benign) final_decision:   $($chatBenign.final_decision)"
+Write-Host "chat (benign) provider:         $($chatBenign.provider_name) / $($chatBenign.model_name)"
+Write-Host "chat (benign) is_mock:          $($chatBenign.is_mock)"
 Write-Host "chat (malicious) final_decision: $($chatMalicious.final_decision)"
 
 if ($health.status -eq "ok" -and $benignResult.decision -eq "allow" -and $maliciousResult.decision -eq "block") {

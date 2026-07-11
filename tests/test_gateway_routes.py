@@ -31,7 +31,10 @@ def test_chat_returns_request_id_and_guard_decisions():
     assert body["input_guard"]["decision"] == "allow"
     assert body["output_guard"] is not None
     assert body["final_decision"] == "allow"
-    assert "Phase 4 mock response" in body["response"]
+    assert "Mock provider response" in body["response"]
+    assert body["provider_name"] == "mock"
+    assert body["model_name"] == "mock-rag-guard-v1"
+    assert body["is_mock"] is True
 
 
 def test_chat_blocks_direct_injection_before_mock_llm():
@@ -69,7 +72,7 @@ def test_chat_continues_with_sanitized_prompt_and_reports_sanitize_decision():
     # Pipeline must continue (unlike block/human_review) -- output guard runs.
     assert body["output_guard"] is not None
     assert body["final_decision"] == "sanitize"
-    assert "Phase 4 mock response" in body["response"]
+    assert "Mock provider response" in body["response"]
 
 
 def test_final_decision_follows_severity_order():
@@ -133,6 +136,11 @@ def test_audit_log_file_is_created_during_gateway_call():
     assert last_event["request_id"] == response.json()["request_id"]
     assert "final_decision" in last_event
     assert "timestamp" in last_event
+    assert last_event["provider"] == {
+        "provider_name": "mock",
+        "model_name": "mock-rag-guard-v1",
+        "is_mock": True,
+    }
 
 
 def test_gateway_stops_when_rag_guard_returns_block():
@@ -192,7 +200,7 @@ def test_gateway_continues_when_rag_guard_returns_sanitize():
     assert body["rag_guard"]["decision"] == "sanitize"
     assert body["output_guard"] is not None
     assert body["final_decision"] == "sanitize"
-    assert "Phase 4 mock response" in body["response"]
+    assert "Mock provider response" in body["response"]
 
 
 def test_benign_input_with_poisoned_context_is_sanitized_and_continues():

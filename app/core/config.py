@@ -20,6 +20,9 @@ class Settings:
     app_env: str
     log_path: str
     enable_audit_log: bool
+    llm_provider: str
+    llm_model_name: str
+    llm_provider_timeout_seconds: int
 
 
 def load_settings() -> Settings:
@@ -32,6 +35,9 @@ def load_settings() -> Settings:
         app_env=os.getenv("APP_ENV", "dev"),
         log_path=os.getenv("LOG_PATH", "logs/audit.jsonl"),
         enable_audit_log=_str_to_bool(os.getenv("ENABLE_AUDIT_LOG", "true")),
+        llm_provider=os.getenv("LLM_PROVIDER", "mock"),
+        llm_model_name=os.getenv("LLM_MODEL_NAME", "mock-rag-guard-v1"),
+        llm_provider_timeout_seconds=int(os.getenv("LLM_PROVIDER_TIMEOUT_SECONDS", "30")),
     )
 
 

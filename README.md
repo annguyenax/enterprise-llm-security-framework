@@ -103,7 +103,7 @@ Invoke-RestMethod -Uri "http://127.0.0.1:8000/v1/gateway/chat" -Method Post -Bod
 Or run `scripts/smoke_test_gateway.ps1` to exercise all of the above automatically (server must already be running).
 
 - **Audit log location:** `logs/audit.jsonl` by default (`LOG_PATH` env var to change it). One JSON object per line, UTF-8 encoded; secret-like patterns are redacted before being written, and rule-authored reason strings use plain ASCII (no em dashes) so the file renders correctly in any PowerShell console codepage.
-- **Still intentionally mocked, not a bug:** `/v1/gateway/chat` never calls a real LLM (fixed mock response only) and there is no real RAG retrieval anywhere in this repository yet - see `app/README.md`.
+- **Still intentionally mocked, not a bug:** `/v1/gateway/chat` uses the local deterministic provider adapter; it never calls an external LLM, and no real RAG retrieval exists yet - see `app/README.md`.
 
 ### Phase 5 RAG Context Guard
 
@@ -154,11 +154,31 @@ This remains a small rule-based guard. It can miss semantic, heavily obfuscated,
 or encoded attacks; a semantic classifier or LLM judge is future work. Vector
 retrieval, embeddings, and real LLM integration are still not implemented.
 
+### Phase 6 LLM Provider Adapter
+
+`app/services/llm_provider.py` defines the provider request/response contract,
+base interface, factory, and deterministic `MockLLMProvider`. The gateway now
+runs `Input Guard -> optional RAG Guard -> LLM Provider -> Output Guard -> Audit
+Logger`. Guarded prompt/context sanitization is applied before the provider is
+called, and blocking or human-review decisions skip the provider entirely.
+
+The default is local and offline:
+
+```powershell
+$env:LLM_PROVIDER = "mock"
+$env:LLM_MODEL_NAME = "mock-rag-guard-v1"
+$env:LLM_PROVIDER_TIMEOUT_SECONDS = "30"
+```
+
+No `.env` file, API key, provider SDK, network access, or paid call is required.
+Real provider integration remains future work and requires explicit approval,
+secret-handling design, and provider-specific tests before it can be enabled.
+
 **What is intentionally not implemented yet (not a bug):**
 - No real vector database, no embeddings, no similarity search — `dataset_loader.py` uses simple deterministic fixed-size character-window chunking only.
-- No real LLM call anywhere in this repository.
+- No real external LLM call anywhere in this repository; only the local deterministic mock provider is available.
 - `context_chunks` must be supplied directly by the caller (as if retrieval had already happened elsewhere) — there is no retrieval step.
-- A real vector database and a real LLM provider adapter are later phases (Phase 5's "LLM Provider Adapter" row and Phase 7's evaluation runner — see `TASK_BOARD.md`).
+- Real-provider implementations and a real vector database are future work; Phase 7 adds the evaluation runner.
 
 Everything before Phase 4 was documentation/data only — Phase 0–3.1 produced scaffolding, research, architecture/threat-model docs, and the synthetic benchmark (`datasets/`, `redteam/`). See [PROJECT_PLAN.md](PROJECT_PLAN.md) for the full roadmap.
 

@@ -44,6 +44,17 @@ def _preview(text: str, max_len: int = 200) -> str:
     return redacted
 
 
+def _redact_value(value: Any) -> Any:
+    """Redact strings recursively without changing JSON-compatible shape."""
+    if isinstance(value, str):
+        return _redact_secrets(value)
+    if isinstance(value, dict):
+        return {key: _redact_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_redact_value(item) for item in value]
+    return value
+
+
 def _guard_summary(
     result: GuardDecisionResponse | RAGGuardResponse | None,
 ) -> dict[str, Any] | None:
@@ -67,6 +78,7 @@ def log_event(
     final_decision: Decision,
     reasons: list[str],
     metadata: dict[str, Any],
+    provider_metadata: dict[str, Any] | None = None,
 ) -> None:
     """Append one JSONL audit event. No-op if ENABLE_AUDIT_LOG is false.
 
@@ -91,7 +103,8 @@ def log_event(
         "output_decision": _guard_summary(output_decision),
         "final_decision": final_decision.value,
         "reasons": reasons,
-        "metadata": metadata,
+        "metadata": _redact_value(metadata),
+        "provider": _redact_value(provider_metadata),
     }
 
     log_path = Path(settings.log_path)

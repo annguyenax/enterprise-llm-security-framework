@@ -1,7 +1,7 @@
-"""Gateway orchestration: Input Guard -> RAG Guard -> (mock LLM) -> Output
+"""Gateway orchestration: Input Guard -> RAG Guard -> LLM Provider -> Output
 Guard -> audit log.
 
-No real LLM is called in this phase. Real LLM provider integration is a
+No real external LLM is called in this phase. Real provider integration is a
 later, explicitly-approved phase (see TASK_BOARD.md and AGENT_RULES.md
 rule 4 - no paid API calls without approval). Real RAG retrieval (vector
 database, embeddings) is also not implemented yet (Phase 6+) - callers of
@@ -30,11 +30,12 @@ from app.guards.rag_guard import evaluate_rag_context
 from app.schemas.requests import RAGContextChunk
 from app.schemas.responses import ChatResponse
 from app.services.audit_logger import log_event
-
-MOCK_RESPONSE = (
-    "Phase 4 mock response: guard evaluation completed. "
-    "Real LLM and RAG retrieval are not enabled in this phase."
+from app.services.llm_provider import (
+    BaseLLMProvider,
+    LLMProviderRequest,
+    get_llm_provider,
 )
+from app.core.config import settings
 
 _BLOCKED_INPUT_TEMPLATE = (
     "Your request was blocked by the Input Guard and was not sent to the "
@@ -71,7 +72,10 @@ _STOPPING_DECISIONS = (Decision.BLOCK, Decision.HUMAN_REVIEW)
 
 
 def run_chat(
-    prompt: str, context_chunks: list[RAGContextChunk], metadata: dict
+    prompt: str,
+    context_chunks: list[RAGContextChunk],
+    metadata: dict,
+    provider: BaseLLMProvider | None = None,
 ) -> ChatResponse:
     """Run the full mock gateway pipeline for one chat request.
 
@@ -84,7 +88,7 @@ def run_chat(
          - BLOCK or HUMAN_REVIEW -> stop here, no mock LLM call.
          - SANITIZE -> continue using the sanitized chunks.
          - LOG_ONLY / ALLOW -> continue using the original chunks.
-      3. Generate the (fixed, mock) assistant response.
+      3. Generate a candidate response through the configured provider.
       4. Evaluate the Output Guard on that response.
          - BLOCK or HUMAN_REVIEW -> withhold the response.
          - SANITIZE -> return the redacted response.
@@ -124,12 +128,11 @@ def run_chat(
         )
 
     # SANITIZE -> use the cleaned prompt; LOG_ONLY/ALLOW -> use the original.
-    # `effective_prompt` is what a real LLM call would receive in a later
-    # phase; it does not change the mock response in this phase.
     effective_prompt = (
-        input_result.sanitized_text if input_result.decision == Decision.SANITIZE else prompt
+        (input_result.sanitized_text or "")
+        if input_result.decision == Decision.SANITIZE
+        else prompt
     )
-    _ = effective_prompt  # not used yet -- no real LLM call in this phase
 
     rag_result = evaluate_rag_context(context_chunks) if context_chunks else None
 
@@ -163,17 +166,24 @@ def run_chat(
             response=response_text,
         )
 
-    # SANITIZE -> use the sanitized chunks; LOG_ONLY/ALLOW -> use the
-    # original chunks. `effective_chunks` is what a real LLM call would
-    # receive in a later phase; it does not change the mock response here.
+    # SANITIZE -> use the sanitized chunks; LOG_ONLY/ALLOW -> use originals.
     effective_chunks = (
-        rag_result.sanitized_chunks
+        (rag_result.sanitized_chunks or [])
         if rag_result is not None and rag_result.decision == Decision.SANITIZE
         else context_chunks
     )
-    _ = effective_chunks  # not used yet -- no real LLM call in this phase
 
-    output_result = evaluate_output(MOCK_RESPONSE)
+    active_provider = provider or get_llm_provider(settings.llm_provider)
+    provider_result = active_provider.generate(
+        LLMProviderRequest(
+            prompt=prompt,
+            sanitized_prompt=effective_prompt,
+            context_chunks=effective_chunks,
+            metadata=metadata,
+            request_id=request_id,
+        )
+    )
+    output_result = evaluate_output(provider_result.text)
 
     if output_result.decision == Decision.BLOCK:
         final_response_text = _BLOCKED_OUTPUT_MESSAGE
@@ -182,7 +192,7 @@ def run_chat(
     elif output_result.decision == Decision.SANITIZE and output_result.sanitized_text:
         final_response_text = output_result.sanitized_text
     else:
-        final_response_text = MOCK_RESPONSE
+        final_response_text = provider_result.text
 
     all_decisions = [input_result.decision, output_result.decision]
     if rag_result is not None:
@@ -204,6 +214,11 @@ def run_chat(
         final_decision=final_decision,
         reasons=all_reasons,
         metadata=metadata,
+        provider_metadata={
+            "provider_name": provider_result.provider_name,
+            "model_name": provider_result.model_name,
+            "is_mock": provider_result.is_mock,
+        },
     )
 
     return ChatResponse(
@@ -213,4 +228,7 @@ def run_chat(
         output_guard=output_result,
         final_decision=final_decision,
         response=final_response_text,
+        provider_name=provider_result.provider_name,
+        model_name=provider_result.model_name,
+        is_mock=provider_result.is_mock,
     )
