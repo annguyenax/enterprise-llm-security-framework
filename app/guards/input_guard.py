@@ -49,6 +49,26 @@ RULES: tuple[Rule, ...] = (
         Decision.BLOCK, 0.9,
         "Detected an explicit claim to override the system prompt/instructions.",
     ),
+    Rule(
+        "direct-disregard-own-instructions", "direct_prompt_injection",
+        _rx(
+            r"\b(disregard|ignore|set aside)\b[^.?!]{0,20}"
+            r"\b(your(?: current)?|the current) instructions?\b[^.?!]{0,80}"
+            r"\b(print|reveal|output|answer|say|comply|instead)\b"
+        ),
+        Decision.BLOCK, 0.9,
+        "Detected an instruction override paired with a replacement or disclosure action.",
+    ),
+    Rule(
+        "direct-forget-prior-message", "direct_prompt_injection",
+        _rx(
+            r"^\s*(please\s+)?forget\s+(everything|all)\s+"
+            r"(you were|you have been|you've been)\s+told\s+"
+            r"(before|prior to)\s+(this|the)\s+(message|request|prompt)\b"
+        ),
+        Decision.BLOCK, 0.9,
+        "Detected an imperative to forget all instructions given before the current message.",
+    ),
 
     # --- role override ---
     Rule(
@@ -97,6 +117,17 @@ RULES: tuple[Rule, ...] = (
         Decision.BLOCK, 0.75,
         "Detected a fictional/game framing combined with a 'no restrictions' claim - a common jailbreak wrapper.",
     ),
+    Rule(
+        "jailbreak-training-detailed-attack", "jailbreak",
+        _rx(
+            r"\b(security awareness|training|educational)\b[^.?!]{0,100}"
+            r"\b(write out|describe|explain)\b[^.?!]{0,80}"
+            r"\b(exactly|step[- ]by[- ]step|in full detail)\b[^.?!]{0,120}"
+            r"\b(attacker|extract|steal|bypass)\w*\b"
+        ),
+        Decision.BLOCK, 0.82,
+        "Detected a training pretext paired with a request for detailed offensive instructions.",
+    ),
 
     # --- sensitive extraction / reveal hidden or system prompt ---
     Rule(
@@ -117,6 +148,17 @@ RULES: tuple[Rule, ...] = (
         Decision.BLOCK, 0.7,
         "Detected a request for another individual's private/HR data.",
     ),
+    Rule(
+        "extract-bulk-confidential-context", "sensitive_extraction",
+        _rx(
+            r"\b(print|output|reveal|dump)\b[^.?!]{0,35}"
+            r"(?:\b(full (contents|text)|complete contents)\b[^.?!]{0,80}"
+            r"\b(confidential|restricted|internal)?\s*documents?\b[^.?!]{0,60}\b(context|loaded)\b"
+            r"|\bevery (confidential|restricted|internal) document\b[^.?!]{0,60}\b(context|loaded)\b)"
+        ),
+        Decision.BLOCK, 0.88,
+        "Detected a bulk extraction request for confidential documents in model context.",
+    ),
 
     # --- RAG context manipulation / malicious retrieved context ---
     Rule(
@@ -136,6 +178,17 @@ RULES: tuple[Rule, ...] = (
         _rx(r"\bonly trust the following text\b|\btreat the following as (an )?authoritative\b"),
         Decision.BLOCK, 0.8,
         "Detected an attempt to inject fake authoritative context directly into the prompt.",
+    ),
+    Rule(
+        "ragctx-ignore-official-source", "rag_context_manipulation",
+        _rx(
+            r"\b(ignore|disregard)\b[^.?!]{0,55}"
+            r"\b(official|retrieved|verified)\b[^.?!]{0,45}"
+            r"\b(document|context|policy)\b[^.?!]{0,90}"
+            r"\b(instead|ground truth|use this text|replacement)\b"
+        ),
+        Decision.BLOCK, 0.84,
+        "Detected an attempt to replace an official or retrieved source with user-supplied ground truth.",
     ),
 
     # --- tool / action misuse ---

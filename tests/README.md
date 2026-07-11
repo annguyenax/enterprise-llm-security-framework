@@ -12,6 +12,7 @@ and audit redaction.
 |---|---|
 | `test_health.py` | `GET /health`. |
 | `test_input_guard.py` | Input Guard behavior. |
+| `test_input_guard_calibration.py` | Phase 7.1 failed cases, nearby attack variants, and benign counterexamples. |
 | `test_output_guard.py` | Output decisions and redaction. |
 | `test_dataset_loader.py` | Markdown parsing, extraction, and chunking. |
 | `test_rag_guard.py` | Corpus behavior, normalization, bypass variants, compound severity, and benign false positives. |
@@ -19,6 +20,7 @@ and audit redaction.
 | `test_gateway_routes.py` | Guard ordering, RAG continuation, short-circuiting, severity, and audit logging. |
 | `test_llm_provider.py` | Deterministic mock behavior and factory fail-closed behavior. |
 | `test_gateway_provider.py` | Provider placement, skip paths, sanitized inputs, Output Guard handoff, response metadata, and safe audit metadata. |
+| `test_evaluation_runner.py` | JSONL validation, all 40 prompts, controlled FP/FN definitions, provider isolation, and report generation. |
 
 ## Running
 

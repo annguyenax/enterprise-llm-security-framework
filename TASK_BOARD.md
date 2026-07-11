@@ -116,7 +116,7 @@ This is the same work recorded against the two Phase 2 rows above ("Synthetic re
 
 **Verification method (same constraint as Phase 4):** dependencies are still **not installed** in this repository, so this session again validated changes via (1) `py_compile` on every changed file, (2) direct logic testing of `app.core.decisions.most_severe()` (zero external dependencies, runs with stdlib only) confirming the full severity order pairwise, and (3) a full non-ASCII character scan confirming every `reason=` string is now pure ASCII while docstrings/comments (not logged) were left untouched. Actually running `pytest`/`uvicorn` still requires a team member to `pip install -r requirements.txt` first.
 
-## Phase 5 — RAG Guard + Demo RAG Pipeline — **Status: In Review (RAG Guard + dataset ingestion done; vector store/LLM adapter still pending)**
+## Phase 5 — RAG Guard + Demo RAG Pipeline — **Status: In Review (RAG Guard, dataset ingestion, and mock provider adapter done; vector store deferred)**
 
 | Task | Owner | Status |
 |---|---|---|
@@ -142,13 +142,33 @@ This is the same work recorded against the two Phase 2 rows above ("Synthetic re
 | Output policy enforcement | Le Dinh Nghia | Done (basic) — decision/redaction logic exists; no dynamic/configurable policy engine, still a fixed rule list |
 | Output Guard unit tests | Both | Done — `tests/test_output_guard.py` |
 
-## Phase 7 — Evaluation Harness
+## Phase 7 — Evaluation Harness — **Status: In Review**
 
 | Task | Owner | Status |
 |---|---|---|
-| Automated red-team runner against gateway | Both | Not Started — methodology pre-specified in `docs/evaluation/evaluation-plan.md` §4; can now target the real `/v1/guard/input`, `/v1/guard/output`, `/v1/gateway/chat` endpoints once dependencies are installed |
-| Metrics collection + reporting scripts | Le Dinh Nghia | Not Started — metric formulas pre-specified in `docs/evaluation/metrics-definition.md` |
+| Automated red-team runner against gateway | Both | Done - offline direct-guard runner validates and evaluates all 40 frozen prompt cases without provider, network, or dataset mutation |
+| Metrics collection + reporting scripts | Le Dinh Nghia | Done - JSON/Markdown reports include exact decision pass rate, decision distribution, controlled FP/FN rates, category failures, and attack-success proxy |
 | Baseline (no-guard) vs guarded comparison run | Nguyen Van An | Not Started — comparison structure pre-specified in `docs/evaluation/evaluation-plan.md` §3 |
+
+**Phase 7 evidence (2026-07-11):** `python scripts/run_evaluation.py` generated
+`reports/evaluation/latest-evaluation.json` and `.md` from the unchanged 40-case
+suite: 35 exact decision matches and 5 failures. This is controlled synthetic
+benchmark evidence only. After Phase 7.1 calibration, the unchanged suite was
+regenerated at 40 exact matches and 0 failures. The project-local `.venv` full
+suite passed 79 tests; its Starlette dependency emitted one `httpx2` deprecation
+warning, but no package was installed.
+
+**Next phase after review:** Phase 8 Report Evidence Packaging. Baseline-vs-
+guarded comparison remains an open Phase 7 task and must not be silently treated
+as complete.
+
+### Phase 7.1 - Evaluation Failure Triage and Guard Calibration - **Status: Done**
+
+- Triaged all five initial false negatives without changing expected labels or removing cases.
+- Added five narrow Input Guard rules plus exact, nearby-variant, and benign-counterexample tests; RAG Guard was unchanged because `RT-INJ-RAGCTX-003` is prompt-side manipulation.
+- Regenerated the unchanged 40-case benchmark: 40 passed, 0 failed, 0 false positives, and 0 false negatives.
+- Full project-local `.venv` pytest verification: 79 passed, with one non-blocking Starlette `httpx2` deprecation warning; `httpx2` was not installed.
+- Evidence: `reports/evaluation/failure-triage.md`, `latest-evaluation.json`, and `latest-evaluation.md`. Results remain controlled synthetic benchmark measurements only.
 
 **Note (Phase 4 session, 2026-07-11 — "next tasks" mapping):** the instruction to add "Phase 5: RAG context guard and dataset ingestion", "Phase 6: LLM provider adapter", "Phase 7: evaluation runner" as next tasks is recorded as follows, since this board's existing Phase 6 already means Output Guard (now done): RAG context guard + dataset ingestion → **Phase 5** rows above; LLM provider adapter → new row added under **Phase 5** above (not Phase 6, to avoid colliding with the existing Output Guard section); evaluation runner → **Phase 7** rows above (unchanged).
 
@@ -192,7 +212,7 @@ metadata, Output Guard execution, and the blocked-input provider skip path. The
 full `TestClient` suite remains blocked by the documented shared-environment
 Starlette issue; no package was installed.
 
-**Next implementation phase:** Phase 7 Evaluation Runner. Any real provider call still requires explicit approval under `AGENT_RULES.md`; vector retrieval remains out of scope.
+**Next implementation phase:** Phase 8 Report Evidence Packaging, after Phase 7 review. Any real provider call still requires explicit approval under `AGENT_RULES.md`; vector retrieval remains out of scope.
 
 - This board is updated as phases progress; do not mark a task `Done` without corresponding documentation/evidence per `AGENT_RULES.md` rule 9.
 - Phase boundaries are gates — do not start Phase N+1 implementation while Phase N is still `In Progress` without explicit approval.

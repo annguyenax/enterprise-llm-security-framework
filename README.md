@@ -174,6 +174,52 @@ No `.env` file, API key, provider SDK, network access, or paid call is required.
 Real provider integration remains future work and requires explicit approval,
 secret-handling design, and provider-specific tests before it can be enabled.
 
+### Phase 7 Evaluation Runner
+
+The offline runner loads and validates all 40 cases in
+`redteam/prompts.jsonl`, evaluates them directly against the existing guards,
+compares exact decisions, and writes reproducible JSON and Markdown reports.
+It does not invoke the mock provider, an external LLM, retrieval, or a vector
+database.
+
+Run it with either command:
+
+```powershell
+python scripts/run_evaluation.py
+.\scripts\run_evaluation.ps1
+```
+
+Generated artifacts:
+
+- `reports/evaluation/latest-evaluation.json` contains the summary and full
+  per-case rule/reason/risk details.
+- `reports/evaluation/latest-evaluation.md` contains a readable summary and
+  all expected-versus-actual decisions.
+
+The initial reproducible run produced 35 exact decision matches from 40 cases,
+with five decision-based false negatives and zero false positives under the
+Phase 7 definitions. These values describe only this small controlled synthetic
+benchmark. They are not real-world detection rates, statistical guarantees, or
+end-to-end harmful-output ASR.
+
+### Phase 7.1 Evaluation failure triage
+
+The initial Phase 7 run exposed five false negatives. Phase 7.1 added five
+targeted Input Guard rules for instruction-disregard actions, start-anchored
+"forget prior message" imperatives, detailed-attack training pretexts, bulk
+confidential-context extraction, and prompt-side replacement of official RAG
+sources. Nearby variants and benign counterexamples were added for each area.
+
+The unchanged 40-case suite was regenerated after calibration and now records
+40 exact matches, zero false positives, and zero false negatives. See
+`reports/evaluation/failure-triage.md` for case-by-case causes and limitations.
+This improvement is scoped only to this controlled synthetic benchmark and does
+not demonstrate complete or real-world prompt-injection protection.
+
+Full verification in the project-local `.venv` passed 79 tests. Starlette
+emitted one deprecation warning mentioning `httpx2`; the project does not depend
+on or install that package.
+
 **What is intentionally not implemented yet (not a bug):**
 - No real vector database, no embeddings, no similarity search — `dataset_loader.py` uses simple deterministic fixed-size character-window chunking only.
 - No real external LLM call anywhere in this repository; only the local deterministic mock provider is available.

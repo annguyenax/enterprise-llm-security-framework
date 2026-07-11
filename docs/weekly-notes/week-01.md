@@ -136,6 +136,20 @@ Phase 0 kickoff. Focus was entirely on scaffolding: repository structure, planni
 - Added optional provider fields to chat responses and provider name/model/mock status to audit events. Recursive metadata redaction prevents synthetic secret markers from leaking through nested metadata.
 - Added direct provider and gateway integration tests covering deterministic output, fail-closed provider selection, skip paths, sanitized inputs, Output Guard handoff, response metadata, and audit metadata. Verified 32 provider/gateway/RAG/dataset tests plus a live local API smoke test; the full `TestClient` suite remains blocked by the documented shared Starlette issue. Phase 7 Evaluation Runner is next after the complete suite passes in a clean environment.
 
+## Phase 7 - Offline Evaluation Runner (same week, 2026-07-11)
+
+- Added `app/services/evaluation_runner.py` with strict JSONL validation, direct guard routing, per-case results, exact-label comparison, decision distributions, controlled false-positive/false-negative metrics, and deterministic report serialization. The runner never calls a provider, network, retrieval system, or vector database.
+- Added `scripts/run_evaluation.py` and `.ps1`; generated `reports/evaluation/latest-evaluation.json` and `.md` from the unchanged 40-case prompt suite.
+- The actual controlled run recorded 35 exact decision matches and 5 failures (0.8750 pass rate), zero false positives, and five decision-based false negatives. These are synthetic benchmark measurements only, not real-world rates or end-to-end harmful-output ASR.
+- Added evaluation validation, metric-definition, provider-isolation, 40-case completeness, and report-generation tests. The offline group passed 37 tests. Phase 7 remains In Review because baseline-vs-guarded comparison and a clean-environment full `TestClient` run remain open.
+
+## Phase 7.1 - Evaluation Failure Triage and Guard Calibration (same week, 2026-07-11)
+
+- Investigated the five initial false negatives and kept all expected decisions and prompt fixtures unchanged. Root causes were narrow lexical gaps in Input Guard, documented case-by-case in `reports/evaluation/failure-triage.md`.
+- Added five targeted rules for instruction override plus disclosure, start-anchored forget-prior-message imperatives, detailed offensive training pretexts, bulk confidential-context extraction, and prompt-side official-source replacement. RAG Guard was not changed because the RAG-context failure originated in user input.
+- Added exact regression prompts, nearby attack variants, and benign counterexamples for each calibration area. The focused offline group passed 52 tests; the complete project-local `.venv` suite passed 79 tests with one non-blocking Starlette `httpx2` deprecation warning. No package was installed.
+- Regenerated the controlled report: 40/40 exact decision matches, zero false positives, and zero false negatives on the unchanged synthetic prompt suite. This is not a real-world protection claim; semantic and unseen paraphrase gaps remain.
+
 ## Next Week Plan
 
 - Team members personally read the three logged academic papers and confirm/replace the placeholder "Summary" fields in `related-work.md` with their own understanding.

@@ -1,16 +1,26 @@
 # scripts/
 
-Utility and automation scripts.
+Offline development, inspection, smoke-test, and evaluation helpers.
 
-**Status: Phase 4 — 1 script exists.**
+## Evaluation
 
-## Contents
+- `run_evaluation.py` validates and evaluates `redteam/prompts.jsonl` directly
+  against the guards, then writes JSON and Markdown artifacts under
+  `reports/evaluation/`.
+- `run_evaluation.ps1` is the PowerShell wrapper for the same offline run.
 
-- `run_dev.ps1` — Windows PowerShell helper that creates/activates a local `.venv`, installs `requirements.txt`, and starts `uvicorn app.main:app --reload`. Local development convenience only, not a deployment script. Usage: `powershell -ExecutionPolicy Bypass -File scripts/run_dev.ps1`.
+```powershell
+python scripts/run_evaluation.py
+.\scripts\run_evaluation.ps1
+```
 
-## Planned Contents (not yet created)
+## Other Helpers
 
-- `generate_synthetic_data.py` — helper to (re)generate/extend the synthetic RAG corpus / red-team prompts, if the team decides to grow `datasets/`/`redteam/` beyond the Phase 3/3.1 frozen benchmark.
-- `run_evaluation.py` — batch runner for the red-team evaluation harness (Phase 7), consuming `redteam/prompts.jsonl` and `datasets/` against a running gateway instance.
+- `run_dev.ps1` starts the local FastAPI application.
+- `smoke_test_gateway.ps1` exercises health, guards, and gateway responses.
+- `inspect_dataset.py` / `inspect_dataset.ps1` inspect the synthetic corpus.
+- `test_rag_guard.ps1` performs a manual RAG Guard smoke test.
 
-Any script that calls a paid LLM API must not run automatically without explicit user approval per `AGENT_RULES.md` rule 4.
+No evaluation script calls an LLM API, vector database, or external service.
+Any future paid API call still requires explicit approval under
+`AGENT_RULES.md` rule 4.
