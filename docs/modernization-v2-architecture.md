@@ -141,6 +141,15 @@ forking guard logic for the new path.
   in v2. It may only ever be used offline, by the evaluation runner, to
   score whether a decision was correct against a known label — the same
   role it already plays in v1's evaluation runner today.
+- **Added per the Phase 12A audit (Grok, Major finding on auditability):**
+  every ingestion's source-to-`trust_level` mapping decision must be
+  recorded in the structured audit log (extending the existing JSONL
+  logging convention from `app/services/audit_logger.py`), not just applied
+  silently. This is the concrete implementation of the Repudiation-row
+  mitigation already listed in `docs/modernization-v2-threat-model.md` §3 —
+  restated here in the architecture document itself so Phase 12B/12C
+  implementers see it as a design requirement, not only a threat-model
+  observation.
 
 ## 5. Centralized DLP
 
@@ -220,15 +229,30 @@ by this document alone — each requires its own explicit go-ahead per
   `app/guards/output_guard.py`, `app/services/gateway.py`,
   `app/services/evaluation_runner.py`, `datasets/`, `redteam/`,
   `reports/evaluation/`, `report-latex-template/`.
-- **Acceptance criteria:** documents can be ingested and retrieved by
-  keyword query with deterministic ranking; an explicit FTS5 capability
-  check runs at startup/first-use and fails clearly (not silently) if
-  unavailable; `/v1/gateway/chat` behavior is byte-for-byte unchanged for
-  existing test cases.
+- **Acceptance criteria (strengthened per the Phase 12A audit — Gemini's
+  finding that acceptance criteria must be verifiable, not circular
+  adjectives):**
+  1. A document ingested via the (future) ingestion path is retrievable by
+     an exact-keyword query matching its content, and the returned rank
+     order is identical across repeated runs against the same corpus
+     (deterministic ranking, checked by test, not asserted by prose).
+  2. The FTS5 capability check runs before the first retrieval-dependent
+     operation and, if FTS5 is unavailable, the system raises a fatal,
+     clearly-worded error and serves **zero** retrieval-dependent requests —
+     verified by a test that simulates the unavailable case and asserts no
+     partial/degraded response path exists.
+  3. Every existing test in the current suite (82 tests as of Phase 12A)
+     passes unmodified, and `/v1/gateway/chat` produces byte-identical
+     responses to its Phase 0-11 behavior for the same inputs.
 - **Tests:** ingestion validation/limits/dedup/hashing/transactional-failure;
-  retrieval ranking, tie-breaking, upsert-replaces-stale-rows; malformed/
-  adversarial FTS query strings do not raise or bypass parameterization;
-  full existing suite (currently 82 tests) still passes unmodified.
+  retrieval ranking, tie-breaking, upsert-replaces-stale-rows; **adversarial
+  FTS5 query strings using `NEAR`, column-filter syntax, boolean operators
+  (`AND`/`OR`/`NOT`), and unbalanced quoting must not raise an unhandled
+  exception, must not alter the query's intended scope beyond the caller's
+  own search terms, and must not bypass SQL parameterization (added per the
+  Phase 12A audit, Grok's finding on FTS5 operator abuse — see also
+  `ADR-002-retrieval-engine.md`'s strengthened query-safety wording)**; full
+  existing suite (currently 82 tests) still passes unmodified.
 - **Rollback plan:** entire feature is additive (new modules, new endpoints);
   disable by not routing to the new endpoints; delete the SQLite file to
   reset state; no existing endpoint or guard logic is touched.
@@ -254,14 +278,29 @@ by this document alone — each requires its own explicit go-ahead per
   consolidation must not change any existing test's expected outcome).
 - **Acceptance criteria:** a query against ingested documents returns a
   guarded response with retrieval provenance; a low-trust source is
-  distinguishable in the response/audit log from a high-trust one; DLP
-  detectors run from one shared module; the full existing test suite
-  (82 tests) still passes with zero behavior changes.
+  distinguishable in the response/audit log from a high-trust one, and the
+  source-to-trust-level mapping decision is itself present in the audit log
+  for every ingested document (per §4 above); DLP detectors run from one
+  shared module; the full existing test suite (82 tests) still passes with
+  zero behavior changes. **Added per the Phase 12A audit (Grok, Critical
+  finding on multi-chunk coordination):** this phase must explicitly decide
+  and document, in its own evidence, whether a lightweight cross-chunk
+  co-occurrence heuristic (§3 of `docs/modernization-v2-threat-model.md`,
+  Tampering row) is implemented. If implemented, it needs a named test
+  case demonstrating it flags a constructed multi-chunk scenario; if
+  deferred, the evidence must say so explicitly — silently omitting this
+  decision fails the phase's acceptance criteria even though full
+  resolution of the underlying risk is not required.
 - **Tests:** end-to-end `/v1/rag/query` happy path, blocked/human-review
   stop path, sanitize-continues path (mirroring the existing
   `test_gateway_routes.py` pattern); provenance correctly attached and
-  never caller-overridable; centralized DLP produces identical redaction
-  behavior to the current duplicated implementation on existing fixtures.
+  never caller-overridable; **a named regression test suite that runs the
+  centralized DLP module's redaction against every existing secret/PII
+  fixture currently covered by `app/guards/rag_guard.py`,
+  `app/guards/output_guard.py`, and `app/services/audit_logger.py`
+  independently, and asserts byte-identical redaction output before and
+  after consolidation (strengthened per the Phase 12A audit, Grok's finding
+  that this must be a named, not general, test requirement)**.
 - **Rollback plan:** new endpoint and new module are additive; the
   guard-to-DLP delegation refactor is scoped and covered by regression
   tests before merge, so a failing regression blocks the phase rather than
@@ -287,11 +326,18 @@ by this document alone — each requires its own explicit go-ahead per
   `redteam/attack-categories.md`, `datasets/clean/`, `datasets/poisoned/`,
   any file under `reports/evaluation/`, `app/`.
 - **Acceptance criteria:** v2 corpus exists with dev/validation/holdout
-  splits and roughly balanced benign/malicious content per
-  `docs/modernization-v2-threat-model.md`; a SHA-256 manifest freezes the
-  corpus; v1 files are provably untouched (hash comparison); holdout
-  content was not referenced while any Phase 12B/12C rule or detector was
-  authored (a timeline/process attestation, not a technical test).
+  splits, **at least 100 cases in total** (statistical floor per the Phase
+  12A audit — see `docs/modernization-final-plan.md` §4.E and
+  `ADR-003-v2-benchmark.md`), and roughly balanced benign/malicious content
+  per `docs/modernization-v2-threat-model.md`; a SHA-256 manifest freezes
+  the corpus; v1 files are provably untouched (hash comparison); **v1
+  content is provably absent from the v2 validation and holdout splits**
+  (added per the Phase 12A audit — v1 may only ever appear, if at all, in
+  the development split); holdout content was not referenced while any
+  Phase 12B/12C rule or detector was authored, and holdout authoring
+  followed the independence rule in `ADR-003-v2-benchmark.md` (different
+  author, a documented time gap, or an independent review pass before
+  freeze — a timeline/process attestation, not a technical test).
   **No numeric detection-rate target is part of this phase's acceptance
   criteria** — see `docs/modernization-final-plan.md` §3 for why.
 - **Tests:** structural validation mirroring
@@ -406,3 +452,84 @@ by this document alone — each requires its own explicit go-ahead per
 - **Stop condition:** last phase; only attempted if all of 12B-12E are done
   and stable, per the approved direction's explicit "optional and last"
   ordering.
+
+## 8. Metric Definitions (Formulas)
+
+Added per the Phase 12A audit (Gemini, Major finding: metric names alone
+risk implementation-time ambiguity/bias). These are **definitions to
+implement in Phase 12E**, not results — every symbol below is computed from
+the v2 corpus's known labels and the guard pipeline's actual decisions on a
+given run; no value is asserted here.
+
+Let `TP`, `TN`, `FP`, `FN` be counts over a chosen scenario set (e.g., one
+`GuardProfile` run against the full v2 corpus, or a subset), where a
+"positive" prediction means the pipeline returned a protective decision
+(`block`, `sanitize`, or `human_review`) and a "positive" label means the
+scenario is labeled malicious/poisoned/leaking in the v2 manifest:
+
+- **TPR (recall, sensitivity)** = `TP / (TP + FN)` — fraction of malicious
+  scenarios that received a protective decision.
+- **FPR** = `FP / (FP + TN)` — fraction of benign scenarios that
+  incorrectly received a protective decision.
+- **FNR** = `FN / (TP + FN)` = `1 - TPR`.
+- **Precision** = `TP / (TP + FP)`.
+- **F1** = `2 * (Precision * TPR) / (Precision + TPR)`.
+
+Retrieval-specific (only meaningful once Phase 12B retrieval exists):
+
+- **Recall@k** = `(number of scenarios where at least one gold-relevant
+  document ID appears in the top-k retrieved hits) / (total scenarios with
+  a defined gold-relevant document set)`.
+- **poisoned-hit-rate@k** = `(number of scenarios where at least one
+  gold-labeled-poisoned document ID appears in the top-k retrieved hits) /
+  (total scenarios that include a poisoned document in the ingested
+  corpus)`. This measures whether poisoned content is *retrieved at all* —
+  a prerequisite for, but not the same as, it reaching the provider.
+- **poisoned-context exposure** = `(number of scenarios where at least one
+  poisoned chunk is present in the context actually sent to the provider,
+  i.e. survives the RAG Guard) / (total scenarios where a poisoned chunk
+  was retrieved, i.e. the poisoned-hit-rate@k numerator)`. This isolates
+  the RAG Guard's marginal effect on top of retrieval.
+- **clean-context retention** = `(total legitimate/clean chunk-count
+  surviving to the provider across all scenarios) / (total legitimate/clean
+  chunk-count retrieved across all scenarios)`. A guard that "protects" by
+  deleting all context, clean or not, scores low here even if TPR is high —
+  this metric exists specifically to catch that failure mode.
+
+DLP-specific:
+
+- **Leakage rate** = `(number of scenarios where a synthetic canary/secret
+  is present in the final returned response) / (total scenarios that
+  contain a synthetic canary/secret anywhere in the ingested/context
+  content for that scenario)`.
+- **Redaction recall** = `(number of canary/secret instances correctly
+  redacted in the final response) / (total canary/secret instances that
+  were present in the raw provider output before Output Guard/DLP ran)`.
+- **Benign over-redaction rate** = `(number of benign, non-secret spans
+  incorrectly redacted) / (total benign spans that a human-authored
+  reference marks as "should remain visible" across the benign scenario
+  set)`. Requires the v2 benign scenarios to carry an explicit
+  should-remain-visible reference span, authored at Phase 12D.
+
+Performance:
+
+- **p50/p95 latency** = the 50th/95th percentile of wall-clock time spent
+  inside the security-middleware pipeline (Input Guard through Output Guard,
+  including retrieval when applicable) for a run of N requests against the
+  mock provider, measured in milliseconds. Excludes any real network call,
+  since the default provider remains mock/offline through at least
+  Phase 12E.
+
+Ablation:
+
+- **Per-layer marginal contribution** (for layer *L*) = `(protected-case
+  count under the "full" GuardProfile) - (protected-case count under the
+  "full_minus_L" GuardProfile)`, where "protected-case count" is the number
+  of malicious/poisoned/leaking scenarios that received a protective
+  decision under that profile. A positive value means layer *L* catches
+  cases no other layer catches; a value near zero means *L*'s catches
+  substantially overlap with other layers.
+- **Unique catches** (for layer *L*) = count of scenarios protected only
+  when *L* is enabled and no other single layer alone protects that same
+  scenario (computed by comparing each `input_only`/`rag_only`/
+  `output_dlp_only` profile's protected-case set pairwise).

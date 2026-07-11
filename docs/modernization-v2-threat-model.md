@@ -8,6 +8,27 @@
 > the existing threat model's own stated approach — no numeric claim is made
 > until an actual v2 evaluation run exists (Phase 12E).
 
+## 0. Scope and Limitations (explicit disclaimer)
+
+This document describes threats considered and mitigations planned for a
+**lab-scale academic proof-of-concept**, evaluated only on synthetic,
+controlled benchmark data (v1 and, later, v2). Nothing in this document
+should be read as claiming:
+
+- Complete or absolute protection against prompt injection, RAG poisoning,
+  or data leakage — several residual risks below (retrieval-ranking
+  poisoning, multi-chunk coordination) are explicitly **not** eliminated by
+  the planned v2 design, only partially mitigated or documented as known
+  limitations.
+- Production readiness of any kind (`AGENT_RULES.md` rule 8).
+- Generalization beyond the specific v1/v2 synthetic benchmarks actually
+  evaluated, or applicability to real-world attacker behavior, real
+  enterprise data, or a real (non-mock) LLM provider.
+
+Every risk rating in this document is qualitative team judgment recorded
+for planning purposes, not a measured statistic — see §6 for why no numeric
+target is adopted before an actual evaluation run.
+
 ## 1. New Assets (beyond the existing Phase 2 list)
 
 - The **persistent document store** (SQLite file + FTS5 index) — previously
@@ -46,7 +67,7 @@ or materially changed rows are listed here.
 | **S**poofing | Benchmark ground truth leaking into a trust decision: `DocumentChunk.is_poisoned` (v1) accidentally read by v2 runtime code | Retrieval / RAG Guard integration | Explicit code-review/test rule: no runtime path may import or branch on `is_poisoned`; only the offline evaluation runner may read it, purely for scoring | Medium — subtle, easy to introduce by accident during Phase 12B/12C if v1 loader output is reused carelessly as seed data |
 | **T**ampering | Retrieval poisoning: a malicious document is ingested and, independent of any hidden-instruction content, is engineered to **rank highly** for target queries (e.g., keyword stuffing tuned to BM25 scoring) so it reliably reaches context even without tripping RAG Guard content rules | Ingestion, Retriever | Out of scope to fully solve in 12B-12E (would need relevance/anomaly modeling); documented as a known residual risk. Provenance/trust filtering (12C) provides partial mitigation if the poisoned document also has to come from a lower-trust source to be ingested at all. | High (residual, explicitly acknowledged, not eliminated) |
 | **T**ampering | FTS5 query-syntax injection: raw user query text reaches `MATCH` without being treated as a structured query language, letting a crafted query string alter matching behavior via FTS5 operators (`NEAR`, column filters, boolean operators, quoting) even though SQL-level parameterization is used correctly | Retriever (`app/retrieval/sqlite_bm25.py`, target) | Required decision A: "safe FTS query construction" — user query terms must be tokenized/escaped before being placed into the FTS5 query string, not concatenated raw even inside a parameterized SQL statement (parameterization protects against SQL injection, not FTS5 query-syntax injection — these are different risks) | Medium-High until the escaping is implemented and tested; this is a genuinely new risk class introduced by adding a real query language, absent from the v1 architecture entirely |
-| **T**ampering | Multi-chunk coordination: an attack instruction is deliberately split across two or more separately-retrieved chunks, none of which individually matches a RAG Guard content rule, but which combine into a coherent instruction once placed together in context | Retriever, RAG Context Guard | Out of scope to fully solve in 12B-12E (would require cross-chunk reasoning, a meaningfully harder problem than single-chunk rule matching); documented as a known limitation of a per-chunk rule-based guard, explicitly named in the final report's limitations section | High (residual, explicitly acknowledged, not eliminated) |
+| **T**ampering | Multi-chunk coordination: an attack instruction is deliberately split across two or more separately-retrieved chunks, none of which individually matches a RAG Guard content rule, but which combine into a coherent instruction once placed together in context | Retriever, RAG Context Guard | Full resolution (cross-chunk reasoning) is out of scope for 12B-12E. However, Phase 12C must **explicitly decide and document** whether a lightweight, deterministic, best-effort mitigation is implemented — e.g., a simple co-occurrence check that flags a retrieval result set where two or more chunks each independently match a *weak* signal (such as the existing `rag-weak-override-keyword` / `log_only` category) for the same query. If implemented, it needs a named test case; if deliberately deferred, Phase 12C's evidence must say so explicitly rather than silently omitting it. Either way, this risk is **not eliminated**, only possibly reduced. | High (residual; partially addressable with a cheap heuristic, not eliminated) |
 | **T**ampering | Existing v1 Tampering rows (indirect prompt injection, RAG document poisoning via content) | RAG Context Guard | Unchanged from v1; still mitigated at the content-detection layer; now additionally exercised against retrieval-supplied (not just caller-supplied) chunks | High, same rating as v1 — not newly introduced, just now tested end-to-end |
 | **R**epudiation | No record of *why* a document was ingested with a given trust level, or of the retrieval trace (which chunks were considered, ranked, and dropped) behind a given answer | Audit Logger, Retriever | Extend structured JSONL logging to include ingestion source-policy decisions and a retrieval trace (query, top-k hit IDs, scores) alongside the existing guard-decision logging; never log raw document content beyond the existing preview/redaction conventions | Low (same mitigation pattern as v1, just extended in scope) |
 | **I**nformation Disclosure | DLP consolidation defect: centralizing secret/PII detectors into one module could introduce a single regression that silently weakens redaction across all three call sites at once (Output Guard, RAG Guard, audit logger), whereas today a bug in one duplicated copy would not affect the other two | Centralized DLP module | Regression tests explicitly comparing pre/post-consolidation redaction behavior on the full existing fixture set before the refactor is considered complete (Phase 12C acceptance criteria) | Medium — a real risk of centralization, worth naming explicitly rather than assuming consolidation is strictly safer |
@@ -83,6 +104,13 @@ Required indirect-injection variant families for v2 scenario authoring
 5. Obfuscated/synonym variants of existing v1 patterns (directly supports
    Gemini's "Rule of Variance" — v2 must not just restate v1 payloads
    verbatim).
+6. **New for v2 (Grok audit finding):** encoding-based obfuscation —ZERO
+   WIDTH / invisible Unicode characters, or base64-or-similar-encoded
+   instruction text, hidden inside otherwise plausible document content.
+   Related prior art already exists in `app/guards/rag_guard.py`'s
+   Phase 5.1 `ZERO_WIDTH_PATTERN` detection-normalization step, but that
+   normalization has never been exercised against a real encoded-instruction
+   scenario end to end — v2 should add one.
 
 Required benign-counterexample families (Grok's review, adopted as design
 input):
@@ -96,8 +124,17 @@ input):
 - Product FAQs with structured data that superficially resembles an
   injection pattern.
 - HR/compliance content containing synthetic PII/canaries in an
-  **approved, expected** context (to measure benign over-redaction
-  specifically, distinct from a real leakage case).
+  **approved, expected, high-trust-source** context (to measure benign
+  over-redaction specifically, distinct from a real leakage case — this
+  needs to be paired with a *high-trust* provenance label specifically, so
+  it also exercises "trust does not bypass content checks" from §4 of
+  `docs/modernization-v2-architecture.md`).
+- **New for v2 (Grok audit finding):** benign *queries* (not just ingested
+  documents) phrased using natural policy/approval/override language —
+  e.g., a user legitimately asking "what is our policy override process for
+  emergency changes?" — to test that the Input Guard side of the same weak
+  signal does not over-trigger on ordinary questions, not only that ingested
+  documents survive.
 
 ## 5. Explicitly Out of Scope for V2 (Phases 12B-12E)
 

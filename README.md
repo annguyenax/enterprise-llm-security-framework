@@ -319,8 +319,15 @@ holdout split, and ablation/retrieval-security/latency evaluation. See:
 - [docs/modernization-v2-threat-model.md](docs/modernization-v2-threat-model.md) — v2 threat model extension.
 - [docs/decisions/ADR-002-retrieval-engine.md](docs/decisions/ADR-002-retrieval-engine.md) and [ADR-003-v2-benchmark.md](docs/decisions/ADR-003-v2-benchmark.md).
 
+This plan was independently audited twice (Gemini, Grok); both returned
+REVISE with Critical/Major findings, all of which were resolved (accepted
+or partially accepted with documented rationale — see
+[docs/modernization-ai-reviews/phase-12a-audit-resolution.md](docs/modernization-ai-reviews/phase-12a-audit-resolution.md)).
+The Phase 12B entry gate now passes on all 10 checked requirements.
+
 Phase 12B (the first phase that touches `app/`) requires a separate,
-explicit go-ahead — it does not start automatically from this plan.
+explicit go-ahead — it does not start automatically from this plan or from
+audit approval.
 
 Everything before Phase 4 was documentation/data only — Phase 0–3.1 produced scaffolding, research, architecture/threat-model docs, and the synthetic benchmark (`datasets/`, `redteam/`). See [PROJECT_PLAN.md](PROJECT_PLAN.md) for the full roadmap.
 

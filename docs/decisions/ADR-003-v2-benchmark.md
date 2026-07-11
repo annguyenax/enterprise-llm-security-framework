@@ -47,18 +47,41 @@ performs the actual authoring.
   headline evaluation numbers. If a holdout case is ever looked at to
   explain a failure and a rule is subsequently changed, that case (and
   ideally the whole holdout split) must be treated as contaminated and
-  regenerated — this is a hard rule, not a guideline.
+  regenerated — this is a hard rule, not a guideline. **Strengthened per
+  the Phase 12A audit (Grok, Major finding on indirect leakage): holdout
+  authoring must additionally satisfy at least one of the following
+  independence conditions, to prevent dev/validation authoring habits from
+  unconsciously shaping holdout design — (a) authored by a different named
+  team member than whoever authored the corresponding dev/validation
+  scenarios in the same category, (b) authored after a documented time gap
+  from the dev/validation authoring session (not the same sitting), or (c)
+  reviewed by an independent pass (e.g., the other team member or the
+  supervisor) before the holdout is frozen. Which condition was satisfied
+  must be recorded in the Phase 12D evidence, matching the existing
+  timeline/process-attestation pattern already required for holdout
+  non-use.**
 
 ### Content rules (adopted from the three reviews, reconciled)
 
 - **Approximately balanced benign and malicious scenarios** (per the
   approved direction), covering the category matrix in
-  `docs/modernization-v2-threat-model.md` §4. Exact per-category counts are
-  decided at Phase 12D authoring time, informed by that matrix — this ADR
-  intentionally does not lock a specific total case count or exact
-  percentage split in advance (see "Alternatives Considered" below for why
-  Gemini's specific 100-case/50-50/named-subcounts proposal was not
-  adopted verbatim).
+  `docs/modernization-v2-threat-model.md` §4, with **a minimum floor of at
+  least 100 cases in total** (added per the Phase 12A audit, Gemini's
+  Critical finding that an unbounded lower bound makes FPR/TPR statistically
+  meaningless). Exact per-category counts and the exact total above that
+  floor are decided at Phase 12D authoring time, informed by the category
+  matrix — this ADR intentionally does not lock a specific upper bound or
+  exact percentage split in advance (see "Alternatives Considered" below
+  for why Gemini's specific 100-case/50-50/named-subcounts proposal was not
+  adopted verbatim in full, even though its minimum-floor concern was
+  adopted).
+- **V1 is formally retired as of this ADR as the historical calibration
+  set** (added per the Phase 12A audit, Gemini's required correction) and
+  is strictly prohibited from being merged into, or reused as scenario
+  content for, the v2 **validation or holdout** splits. V1 content may only
+  ever appear in v2's **development** split, if a team member chooses to
+  reuse it there, since development is the one split that may legitimately
+  overlap with prior calibration history.
 - Malicious scenarios must include **obfuscated/synonym variants** of
   existing v1 attack patterns, not verbatim restatements — this is
   Gemini's "Rule of Variance," adopted because a benchmark that only
@@ -84,7 +107,14 @@ performs the actual authoring.
 
 - Once Phase 12D authoring is complete, the v2 corpus is hashed (SHA-256
   per file, plus a manifest) and frozen, mirroring the pattern
-  `tests/test_evaluation_runner.py` already enforces for v1.
+  `tests/test_evaluation_runner.py` already enforces for v1. **Strengthened
+  per the Phase 12A audit (Gemini, Minor finding): this must not rely on a
+  separate pytest check alone — the future Phase 12E evaluation/ablation
+  runner itself must verify the v2 manifest's SHA-256 hashes at the start
+  of every run and abort before producing any report if the corpus does
+  not match the frozen manifest.** This makes corpus-integrity a runtime
+  precondition of producing a result, not only a CI-time check that could
+  be skipped when running the script manually (e.g., during a live demo).
 - Once Phase 12E's evaluation run starts for the purpose of producing
   final-report numbers, **no further rule modification is permitted**,
   even if a specific case performs poorly — this is Gemini's "Rule of

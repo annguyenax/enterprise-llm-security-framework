@@ -21,6 +21,37 @@ This document is the single authoritative reconciliation of those four
 reviews into one approved direction, one phase boundary structure, and one
 set of required engineering decisions. It does not implement anything.
 
+## 1a. Research Questions
+
+Added per the Phase 12A audit (`docs/modernization-ai-reviews/gemini-phase-12a-audit.md`,
+Major finding on missing baseline RQ), consolidating
+`gemini-phase-12a-academic-gate.md`'s original RQ1-RQ4 plus one new RQ this
+audit specifically requested. These frame what Phase 12E's evaluation must
+be able to answer — they are questions to answer with real Phase 12E
+measurements, not claims made now:
+
+- **RQ1 (Efficacy):** To what extent does server-controlled provenance and
+  metadata-aware context filtering reduce indirect-prompt-injection/RAG
+  poisoning exposure, compared to a pipeline without those layers, on the
+  v2 benchmark?
+- **RQ2 (Trade-off):** What is the trade-off between security strictness
+  (TPR) and usability (FPR on benign queries, including the "trap" queries
+  in §4.E below) across the individual guard layers?
+- **RQ3 (Ablation / layer value):** What is each layer's (Input, Retrieval/
+  Provenance, RAG Context, Output/DLP) marginal contribution to overall
+  system efficacy, per the `GuardProfile` ablation design in
+  `docs/modernization-v2-architecture.md` §2 and §7 (Phase 12E)?
+- **RQ4 (Performance overhead):** What is the latency overhead (p50/p95, in
+  milliseconds) introduced by the multi-layer gateway during an end-to-end
+  retrieval-and-generation cycle against the mock provider?
+- **RQ5 (Baseline vulnerability, added by audit):** What is the baseline
+  leakage rate and poisoned-context exposure of the retrieval pipeline with
+  all guard layers disabled (the `no_guards` profile), when evaluated
+  against the v2 holdout split? This establishes the "before" number that
+  RQ1 and RQ3's "marginal contribution" claims are measured against — the
+  same role v1's `baseline-vs-guarded` comparison already plays for the v1
+  benchmark (`reports/evaluation/baseline-vs-guarded.md`), extended to v2.
+
 ## 2. Final Approved Direction
 
 Adopted, in priority order:
@@ -59,8 +90,14 @@ See `docs/modernization-v2-architecture.md` for full detail. Summary:
 
 **A. Retrieval** — standard-library `sqlite3` only (no new dependency for the
 core retrieval path); SQLite FTS5 virtual table with `bm25()` ranking; an
-explicit startup capability check for FTS5 (some Python/SQLite builds omit
-it) with a clear failure message rather than a silent fallback; a persistent
+explicit capability check for FTS5 (some Python/SQLite builds omit it) that
+runs before retrieval is used. **Strengthened per the Phase 12A audit
+(both Gemini and Grok flagged the original wording as not absolute enough):
+if FTS5 is unavailable, the system must fail with a clear capability error
+and refuse to serve any retrieval-dependent request — there is no fallback
+to `LIKE`, substring search, or any other degraded scoring method, at
+startup or at any later runtime check.** This is a hard requirement, not a
+preference, per the approved decisions list for this phase. A persistent
 local `.db` file (not in-memory-only); short-lived connections per request
 (SQLite + FastAPI threading risk, per Codex finding); parameterized SQL
 throughout; safe FTS5 query construction (raw user text must never be
@@ -108,9 +145,23 @@ splits; holdout cases are never used to author or calibrate a rule
 evaluation starts for the final report, rules are frozen (Gemini's "Rule of
 Freezing"); the v2 manifest is hashed (SHA-256) and frozen the same way v1
 already is (`tests/test_evaluation_runner.py` already enforces this pattern
-for v1 and should be extended, not replaced, for v2); v1's 40/40 result
-remains a permanent historical artifact and must never be re-presented as
-if it were a v2 result.
+for v1 and should be extended, not replaced, for v2 — **per the Phase 12A
+audit, the future v2 evaluation runner itself must also verify the manifest
+hash at the start of every run and abort on mismatch, not rely solely on a
+separate pytest check**); v1's 40/40 result remains a permanent historical
+artifact and must never be re-presented as if it were a v2 result. **V1 is
+formally retired as the historical calibration set as of this plan and is
+strictly prohibited from being merged into, or reused as content for, the
+v2 validation or holdout splits** (Gemini audit required correction — v1
+content may only ever appear in v2's *development* split, if at all, since
+development is the one split that may legitimately overlap with prior
+calibration history). **The v2 corpus must contain at least 100 cases in
+total** (a statistical floor for FPR/TPR to carry meaning, per the Phase
+12A audit), approximately balanced between benign and malicious scenarios;
+the exact upper bound and per-category subcounts remain deferred to Phase
+12D authoring time, informed by the category matrix in
+`docs/modernization-v2-threat-model.md` §4 — see `ADR-003-v2-benchmark.md`
+for the full rule and why an exact prescriptive split is not locked now.
 
 **F. Evaluation** — metrics to define and compute (not necessarily all in
 the first evaluation phase, see phase boundaries): TPR, FPR, FNR, precision,
@@ -123,7 +174,10 @@ guard that "protects" by deleting everything is not useful, matching the
 usability concern both Gemini and the earlier Claude review raised); leakage
 rate and redaction recall (DLP-specific); benign over-redaction (DLP false
 positives on legitimate content); p50/p95 latency; per-layer unique catches
-and marginal contribution (ablation).
+and marginal contribution (ablation). **Exact numerator/denominator
+formulas for every metric above are defined in**
+`docs/modernization-v2-architecture.md` §8 (added per the Phase 12A audit,
+Gemini's finding that metric names alone risk inconsistent implementation).
 
 **G. Phase boundaries** — see `docs/modernization-v2-architecture.md` §7 and
 the phase-by-phase acceptance criteria there. Summary list:
@@ -163,11 +217,12 @@ Carried forward unchanged from `AGENT_RULES.md` and `docs/diagrams/architecture.
 
 | Document | Purpose |
 |---|---|
-| `docs/modernization-final-plan.md` (this file) | Scope lock, reconciliation, required decisions summary, phase list. |
-| `docs/modernization-v2-architecture.md` | Target v2 component/module/API design in implementation-ready detail. |
+| `docs/modernization-final-plan.md` (this file) | Scope lock, reconciliation, required decisions summary, research questions, phase list. |
+| `docs/modernization-v2-architecture.md` | Target v2 component/module/API design, metric formulas, and Phase 12B-12H boundaries in implementation-ready detail. |
 | `docs/modernization-v2-threat-model.md` | STRIDE-style threat model for the v2 retrieval/ingestion/provenance/DLP surface. |
 | `docs/decisions/ADR-002-retrieval-engine.md` | Formal decision record: SQLite FTS5/BM25 over vector/hybrid/mock-only. |
 | `docs/decisions/ADR-003-v2-benchmark.md` | Formal decision record: v2 benchmark structure, splits, freezing rules. |
+| `docs/modernization-ai-reviews/phase-12a-audit-resolution.md` | Traceable record of the Gemini and Grok Phase 12A audits and how each Critical/Major/Minor finding was resolved against this document set. |
 
 ## 7. Approval Gate
 

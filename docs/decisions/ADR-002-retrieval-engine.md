@@ -45,9 +45,17 @@ Key implementation requirements (see `docs/modernization-v2-architecture.md`
 
 - No new runtime dependency for the core retrieval path — `sqlite3` ships
   with CPython.
-- An explicit capability check for FTS5 support must run before retrieval
-  is used, failing with a clear error rather than silently degrading, since
-  not every SQLite build/platform combination compiles FTS5 in.
+- **An explicit capability check for FTS5 support must run before retrieval
+  is used. Strengthened per the Phase 12A audit (Gemini and Grok both
+  flagged this): if FTS5 is unavailable, the system must fail with a clear,
+  fatal capability error (e.g., a dedicated exception such as
+  `RuntimeError("SQLite FTS5 extension required for retrieval")`) and must
+  refuse to serve any retrieval-dependent request. There is no fallback of
+  any kind — not `LIKE`-based substring search, not a degraded/unranked
+  scan, not any other scoring method — under any circumstance, whether
+  detected at startup or at any later runtime check.** This is a hard,
+  non-negotiable requirement per the approved decisions for this phase, not
+  an implementation preference.
 - A persistent local `.db` file (not in-memory-only), so ingested documents
   survive a process restart.
 - Short-lived connections per request rather than one long-lived global
@@ -58,7 +66,17 @@ Key implementation requirements (see `docs/modernization-v2-architecture.md`
   into an FTS5 `MATCH` expression, since FTS5 has its own query syntax with
   operators that raw concatenation could let a caller manipulate (see
   `docs/modernization-v2-threat-model.md` §3, Tampering row on FTS5 query
-  injection).
+  injection). **Strengthened per the Phase 12A audit (Grok, Critical
+  finding): the concrete required approach is to treat all user-supplied
+  query text as a bag of plain search terms, never as raw FTS5 query
+  syntax — split on whitespace, strip or escape FTS5 special
+  characters/operators (double quotes, `*`, `:`, `-`, `^`, parentheses, the
+  `NEAR` operator and its proximity argument, column-filter syntax such as
+  `column:term`, and the boolean keywords `AND`/`OR`/`NOT` when they appear
+  as standalone tokens), and construct the final `MATCH` argument only from
+  the sanitized term list. Phase 12B's required tests
+  (`docs/modernization-v2-architecture.md` §7) must include adversarial
+  cases exercising each of these operators.**
 - Deterministic ranking with an explicit tie-breaking rule (`bm25()` score,
   then a stable secondary key such as `chunk_id`), so the same query against
   the same corpus always returns the same ordered result — required for

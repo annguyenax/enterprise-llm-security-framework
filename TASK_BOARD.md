@@ -283,9 +283,45 @@ changed-path review against the prohibited-paths list (`app/`, `tests/`,
 `scripts/`, `datasets/`, `redteam/`, `reports/evaluation/`,
 `report-latex-template/`).
 
+### Phase 12A Audit Resolution — **Status: Done**
+
+Two independent audits of the Phase 12A commit (`a814a14`) were reviewed -
+`docs/modernization-ai-reviews/gemini-phase-12a-audit.md` (verdict: REVISE)
+and `docs/modernization-ai-reviews/grok-phase-12a-audit.md` (verdict:
+REVISE, "strong foundation... proceed after fixes"). Full traceable
+resolution: `docs/modernization-ai-reviews/phase-12a-audit-resolution.md`.
+
+- **5 Critical findings** (2 Gemini, 3 Grok) - all accepted or partially
+  accepted: explicit non-production/non-absolute disclaimer added to the
+  threat model; FTS5 query safety strengthened with a concrete
+  tokenization/escaping spec; FTS5 fail-fast wording made absolute (no
+  fallback ever, startup or runtime) across all three affected documents;
+  benchmark v2 given a minimum floor of >=100 cases; multi-chunk
+  coordination mitigation converted from "documented only" into an
+  explicit Phase 12C decision-point requirement (implement a lightweight
+  heuristic or explicitly justify deferring it - not silently ignored,
+  but also not unilaterally mandated as new engineering scope from a
+  docs-only pass).
+- **6 Major findings** (3 Gemini, 3 Grok) - all accepted: acceptance
+  criteria reworded as verifiable pass/fail conditions (without inventing
+  numeric thresholds); exact metric formulas added
+  (`docs/modernization-v2-architecture.md` new §8); a baseline research
+  question added; v1 explicitly and formally prohibited from being merged
+  into v2 validation/holdout; ingestion trust decisions now require audit
+  logging; holdout authoring now requires an independence safeguard
+  (different author, time gap, or review pass); centralized DLP
+  consolidation now has a named pre/post regression-parity test
+  requirement.
+- **Minor findings:** 5 fixed now (small, clear, no scope expansion - see
+  the resolution report), 3 deferred (Grok's own "optional improvements"),
+  0 rejected.
+- **Phase 12B entry gate:** all 10 checked requirements PASS. **Final
+  recommendation: APPROVE PHASE 12B** (audit gate satisfied).
+
 **Next phase:** Phase 12B — Retrieval Foundation. Per `AGENT_RULES.md` rule
 12 (stop at phase boundaries), Phase 12B does not start automatically and
-requires a separate, explicit go-ahead referencing this plan.
+still requires a separate, explicit go-ahead referencing this plan -
+audit approval is not itself that go-ahead.
 
 ## Notes
 

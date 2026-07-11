@@ -255,3 +255,42 @@ Phase 0 kickoff. Focus was entirely on scaffolding: repository structure, planni
   `AGENT_RULES.md` rule 12 (stop at phase boundaries), this session stopped
   after the planning documents were produced and is awaiting explicit
   approval before any `app/` code is written.
+
+## Phase 12A Audit Resolution (same week, 2026-07-11)
+
+- Two independent audits of the Phase 12A commit (`a814a14`) were reviewed:
+  `docs/modernization-ai-reviews/gemini-phase-12a-audit.md` and
+  `grok-phase-12a-audit.md`, both returning verdict REVISE with specific
+  Critical/Major/Minor findings (not a rejection of the approved direction -
+  Grok's own words: "strong foundation overall, proceed after fixes").
+- Every Critical (5) and Major (6) finding was resolved - accepted or
+  partially accepted with documented rationale, never silently ignored.
+  Notable corrections: FTS5 fail-fast wording made absolute (no fallback
+  under any circumstance) across `modernization-final-plan.md`,
+  `ADR-002-retrieval-engine.md`, and `modernization-v2-architecture.md`;
+  concrete FTS5 query tokenization/escaping spec added; exact metric
+  formulas added (`modernization-v2-architecture.md` new section 8); v2
+  benchmark given a minimum floor of >=100 cases while still deferring the
+  exact upper bound/split to Phase 12D; v1 explicitly and formally
+  prohibited from being merged into v2 validation/holdout; multi-chunk
+  coordination mitigation converted from "documented only" into a
+  required Phase 12C decision point, without unilaterally mandating new
+  engineering scope from a documentation-only correction pass.
+- Two findings were only *partially* accepted, with rationale recorded in
+  `docs/modernization-ai-reviews/phase-12a-audit-resolution.md`: Grok's
+  request to mandate a working cross-chunk heuristic (converted into a
+  decision-point requirement instead, to avoid committing a future phase's
+  engineering scope from a docs-only pass) and Gemini's exact 100-case
+  50/50 named-subcount benchmark split (only the minimum floor was
+  adopted, consistent with Phase 12A's own earlier reasoning against
+  locking exact counts before Phase 12D authoring).
+- Created `docs/modernization-ai-reviews/phase-12a-audit-resolution.md`
+  (full traceable record: verdicts, every finding's resolution, deferred
+  decisions, and a 10-point Phase 12B entry-gate checklist - all PASS).
+  No file under `app/`, `tests/`, `scripts/`, `datasets/`, `redteam/`,
+  `reports/evaluation/`, `report-latex-template/`, or `requirements.txt`
+  was modified; verified with `git diff --check` and a changed-path review.
+- **Final recommendation: APPROVE PHASE 12B** (audit gate satisfied). This
+  is not itself the go-ahead to implement - per `AGENT_RULES.md` rule 12,
+  Phase 12B still requires a separate, explicit instruction before any
+  `app/` code is written.
