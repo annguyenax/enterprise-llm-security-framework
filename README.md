@@ -139,6 +139,21 @@ Invoke-RestMethod -Uri "http://127.0.0.1:8000/v1/guard/rag-context" -Method Post
 
 **RAG Guard decision rules:** hidden HTML-comment instructions and quoted-transcript injection are `sanitize` (strip the malicious fragment, keep legitimate text); an explicit system-instruction-override document with no legitimate content is `block`; the fake secret marker `FAKE-SECRET-0000-EXAMPLE` is `sanitize` + redacted (the Output Guard independently blocks the same marker as a backstop); policy-bypass wording is `sanitize`; a narrow "must be treated as final/authoritative" pattern is `human_review`; the bare word "override" alone is `log_only`. See the module docstring in `app/guards/rag_guard.py` for the full rationale, including the one deliberate deviation from a dataset file's literal `expected_guard_decision`.
 
+### Phase 5.1 Red-team hardening
+
+The RAG Guard now normalizes a detection-only copy of each chunk (case,
+whitespace, zero-width characters, and common light leetspeak), while keeping
+the original text for targeted sanitization and output. Coverage now includes
+malformed and multiline HTML/XML comments, JS/CSS comment blocks, directive
+replacement variants, multiline support transcripts, broader approval/policy
+bypass wording, and deterministic compound-signal handling. A benign enterprise
+false-positive suite covers policy updates, override-process FAQs, helpdesk text,
+password guidance, and ordinary changelogs.
+
+This remains a small rule-based guard. It can miss semantic, heavily obfuscated,
+or encoded attacks; a semantic classifier or LLM judge is future work. Vector
+retrieval, embeddings, and real LLM integration are still not implemented.
+
 **What is intentionally not implemented yet (not a bug):**
 - No real vector database, no embeddings, no similarity search — `dataset_loader.py` uses simple deterministic fixed-size character-window chunking only.
 - No real LLM call anywhere in this repository.

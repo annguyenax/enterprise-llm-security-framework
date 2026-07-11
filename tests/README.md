@@ -1,30 +1,33 @@
 # tests/
 
-pytest test suite for the gateway skeleton and its guards.
+pytest coverage for the gateway, dataset loader, and three rule-based guards.
 
-**Status: Phase 4 — 4 test modules, ~13 test cases.** Dependencies (`pytest`, `httpx`, `fastapi`) are **not installed** in this repository — run `pip install -r requirements.txt` first (see repository root `README.md`).
+**Status: Phase 5.1.** Coverage includes bypass variants, targeted RAG
+sanitization, benign false positives, gateway ordering, severity aggregation,
+and audit redaction.
 
 ## Test Modules
 
 | File | Covers |
 |---|---|
-| `test_health.py` | `GET /health` |
-| `test_input_guard.py` | `POST /v1/guard/input` — benign allow, direct injection block, sensitive extraction, RAG-context sanitize, tool misuse block |
-| `test_output_guard.py` | `POST /v1/guard/output` — benign allow, fake-secret sanitize/block, realistic API key block, email log_only |
-| `test_gateway_routes.py` | `POST /v1/gateway/chat` — request_id + guard decisions present, blocked input skips the mock LLM, audit log file is created |
-
-A root-level `conftest.py` (not inside `tests/`) puts the repository root on `sys.path` so `from app.main import app` resolves without installing the project as a package.
+| `test_health.py` | `GET /health`. |
+| `test_input_guard.py` | Input Guard behavior. |
+| `test_output_guard.py` | Output decisions and redaction. |
+| `test_dataset_loader.py` | Markdown parsing, extraction, and chunking. |
+| `test_rag_guard.py` | Corpus behavior, normalization, bypass variants, compound severity, and benign false positives. |
+| `test_rag_context_endpoint.py` | RAG endpoint, sanitization, metadata, and audit behavior. |
+| `test_gateway_routes.py` | Guard ordering, RAG continuation, short-circuiting, severity, and audit logging. |
 
 ## Running
 
-```bash
-pytest
+```powershell
+python -m pytest -q
 ```
 
-All tests use FastAPI's `TestClient` against the real `app.main:app` instance — no network calls, no real LLM, no external services. `test_gateway_routes.py`'s audit-log test writes to the real configured `LOG_PATH` (default `logs/audit.jsonl`) and clears any pre-existing file first so the assertion is deterministic.
+Guard and loader tests run directly. Endpoint tests use FastAPI's `TestClient`
+against `app.main:app`; they make no external network calls. Use a clean
+project-local environment with the genuine dependencies from `requirements.txt`.
+Never install `httpx2`; see the shared-environment warning in `TASK_BOARD.md`.
 
-## Conventions
-
-- One test module per guard/route group, matching `app/api/routes.py`'s endpoints.
-- Test prompts are deliberately simple, unambiguous examples chosen to reliably trigger (or not trigger) a specific rule — they are not the full 40-prompt benchmark. For systematic coverage against the full synthetic benchmark, see `redteam/prompts.jsonl` and `docs/evaluation/evaluation-plan.md` (Phase 7 evaluation runner, not yet built).
-- No test calls a real LLM API or installs anything.
+No test calls a real LLM, uses a vector database, or installs dependencies.
+All added attack strings are synthetic and non-operational.

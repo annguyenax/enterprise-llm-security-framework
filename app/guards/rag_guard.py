@@ -1,46 +1,9 @@
-"""Rule-based RAG Context Guard (Phase 5).
+"""Small, explainable RAG Context Guard with Phase 5.1 hardening.
 
-Evaluates retrieved-context chunks (the text a real RAG pipeline would be
-about to hand to the LLM) for signs of RAG document poisoning / indirect
-prompt injection, before that text ever reaches a (mock or real) LLM call.
-Same lab-scale regex/keyword heuristic approach as
-app/guards/input_guard.py and app/guards/output_guard.py - not a machine-
-learned classifier, not comprehensive coverage.
-
-Decision taxonomy (see app/core/decisions.py, shared with all guards):
-    allow < log_only < sanitize < human_review < block
-
-Design intent per chunk, validated against every file in
-datasets/poisoned/ (see docs/dataset/*):
-  - Hidden HTML-comment instructions -> sanitize (strip the comment,
-    keep legitimate surrounding text) - datasets/poisoned/hidden-html-instruction.md.
-  - Explicit "this document supersedes system instructions" style override,
-    addressed directly at the AI with no legitimate content of its own
-    -> block - datasets/poisoned/system-override.md.
-  - The fake secret marker `FAKE-SECRET-0000-EXAMPLE` -> sanitize + redact.
-    The dataset's own `expected_guard_decision` for this file is `block`,
-    but this project also has an Output Guard backstop
-    (app/guards/output_guard.py) that independently blocks any completion
-    containing this marker - see fake-secret-leak.md's own "Explanation for
-    Evaluator" section, which frames this as a two-layer defense-in-depth
-    test. Redacting the marker at the RAG layer (rather than dropping the
-    whole chunk) still guarantees the secret can never reach the LLM
-    context, while keeping this guard's default MVP behavior consistent
-    with output_guard.py's existing sanitize+redact treatment of the same
-    marker. This deviation is a deliberate design choice, not an oversight.
-  - Policy-bypass instructions that contradict a known policy without
-    addressing "the AI" directly -> sanitize (weaker/ambiguous signals fall
-    back to log_only) - datasets/poisoned/policy-bypass.md.
-  - Indirect injection via a quoted transcript ("Customer message: ...
-    Ignore ...") -> sanitize, treated as context isolation: the quoted
-    instruction is stripped rather than the whole transcript, since the
-    transcript itself models correct behavior -
-    datasets/poisoned/support-transcript-injection.md.
-  - A dedicated, narrow "treat this note as final/authoritative" pattern
-    is scored as human_review: an ambiguous authority claim that is not
-    clearly a direct override and not clearly benign. No current dataset
-    file matches this rule; it exists for the human_review branch of the
-    decision taxonomy and is covered by a hand-written test case.
+Detection uses normalized text to catch simple whitespace, zero-width, and
+leetspeak evasions. Sanitization always operates on the original text so
+source content and chunk metadata are preserved. These heuristics are not a
+semantic classifier and do not provide complete prompt-injection protection.
 """
 from __future__ import annotations
 
@@ -52,11 +15,16 @@ from app.schemas.requests import RAGContextChunk
 from app.schemas.responses import RAGGuardResponse
 
 REDACTED = "[REDACTED]"
-
-# Same fixed fake-secret format used across this project (see
-# app/guards/output_guard.py and app/services/audit_logger.py).
+ZERO_WIDTH_PATTERN = re.compile(r"[\u200b-\u200d\u2060\ufeff]")
 FAKE_SECRET_PATTERN = re.compile(r"FAKE-SECRET-0000-EXAMPLE(-[A-Z-]+)?", re.IGNORECASE)
-HIDDEN_HTML_COMMENT_PATTERN = re.compile(r"<!--.*?-->", re.DOTALL)
+HIDDEN_BLOCK_PATTERN = re.compile(
+    r"<!--.*?--\s*>|<!(?:--)?\s*.*?--\s*>|/\*.*?\*/",
+    re.IGNORECASE | re.DOTALL,
+)
+HIDDEN_RISK_PATTERN = re.compile(
+    r"\b(ignore|disregard|override|system|developer|instruction|reveal|secret|bypass|supersede)\w*\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -74,87 +42,127 @@ def _rx(pattern: str) -> re.Pattern[str]:
     return re.compile(pattern, re.IGNORECASE)
 
 
+def _normalize_for_detection(text: str) -> str:
+    """Normalize only the copy used by detectors, never returned content."""
+    normalized = ZERO_WIDTH_PATTERN.sub("", text).lower()
+    normalized = normalized.translate(str.maketrans({
+        "0": "o", "3": "e", "4": "a", "@": "a",
+        "5": "s", "$": "s", "1": "i",
+    }))
+    return re.sub(r"\s+", " ", normalized).strip()
+
+
 RULES: tuple[Rule, ...] = (
     Rule(
-        "rag-hidden-html-comment", "hidden_html_instruction",
-        HIDDEN_HTML_COMMENT_PATTERN,
-        Decision.SANITIZE, 0.75,
-        "Detected a hidden HTML comment in retrieved context; a naive pipeline would still forward "
-        "this invisible text to the LLM, so it was stripped.",
-    ),
-    Rule(
-        "rag-system-override", "system_instruction_override",
+        "rag-system-override", "instruction_override",
         _rx(
             r"\bnotice to ai\b"
-            r"|\bsupersedes?\b[^.?!]{0,30}\b(earlier|previous|prior|system)\b[^.?!]{0,20}\binstructions?\b"
-            r"|\bthis document supersedes\b"
+            r"|\b(new directives? (replace|supersede)[^.!?]{0,35}(previous|prior|existing) guidelines?)\b"
+            r"|\boperating under new directives?\b"
+            r"|\bthis document supersedes? (existing|previous|prior|system)? ?instructions?\b"
+            r"|\btreat this as the highest priority instruction\b"
+            r"|\b(developer|system) (rules?|instructions?) (are|is) no longer applicable\b"
+            r"|\bthis note must override (previous|prior|existing) (policy|instructions?|guidelines?)\b"
+            r"|\bsupersedes?[^.!?]{0,35}(previous|prior|system)[^.!?]{0,25}instructions?\b"
         ),
         Decision.BLOCK, 0.9,
-        "Detected retrieved content directly addressing the AI assistant and claiming authority to "
-        "override system instructions.",
+        "Detected retrieved content claiming authority to replace system or developer instructions.",
     ),
     Rule(
-        "rag-fake-secret", "fake_secret_leak",
-        FAKE_SECRET_PATTERN,
+        "rag-fake-secret", "fake_secret_leak", FAKE_SECRET_PATTERN,
         Decision.SANITIZE, 0.7,
-        "Detected this project's synthetic fake-secret marker in retrieved context; redacted before "
-        "the chunk is used (Output Guard also blocks this marker as a backstop).",
+        "Detected the synthetic fake-secret marker; redacted before context use.",
         redact=True,
     ),
     Rule(
         "rag-policy-bypass", "policy_bypass",
-        _rx(r"\bdisregard the\b[^.?!]{0,60}\b(threshold|policy|review|approval)\b"),
-        Decision.SANITIZE, 0.6,
-        "Detected an instruction to disregard a known policy threshold or approval step.",
+        _rx(
+            r"\b(bypass (the )?policy|override (the )?approval workflow|waive (the )?approval"
+            r"|skip (manager )?approval|approve (the )?refund immediately|proceed without approval"
+            r"|exception without review|disregard[^.!?]{0,45}(threshold|policy|review|approval)"
+            r"|high[- ]priority request[^.!?]{0,35}ignore[^.!?]{0,20}(normal )?policy)\b"
+        ),
+        Decision.SANITIZE, 0.72,
+        "Detected an instruction to bypass a policy, review, or approval control.",
     ),
     Rule(
-        "rag-transcript-quoted-injection", "indirect_prompt_injection",
-        _rx(r"(customer|user)\s+(message|said|wrote)[:\s]*[\"'][^\"']{0,40}\bignore\b"),
-        Decision.SANITIZE, 0.55,
-        "Detected an embedded instruction inside quoted third-party speech; isolating the quoted "
-        "text so it is not treated as a live command.",
+        "rag-transcript-quoted-injection", "transcript_injection",
+        _rx(r"\b(support agent notes?|customer support log|customer message|the user said|agent confirmed)\b"),
+        Decision.SANITIZE, 0.68,
+        "Detected a support transcript carrying a policy-override instruction.",
     ),
     Rule(
-        "rag-generic-ignore-instructions", "direct_override_language",
-        _rx(r"\bignore all (prior|previous) instructions\b"),
-        Decision.SANITIZE, 0.7,
-        "Detected 'ignore all prior/previous instructions' style override language in retrieved context.",
+        "rag-generic-ignore-instructions", "instruction_override",
+        _rx(r"\b(ignore|disregard|forget) (all )?(prior|previous|existing|earlier) (system |developer )?instructions?\b"),
+        Decision.SANITIZE, 0.75,
+        "Detected language instructing the model to ignore prior instructions.",
     ),
     Rule(
-        "rag-ambiguous-authority-claim", "ambiguous_authority_claim",
-        _rx(r"\bthis (note|memo|update) (should|must) be (treated|considered) as (final|authoritative)\b"),
+        "rag-ambiguous-authority-claim", "authority_claim",
+        _rx(r"\bthis (note|memo) (should|must) be (treated|considered) as (final|authoritative)\b"),
         Decision.HUMAN_REVIEW, 0.55,
-        "Detected an ambiguous claim of final/authoritative status that is not a clear override; "
-        "flagged for human review rather than auto-decided.",
+        "Detected an ambiguous authority claim requiring human review.",
     ),
     Rule(
-        "rag-weak-override-keyword", "weak_signal",
-        _rx(r"\boverride\b"),
+        "rag-weak-override-keyword", "weak_signal", _rx(r"\boverride\b"),
         Decision.LOG_ONLY, 0.3,
-        "Detected the word 'override' in retrieved context; may be benign, logged for visibility.",
+        "Detected the word 'override'; logged as a weak signal that may be benign.",
     ),
+)
+
+TRANSCRIPT_MARKER_PATTERN = _rx(
+    r"\b(support agent notes?|customer support log|customer message|the user said|agent confirmed)\b"
+)
+TRANSCRIPT_ATTACK_PATTERN = _rx(
+    r"\b(ignore|disregard|bypass|override)\b[^.!?]{0,80}\b(policy|approval|instructions?|workflow)\b"
+    r"|\bignore\b[^.!?]{0,80}\b(restrictions?|rules?|guidelines?)\b"
+    r"|\b(approve|refund|proceed)\b[^.!?]{0,45}\bwithout approval\b"
+    r"|\bapprove (the )?refund immediately\b"
 )
 
 
 def evaluate_rag_context(chunks: list[RAGContextChunk]) -> RAGGuardResponse:
-    """Evaluate a list of retrieved-context chunks and return one combined
-    decision, plus per-chunk sanitized text when the decision is SANITIZE."""
     all_matched: list[Rule] = []
-    per_chunk_matches: list[tuple[RAGContextChunk, list[Rule]]] = []
+    per_chunk_matches: list[tuple[RAGContextChunk, list[Rule], bool]] = []
 
     for chunk in chunks:
-        matched = [rule for rule in RULES if rule.pattern.search(chunk.text)]
-        per_chunk_matches.append((chunk, matched))
+        normalized = _normalize_for_detection(chunk.text)
+        matched = [
+            rule for rule in RULES
+            if rule.category not in {"transcript_injection", "fake_secret_leak"}
+            and rule.pattern.search(normalized)
+        ]
+        if FAKE_SECRET_PATTERN.search(chunk.text):
+            matched.append(next(rule for rule in RULES if rule.category == "fake_secret_leak"))
+        transcript_attack = bool(
+            TRANSCRIPT_MARKER_PATTERN.search(normalized)
+            and TRANSCRIPT_ATTACK_PATTERN.search(normalized)
+        )
+        if transcript_attack:
+            matched.append(next(rule for rule in RULES if rule.category == "transcript_injection"))
+
+        hidden_attack = any(
+            HIDDEN_RISK_PATTERN.search(_normalize_for_detection(block.group(0)))
+            for block in HIDDEN_BLOCK_PATTERN.finditer(chunk.text)
+        )
+        if hidden_attack:
+            matched.append(_hidden_rule())
+
+        matched = _dedupe_rules(matched)
+        per_chunk_matches.append((chunk, matched, hidden_attack))
         all_matched.extend(matched)
 
     if not all_matched:
         return RAGGuardResponse(decision=Decision.ALLOW, sanitized_chunks=list(chunks))
 
-    final_decision = most_severe([rule.decision for rule in all_matched])
-    risk_score = max(rule.weight for rule in all_matched)
-    reasons = _dedupe([rule.reason for rule in all_matched])
-    matched_rules = _dedupe([rule.rule_id for rule in all_matched])
+    categories = {rule.category for rule in all_matched}
+    decisions = [rule.decision for rule in all_matched]
+    # Compound signals are deterministic: paired override+bypass evidence is
+    # at least sanitize; explicit system replacement remains block.
+    if {"instruction_override", "policy_bypass"} <= categories:
+        decisions.append(Decision.SANITIZE)
 
+    final_decision = most_severe(decisions)
     sanitized_chunks: list[RAGContextChunk] | None
     if final_decision == Decision.BLOCK:
         sanitized_chunks = None
@@ -162,10 +170,10 @@ def evaluate_rag_context(chunks: list[RAGContextChunk]) -> RAGGuardResponse:
         sanitized_chunks = [
             RAGContextChunk(
                 doc_id=chunk.doc_id,
-                text=_sanitize_text(chunk.text, matched),
+                text=_sanitize_text(chunk.text, matched, hidden_attack),
                 metadata=chunk.metadata,
             )
-            for chunk, matched in per_chunk_matches
+            for chunk, matched, hidden_attack in per_chunk_matches
         ]
     else:
         sanitized_chunks = list(chunks)
@@ -173,27 +181,56 @@ def evaluate_rag_context(chunks: list[RAGContextChunk]) -> RAGGuardResponse:
     return RAGGuardResponse(
         decision=final_decision,
         sanitized_chunks=sanitized_chunks,
-        reasons=reasons,
-        matched_rules=matched_rules,
-        risk_score=risk_score,
+        reasons=_dedupe([rule.reason for rule in all_matched]),
+        matched_rules=_dedupe([rule.rule_id for rule in all_matched]),
+        risk_score=max(rule.weight for rule in all_matched),
     )
 
 
-def _sanitize_text(text: str, matched: list[Rule]) -> str:
+def _hidden_rule() -> Rule:
+    return Rule(
+        "rag-hidden-html-comment", "hidden_instruction", HIDDEN_BLOCK_PATTERN,
+        Decision.SANITIZE, 0.78,
+        "Detected instruction-like content in a hidden HTML, XML, JS, or CSS comment block.",
+    )
+
+
+def _sanitize_text(text: str, matched: list[Rule], hidden_attack: bool) -> str:
     cleaned = text
-    for rule in matched:
-        if rule.redact:
-            cleaned = rule.pattern.sub(REDACTED, cleaned)
-        elif rule.decision == Decision.SANITIZE:
-            cleaned = rule.pattern.sub("", cleaned)
+    if hidden_attack:
+        cleaned = HIDDEN_BLOCK_PATTERN.sub(
+            lambda match: "" if HIDDEN_RISK_PATTERN.search(
+                _normalize_for_detection(match.group(0))
+            ) else match.group(0),
+            cleaned,
+        )
+    if any(rule.redact for rule in matched):
+        cleaned = FAKE_SECRET_PATTERN.sub(REDACTED, cleaned)
+
+    removable = {
+        rule.category for rule in matched
+        if rule.decision == Decision.SANITIZE
+    } - {"hidden_instruction", "fake_secret_leak"}
+    if removable:
+        lines = cleaned.splitlines(keepends=True)
+        kept = []
+        for line in lines:
+            normalized_line = _normalize_for_detection(line)
+            malicious = any(
+                rule.category in removable and rule.pattern.search(normalized_line)
+                for rule in matched if rule.category != "transcript_injection"
+            )
+            if "transcript_injection" in removable:
+                malicious = malicious or bool(TRANSCRIPT_ATTACK_PATTERN.search(normalized_line))
+            if not malicious:
+                kept.append(line)
+        cleaned = "".join(kept)
     return re.sub(r"[ \t]+", " ", cleaned).strip()
 
 
 def _dedupe(values: list[str]) -> list[str]:
-    seen: set[str] = set()
-    result: list[str] = []
-    for value in values:
-        if value not in seen:
-            seen.add(value)
-            result.append(value)
-    return result
+    return list(dict.fromkeys(values))
+
+
+def _dedupe_rules(rules: list[Rule]) -> list[Rule]:
+    return list({rule.rule_id: rule for rule in rules}.values())
