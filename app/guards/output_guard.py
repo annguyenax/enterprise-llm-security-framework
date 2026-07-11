@@ -54,7 +54,7 @@ RULES: tuple[Rule, ...] = (
         "output-email-pii", "sensitive_information_disclosure",
         _rx(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"),
         Decision.LOG_ONLY, 0.4,
-        "Detected an email-like string in the output; may be a legitimate contact reference — "
+        "Detected an email-like string in the output; may be a legitimate contact reference - "
         "flagged for review rather than auto-blocked.",
         redact=False,
     ),
@@ -62,13 +62,13 @@ RULES: tuple[Rule, ...] = (
         "output-system-prompt-leak", "instruction_leakage",
         _rx(r"\bsystem prompt\b|\bmy (full |complete )?instructions are\b"),
         Decision.BLOCK, 0.85,
-        "Detected the output referencing/quoting the system prompt or internal instructions — possible instruction leakage.",
+        "Detected the output referencing/quoting the system prompt or internal instructions - possible instruction leakage.",
     ),
     Rule(
         "output-disclosure-marker", "unsafe_disclosure_marker",
         _rx(r"\binternal use only\b|\bclassification:\s*(confidential|restricted)\b"),
         Decision.HUMAN_REVIEW, 0.5,
-        "Detected a confidentiality/classification marker in the output — ambiguous (could be a "
+        "Detected a confidentiality/classification marker in the output - ambiguous (could be a "
         "legitimate policy quote); flagged for human review rather than auto-decided.",
     ),
 )

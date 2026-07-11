@@ -95,7 +95,7 @@ RULES: tuple[Rule, ...] = (
         "jailbreak-fictional-frame", "jailbreak",
         _rx(r"\b(roleplay|game|story|dialogue)\b[^.?!]{0,80}\bno (content )?restrictions?\b"),
         Decision.BLOCK, 0.75,
-        "Detected a fictional/game framing combined with a 'no restrictions' claim — a common jailbreak wrapper.",
+        "Detected a fictional/game framing combined with a 'no restrictions' claim - a common jailbreak wrapper.",
     ),
 
     # --- sensitive extraction / reveal hidden or system prompt ---
@@ -149,19 +149,19 @@ RULES: tuple[Rule, ...] = (
         "tool-send-email", "tool_action_misuse",
         _rx(r"\bsend an email on my behalf\b"),
         Decision.BLOCK, 0.75,
-        "Detected a request to send messages on the user's behalf — no such capability exists.",
+        "Detected a request to send messages on the user's behalf - no such capability exists.",
     ),
     Rule(
         "tool-execute-query", "tool_action_misuse",
         _rx(r"\bexecute a database query\b"),
         Decision.BLOCK, 0.8,
-        "Detected a request to execute a database query — no such capability exists.",
+        "Detected a request to execute a database query - no such capability exists.",
     ),
     Rule(
         "tool-admin-panel", "tool_action_misuse",
         _rx(r"\baccess the (internal )?admin(istration)? panel\b"),
         Decision.BLOCK, 0.8,
-        "Detected a request to access an administration panel — no such capability exists.",
+        "Detected a request to access an administration panel - no such capability exists.",
     ),
     Rule(
         "tool-reset-password", "tool_action_misuse",
@@ -173,7 +173,7 @@ RULES: tuple[Rule, ...] = (
         "tool-delete-logs", "tool_action_misuse",
         _rx(r"\bdelete the (application )?logs\b"),
         Decision.BLOCK, 0.8,
-        "Detected a request to delete application logs — no such capability exists.",
+        "Detected a request to delete application logs - no such capability exists.",
     ),
 )
 

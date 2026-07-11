@@ -102,6 +102,20 @@ This is the same work recorded against the two Phase 2 rows above ("Synthetic re
 | Jailbreak pattern detectors | Le Dinh Nghia | Done — same file, jailbreak-keyword and fictional-framing rules |
 | Input Guard unit tests | Both | Done — `tests/test_input_guard.py` |
 
+## Phase 4.1 — Gateway QA and Skeleton Hardening — **Status: Done**
+
+| Task | Owner | Status |
+|---|---|---|
+| Fix encoding-sensitive strings (em dash -> ASCII "-" in logged reason strings) | Le Dinh Nghia | Done — 8 `reason=` strings across `app/guards/input_guard.py` and `app/guards/output_guard.py` fixed; module docstrings/comments intentionally left as-is (not logged, out of scope) |
+| Confirm audit logs write as UTF-8 with readable redaction | Le Dinh Nghia | Done — `app/services/audit_logger.py` already used `encoding="utf-8"`; added regression test confirming strict-UTF-8 decode and no em/en dash in logged reasons |
+| Improve mock gateway response text | Nguyen Van An | Done — `app/services/gateway.py` `MOCK_RESPONSE` now reads "Phase 4 mock response: guard evaluation completed. Real LLM and RAG retrieval are not enabled in this phase." |
+| Improve final_decision logic (deterministic severity order) | Nguyen Van An | Done — `app/services/gateway.py` refactored: BLOCK and HUMAN_REVIEW on the Input Guard now both stop the pipeline before any mock-LLM call (matching `redteam/expected-behaviors.yaml`'s "human_review has the same practical effect as Block" definition); Output Guard HUMAN_REVIEW now withholds the response instead of silently returning it; `final_decision` combination continues to use the existing `most_severe()` severity function (`block > human_review > sanitize > log_only > allow`), now verified by a dedicated test |
+| Add/strengthen tests | Both | Done — `tests/test_gateway_routes.py` grew from 3 to 7 tests: sanitize-continues-pipeline, severity-order (exhaustive pairwise check), output-guard-sanitizes-fake-secret-and-log-never-leaks-it, UTF-8-readable-log-with-ASCII-safe-reasons, plus the 2 original tests (one assertion updated for the new mock text) |
+| Smoke test script | Both | Done (optional item, included) — `scripts/smoke_test_gateway.ps1`, calls `/health` + `/v1/guard/input` (benign & malicious) + `/v1/gateway/chat` (benign & malicious), ASCII-only output |
+| README "Phase 4.1 QA checks" section | Both | Done — `pytest -q`, `uvicorn` run, `Invoke-RestMethod` examples, audit log location, explicit "still mocked" note |
+
+**Verification method (same constraint as Phase 4):** dependencies are still **not installed** in this repository, so this session again validated changes via (1) `py_compile` on every changed file, (2) direct logic testing of `app.core.decisions.most_severe()` (zero external dependencies, runs with stdlib only) confirming the full severity order pairwise, and (3) a full non-ASCII character scan confirming every `reason=` string is now pure ASCII while docstrings/comments (not logged) were left untouched. Actually running `pytest`/`uvicorn` still requires a team member to `pip install -r requirements.txt` first.
+
 ## Phase 5 — RAG Guard + Demo RAG Pipeline
 
 | Task | Owner | Status |
