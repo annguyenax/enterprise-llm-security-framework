@@ -196,13 +196,24 @@ manual team rehearsal/review; no core behavior, benchmark label, dataset, or
 LaTeX template content changed. Reproduction commands were checked with 82
 passing tests (system-temp basetemp) and a passing local gateway smoke test.
 
-## Phase 9 — Final Polish & Submission
+## Phase 9 — Final Polish & Submission — **Status: In Review**
 
 | Task | Owner | Status |
 |---|---|---|
-| Demo rehearsal | Both | Not Started |
-| Final report proofread | Both | Not Started |
+| Report integration plan | Both | Done - maps introduction through future work to evidence and target LaTeX chapters; official title verified unchanged |
+| Demo rehearsal checklist | Both | Done - commands, expected outputs, speaking points, common questions, and fallback flow documented |
+| Screenshots | Both | Not Started - capture and caption the items in `reports/evidence/screenshot-guide.md` |
+| Final PDF compile | Both | Not Started - integrate reviewed content, compile template, resolve references/warnings |
+| Supervisor review | Both | Not Started - provide final PDF and evidence package for feedback/sign-off |
+| Demo rehearsal | Both | In Progress - written checklist ready; timed team rehearsal not yet recorded |
+| Final report proofread | Both | In Progress - report-ready summary audited; LaTeX chapter integration and Vietnamese proofread pending |
 | Submission packaging | Both | Not Started |
+
+**Phase 9 review note (2026-07-11):** the official thesis title is unchanged.
+The LaTeX template retains early periodic-report statements such as “no source
+code/results yet”; these are identified in `report-integration-plan.md` and must
+be replaced with reviewed current evidence before final compilation. No app,
+test, benchmark, evaluation, or core behavior changed in this phase.
 
 ## Notes
 

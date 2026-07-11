@@ -256,6 +256,20 @@ These files package existing evidence; they do not add security features or
 change the frozen benchmark. LaTeX report integration and manual screenshot
 capture remain team review tasks.
 
+### Phase 9 Report and Demo Finalization
+
+- [Report integration plan](reports/evidence/report-integration-plan.md) maps
+  every final report section to source evidence and target LaTeX chapters.
+- [Demo rehearsal checklist](reports/evidence/demo-rehearsal-checklist.md)
+  provides preflight checks, timing, expected output, speaking points, common
+  questions, and an offline fallback plan.
+
+The official title in `report-latex-template/thesis.sty` was verified unchanged:
+“Nghiên cứu và triển khai cơ chế Guardrails bảo vệ hệ thống RAG trước tấn công
+Prompt Injection và rò rỉ dữ liệu”. LaTeX chapter content still contains stale
+early-phase status statements and must be integrated/reviewed before final PDF
+compilation.
+
 **What is intentionally not implemented yet (not a bug):**
 - No real vector database, no embeddings, no similarity search — `dataset_loader.py` uses simple deterministic fixed-size character-window chunking only.
 - No real external LLM call anywhere in this repository; only the local deterministic mock provider is available.

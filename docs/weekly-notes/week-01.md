@@ -166,6 +166,14 @@ Phase 0 kickoff. Focus was entirely on scaffolding: repository structure, planni
 - Verified the packaged commands: full pytest with a system-temp basetemp passed 82 tests, and the local gateway smoke script printed `SMOKE TEST PASSED`. A workspace-local basetemp was documented as unsuitable in managed Windows shells because pytest cleanup encountered ACL denial.
 - Phase 8 is In Review: evidence packaging is complete, while team screenshot capture, demo rehearsal, diagram finalization, LaTeX integration, and internal report review remain manual tasks.
 
+## Phase 9 - Report Writing and Demo Finalization (same week, 2026-07-11)
+
+- Added `reports/evidence/report-integration-plan.md`, mapping introduction, background, architecture, threat model, dataset, guards, provider, evaluation, results, baseline, limitations, and future work to evidence and target LaTeX chapters.
+- Added `reports/evidence/demo-rehearsal-checklist.md` with timed flow, preflight commands, expected outputs, speaking points, common questions, and a no-server fallback.
+- Audited `report-ready-summary.md` and added an upfront scope statement: controlled synthetic benchmark, rule-based PoC, no real LLM/vector DB/retrieval, and no real-world interpretation of 40/40.
+- Verified the official title remains unchanged in `report-latex-template/thesis.sty`. LaTeX chapters were not automatically rewritten because several early-period status passages require deliberate team review and integration.
+- Phase 9 is In Review pending screenshots, final PDF compile, supervisor review, timed demo rehearsal, final proofread, and submission packaging.
+
 ## Next Week Plan
 
 - Team members personally read the three logged academic papers and confirm/replace the placeholder "Summary" fields in `related-work.md` with their own understanding.

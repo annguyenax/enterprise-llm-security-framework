@@ -1,5 +1,11 @@
 # Tóm tắt kết quả phục vụ báo cáo thực tập
 
+> **Phạm vi diễn giải:** Toàn bộ kết quả định lượng dưới đây chỉ áp dụng cho bộ
+> benchmark tổng hợp có kiểm soát của dự án. Hệ thống là proof-of-concept dựa
+> trên rule, không phải sản phẩm sẵn sàng triển khai; chưa tích hợp LLM thực,
+> vector database, embedding hoặc pipeline retrieval hoàn chỉnh. Kết quả 40/40
+> không được diễn giải thành tỷ lệ phát hiện trong môi trường thực tế.
+
 ## Mục tiêu hệ thống
 
 Đề tài xây dựng một mô hình thử nghiệm quy mô phòng lab cho cổng bảo mật ứng
