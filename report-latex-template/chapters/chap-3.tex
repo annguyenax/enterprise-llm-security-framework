@@ -1,0 +1,67 @@
+\chapter{Đề cương chi tiết công việc thực hiện}
+\label{ch:de-cuong-cong-viec}
+
+\section{Outline quyển báo cáo cuối kỳ}
+
+Quyển báo cáo cuối kỳ dự kiến gồm: Mở đầu; Chương 1 -- Tổng quan và cơ sở lý thuyết; Chương 2 -- Phân tích và thiết kế hệ thống; Chương 3 -- Triển khai; Chương 4 -- Kiểm thử và đánh giá; Kết luận và hướng phát triển; Tài liệu tham khảo; Phụ lục (chi tiết đầy đủ tại \texttt{docs/report/report-outline.md} của kho mã nguồn dự án). Báo cáo định kỳ hiện tại tương ứng với phần nội dung đã hoàn thành của Chương 1--2 nêu trên, trình bày lại dưới cấu trúc bắt buộc của báo cáo định kỳ TTTN.
+
+\section{Đề cương chi tiết theo giai đoạn (phase)}
+
+Bảng~\ref{tab:phase-overview} liệt lại các giai đoạn thực hiện đề tài (chi tiết đầy đủ tại \texttt{TASK\_BOARD.md} của kho mã nguồn dự án), trong đó Phase 0--2 đã hoàn thành ở mức tài liệu tại thời điểm báo cáo này.
+
+\begin{table}[H]
+\centering
+\caption{Đề cương công việc theo giai đoạn}
+\label{tab:phase-overview}
+\begin{tabular}{@{}p{0.08\linewidth}p{0.55\linewidth}p{0.27\linewidth}@{}}
+\toprule
+\textbf{Phase} & \textbf{Nội dung chính} & \textbf{Trạng thái} \\
+\midrule
+0 & Scaffold repo, kế hoạch dự án, khung nghiên cứu, quy tắc agent, khung báo cáo LaTeX & Hoàn thành \\
+1 & Nghiên cứu sâu: OWASP LLM Top 10, related work, so sánh công cụ/framework & Bản nháp đầu, đang xác minh \\
+2 & Threat modeling STRIDE, yêu cầu FR/NFR, kiến trúc, thiết kế bộ dữ liệu kiểm thử tổng hợp và tiêu chí đánh giá & Đã thiết kế đầy đủ \\
+3 & Khung Gateway: FastAPI app, cấu hình, logging & Chưa bắt đầu \\
+4 & Input Guard: phát hiện prompt injection, jailbreak & Chưa bắt đầu \\
+5 & RAG Guard + pipeline RAG demo & Chưa bắt đầu \\
+6 & Output Guard: chống rò rỉ thông tin nhạy cảm & Chưa bắt đầu \\
+7 & Bộ đánh giá (evaluation harness) + chạy red-team trên MVP & Chưa bắt đầu (đã có kế hoạch/metric) \\
+8 & Tổng hợp kết quả, hoàn thiện báo cáo, sơ đồ & Chưa bắt đầu \\
+9 & Hoàn thiện, chuẩn bị demo, nộp bài & Chưa bắt đầu \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Thiết kế bộ dữ liệu kiểm thử red-team (đã thiết kế, chưa hiện thực hóa)}
+
+Là một phần của Phase 2, nhóm \textbf{đã thiết kế} (chưa tạo file dữ liệu thật) một bộ dữ liệu kiểm thử tổng hợp, chi tiết đầy đủ tại \texttt{docs/evaluation/red-team-test-design.md}. Toàn bộ ví dụ đều là dữ liệu hư cấu 100\%, dùng công ty giả định "Northwind Retail Group", không chứa PII/secret thật.
+
+\begin{itemize}
+    \item \textbf{5 tài liệu doanh nghiệp "sạch"} dùng làm baseline: chính sách nhân sự (HR), chính sách IT helpdesk, hướng dẫn an toàn nội bộ, FAQ sản phẩm, chính sách hoàn ứng chi phí (finance reimbursement).
+    \item \textbf{5 nhóm tài liệu RAG "nhiễm độc"}: chứa chỉ dẫn ẩn; cố ghi đè chỉ dẫn hệ thống; cố làm rò rỉ bí mật (dùng chuỗi giả rõ ràng, ví dụ \texttt{FAKE-SECRET-0000-EXAMPLE}); yêu cầu bỏ qua chính sách; mô phỏng indirect prompt injection qua transcript hỗ trợ khách hàng.
+    \item \textbf{7 nhóm prompt injection}: direct injection, role override, instruction hierarchy attack, jailbreak, trích xuất thông tin nhạy cảm, thao túng ngữ cảnh RAG, yêu cầu lạm dụng tool/action (dù MVP chưa có tool nào, dùng để kiểm tra hệ thống không "ảo giác" có năng lực đó).
+\end{itemize}
+
+\section{Hành vi guard kỳ vọng}
+
+Mỗi test case được ánh xạ tới một trong 5 hành vi kỳ vọng (Bảng~\ref{tab:guard-behavior}), là ngôn ngữ chung dùng xuyên suốt thiết kế dữ liệu và định nghĩa metric ở Chương 4.
+
+\begin{table}[H]
+\centering
+\caption{Đơn vị hành vi guard kỳ vọng}
+\label{tab:guard-behavior}
+\begin{tabular}{@{}p{0.18\linewidth}p{0.72\linewidth}@{}}
+\toprule
+\textbf{Hành vi} & \textbf{Ý nghĩa} \\
+\midrule
+Allow & Guard không phát hiện vấn đề, request đi tiếp không thay đổi \\
+Block & Guard phát hiện vi phạm rõ ràng, dừng pipeline, trả về phản hồi từ chối an toàn \\
+Sanitize & Guard phát hiện vấn đề cục bộ (ví dụ chỉ dẫn ẩn trong tài liệu), loại bỏ phần đó, giữ lại phần nội dung hợp lệ \\
+Log only & Tín hiệu mức thấp/mơ hồ, request vẫn đi tiếp nhưng được ghi log để phân tích sau \\
+Require human review & Trường hợp mức độ nghiêm trọng cao nhưng còn mơ hồ, chưa nên tự động quyết định (ở MVP, hiệu ứng thực tế tương đương Block kèm mã lý do riêng) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Phân chia công việc theo phase}
+
+Việc phân chia công việc cho từng phase bám theo Bảng phân chia vai trò đã trình bày ở phần "Kế hoạch thực hiện công việc nhóm" đầu báo cáo, và được cập nhật chi tiết hơn theo tuần tại \texttt{docs/weekly-notes/} của kho mã nguồn dự án.

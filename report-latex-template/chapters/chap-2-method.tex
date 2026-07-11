@@ -1,0 +1,150 @@
+\chapter{Phân tích yêu cầu, kiến trúc và threat model}
+\label{ch:phan-tich-kien-truc}
+
+\section{Yêu cầu chức năng}
+
+Bảng~\ref{tab:functional-req} liệt kê các yêu cầu chức năng đã được nhóm thiết kế cho hệ thống MVP (chi tiết tại \texttt{docs/diagrams/architecture.md} của kho mã nguồn dự án). Đây là các yêu cầu \textbf{dự kiến triển khai}, chưa có mã nguồn hiện thực.
+
+\begin{table}[H]
+\centering
+\caption{Yêu cầu chức năng của MVP}
+\label{tab:functional-req}
+\begin{tabular}{@{}p{0.1\linewidth}p{0.85\linewidth}@{}}
+\toprule
+\textbf{Mã} & \textbf{Yêu cầu} \\
+\midrule
+FR1 & Gateway tiếp nhận truy vấn từ Demo UI/API và chuyển qua Input Guard trước khi truy hồi hoặc gọi LLM. \\
+FR2 & Input Guard phân loại đầu vào theo dấu hiệu prompt injection/jailbreak trực tiếp và cho phép/gắn cờ/chặn tương ứng. \\
+FR3 & Với đầu vào được cho phép, hệ thống truy hồi tài liệu ứng viên từ kho tri thức RAG tổng hợp. \\
+FR4 & RAG Guard rà soát tài liệu truy hồi để phát hiện chỉ dẫn ẩn/gián tiếp và dấu hiệu đầu độc trước khi đưa vào ngữ cảnh LLM. \\
+FR5 & Gateway gửi prompt đã làm sạch cùng ngữ cảnh tới một nhà cung cấp LLM qua API. \\
+FR6 & Output Guard rà soát kết quả sinh ra để phát hiện rò rỉ thông tin nhạy cảm trước khi trả về người dùng. \\
+FR7 & Hệ thống ghi log mọi quyết định của guard (allow/flag/block, mã lý do, timestamp, request ID) dạng JSONL. \\
+FR8 & Hệ thống hỗ trợ chạy hàng loạt các test case red-team tổng hợp qua gateway và ghi nhận kết quả pass/fail theo từng guard. \\
+FR9 & Cấu hình (nhà cung cấp LLM, ngưỡng guard, đường dẫn log) được cấu hình từ bên ngoài (biến môi trường/settings), không hard-code. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Yêu cầu phi chức năng}
+
+Bảng~\ref{tab:nonfunctional-req} liệt kê các yêu cầu phi chức năng, trong đó nhấn mạnh ràng buộc về tài nguyên phần cứng (laptop 16GB RAM của 2 sinh viên) và nguyên tắc không đưa ra số liệu hiệu năng chưa đo được.
+
+\begin{table}[H]
+\centering
+\caption{Yêu cầu phi chức năng của MVP}
+\label{tab:nonfunctional-req}
+\begin{tabular}{@{}p{0.1\linewidth}p{0.85\linewidth}@{}}
+\toprule
+\textbf{Mã} & \textbf{Yêu cầu} \\
+\midrule
+NFR1 & Toàn bộ MVP chạy được cục bộ trên laptop 16GB RAM, không cần GPU, không cần hạ tầng cloud ngoài API LLM. \\
+NFR2 & Độ trễ do các guard gây ra phải ở mức hợp lý cho một bản demo tương tác -- \textit{chưa đặt mục tiêu số liệu cụ thể vì chưa có đo lường thực tế}. \\
+NFR3 & Mọi quyết định của guard phải được log dưới dạng có cấu trúc, đủ để tái dựng lý do allow/flag/block cho từng request. \\
+NFR4 & Không dùng PII, secret, hay tài liệu tổ chức thật ở bất kỳ đâu trong hệ thống, kể cả log và dữ liệu kiểm thử. \\
+NFR5 & Các lần chạy đánh giá phải tái lập được từ mã nguồn/cấu hình/dữ liệu đã lưu trong kho mã nguồn. \\
+NFR6 & Không gọi API trả phí khi chưa được phê duyệt; ưu tiên chế độ dry-run/mock khi phát triển guard. \\
+NFR7 & Ưu tiên heuristic/rule-based đơn giản, dễ giải thích hơn là hạ tầng ML nặng, phù hợp năng lực 2 sinh viên. \\
+NFR8 & MVP chạy dưới dạng một tiến trình đơn hoặc Docker Compose đơn giản -- \textbf{không dùng Kubernetes, không tích hợp SIEM}. \\
+NFR9 & Mỗi giai đoạn phải có tài liệu/bằng chứng đủ cho các mốc báo cáo định kỳ. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Kiến trúc tổng thể}
+
+Kiến trúc mục tiêu của MVP là một \textbf{LLM Security Gateway / Guardrail Proxy} đặt trước một ứng dụng RAG minh họa, gồm 9 thành phần (module) như mô tả trong Bảng~\ref{tab:module-table}. Luồng xử lý tổng quát: người dùng gửi truy vấn qua Demo UI/API $\rightarrow$ Gateway $\rightarrow$ Input Guard $\rightarrow$ RAG Guard (truy hồi + rà soát tài liệu) $\rightarrow$ gọi LLM Provider $\rightarrow$ Output Guard $\rightarrow$ trả kết quả về người dùng; mọi bước đều ghi log vào Logging/Evaluation. (Sơ đồ Mermaid chi tiết của luồng này hiện có tại \texttt{docs/diagrams/architecture.md} và \texttt{docs/diagrams/data-flow.md} của kho mã nguồn dự án; sơ đồ hình ảnh sẽ được xuất và chèn vào báo cáo ở lần cập nhật kế tiếp, xem Phụ lục.)
+
+\begin{table}[H]
+\centering
+\caption{Bảng phân chia trách nhiệm module}
+\label{tab:module-table}
+\begin{tabular}{@{}p{0.22\linewidth}p{0.5\linewidth}p{0.18\linewidth}@{}}
+\toprule
+\textbf{Module} & \textbf{Trách nhiệm} & \textbf{Giai đoạn dự kiến} \\
+\midrule
+Demo UI/API & Giao diện/endpoint mỏng dùng để thao tác thử gateway & Phase 3 \\
+Security Gateway & Điều phối chuỗi Input Guard $\to$ RAG Guard $\to$ gọi LLM $\to$ Output Guard & Phase 3 \\
+Config/Settings & Quản lý cấu hình qua biến môi trường, không chứa secret & Phase 3 \\
+Input Guard & Phát hiện prompt injection/jailbreak trực tiếp & Phase 4 \\
+RAG Guard & Rà soát/làm sạch tài liệu truy hồi & Phase 5 \\
+Vector Store & Lưu trữ kho tri thức RAG tổng hợp & Phase 5 \\
+LLM Provider Adapter & Cô lập logic gọi API của nhà cung cấp LLM & Phase 3/5 \\
+Output Guard & Rà soát đầu ra để chặn rò rỉ thông tin & Phase 6 \\
+Logging/Evaluation & Ghi log JSONL + công cụ đánh giá & Phase 3/7 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Phạm vi MVP so với hướng mở rộng cho đồ án/luận văn tương lai}
+
+Bảng~\ref{tab:mvp-vs-future} phân định rõ ràng những gì thuộc phạm vi MVP thực tập và những gì \textbf{chỉ là hướng mở rộng tương lai}, để tránh mở rộng phạm vi ngoài kế hoạch.
+
+\begin{table}[H]
+\centering
+\caption{Phạm vi MVP so với hướng mở rộng tương lai}
+\label{tab:mvp-vs-future}
+\begin{tabular}{@{}p{0.2\linewidth}p{0.38\linewidth}p{0.32\linewidth}@{}}
+\toprule
+\textbf{Hạng mục} & \textbf{Phạm vi MVP (đồ án thực tập)} & \textbf{Hướng mở rộng tương lai} \\
+\midrule
+Triển khai & Tiến trình đơn cục bộ, có thể dùng Docker Compose đơn giản & Kubernetes, autoscaling, triển khai đa máy chủ \\
+Giám sát & Log JSONL có cấu trúc, tùy chọn SQLite để truy vấn cục bộ & Tích hợp SIEM (Splunk/ELK/Sentinel), pipeline cảnh báo \\
+Phương pháp phát hiện & Heuristic/rule-based; LLM-as-judge tùy chọn nếu được phê duyệt & Huấn luyện/fine-tune mô hình phát hiện cục bộ \\
+Truy cập LLM & Một nhà cung cấp LLM qua API & Định tuyến đa nhà cung cấp; mô hình cục bộ qua Ollama (tùy chọn) \\
+Bề mặt agent & Không có tool-use/agent tự động & Bảo mật cho hệ đa agent, tool-use tự động \\
+Đảm bảo/tuân thủ & Checklist tự định nghĩa, lấy cảm hứng từ OWASP LLMSVS & Theo đuổi một mức đảm bảo LLMSVS chính thức \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Threat model theo mô hình STRIDE}
+
+Nhóm đã xây dựng threat model theo mô hình STRIDE cho gateway và pipeline RAG (Bảng~\ref{tab:stride}), với mức đánh giá rủi ro \textbf{định tính} (Cao/Trung bình/Thấp) dựa trên nhận định của nhóm, \textbf{chưa dựa trên số liệu đo thực tế}.
+
+\begin{table}[H]
+\centering
+\caption{Threat model STRIDE cho gateway và pipeline RAG}
+\label{tab:stride}
+\begin{tabular}{@{}p{0.12\linewidth}p{0.42\linewidth}p{0.22\linewidth}p{0.12\linewidth}@{}}
+\toprule
+\textbf{STRIDE} & \textbf{Rủi ro cụ thể} & \textbf{Module liên quan} & \textbf{Mức rủi ro} \\
+\midrule
+Spoofing & Giả mạo nguồn tài liệu để chèn nội dung độc hại vào kho RAG & RAG Guard / nạp dữ liệu & Trung bình \\
+Tampering & Indirect prompt injection qua tài liệu truy hồi & RAG Guard & Cao \\
+Tampering & Đầu độc tài liệu RAG để thao túng câu trả lời & RAG Guard / nạp dữ liệu & Cao \\
+Repudiation & Không có log lý do allow/flag/block, khó truy vết & Logging/Evaluation & Thấp (dễ giảm thiểu) \\
+Information Disclosure & Rò rỉ system prompt/secret/dữ liệu riêng tư qua output & Output Guard & Cao \\
+Denial of Service & Prompt gây tốn tài nguyên & Security Gateway & Chấp nhận rủi ro, ngoài phạm vi MVP \\
+Elevation of Privilege & Prompt injection/jailbreak trực tiếp ghi đè chỉ dẫn hệ thống & Input Guard & Cao \\
+Elevation of Privilege & Chỉ dẫn chèn qua tài liệu khiến LLM vượt phạm vi dự kiến & RAG Guard + Output Guard & Cao \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Ngoài phạm vi MVP (không mô hình hóa chi tiết): tấn công hạ tầng nhà cung cấp LLM, tấn công chuỗi cung ứng phụ thuộc, và leo thang đặc quyền qua đa agent/tool-use (do MVP không có bề mặt agent).
+
+\subsection{Các nhóm rủi ro chỉ liên quan tới hướng mở rộng tương lai}
+
+Nếu về sau nhóm/đồ án mở rộng sang Kubernetes, SIEM, hoặc pipeline fine-tune cục bộ, các rủi ro tương ứng (container escape, cấu hình RBAC sai, giả mạo log gửi tới SIEM, đầu độc dữ liệu huấn luyện) sẽ cần được mô hình hóa riêng -- \textbf{hiện tại chỉ được ghi nhận, chưa mô hình hóa}, vì các hạ tầng đó không thuộc kiến trúc MVP.
+
+\section{Rủi ro và giải pháp giảm thiểu ở mức kiến trúc}
+
+Bảng~\ref{tab:risks} tóm tắt các rủi ro triển khai (khác với rủi ro bảo mật STRIDE ở trên) và hướng giảm thiểu dự kiến.
+
+\begin{table}[H]
+\centering
+\caption{Rủi ro kiến trúc và giải pháp giảm thiểu}
+\label{tab:risks}
+\begin{tabular}{@{}p{0.35\linewidth}p{0.15\linewidth}p{0.42\linewidth}@{}}
+\toprule
+\textbf{Rủi ro} & \textbf{Mức ảnh hưởng} & \textbf{Giải pháp giảm thiểu} \\
+\midrule
+Gateway là điểm lỗi duy nhất & Trung bình & Chấp nhận với quy mô demo lab-scale, không giải quyết bằng HA trong MVP \\
+Guard vừa bỏ sót vừa chặn nhầm & Cao & Đo bằng bộ đánh giá Phase 7, chưa đặt mục tiêu số liệu \\
+Laptop 16GB RAM không đủ nếu chọn embedding model nặng & Trung bình & Giữ kho tri thức nhỏ, tổng hợp; ưu tiên embedding qua API nếu cần \\
+Mở rộng phạm vi sang Kubernetes/SIEM/fine-tune ngoài kế hoạch & Trung bình & Có bảng phạm vi tường minh (Bảng~\ref{tab:mvp-vs-future}) + quy tắc agent chặn scope creep \\
+Độ trễ do 3 guard tuần tự & Thấp--Trung bình & Ưu tiên heuristic nhẹ; chỉ dùng LLM-as-judge khi được phê duyệt \\
+\bottomrule
+\end{tabular}
+\end{table}

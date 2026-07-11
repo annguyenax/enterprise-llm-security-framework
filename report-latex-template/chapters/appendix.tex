@@ -1,0 +1,44 @@
+\chapter{Quy ước đặt mã (ID) cho test case red-team}
+\label{ap:id-convention}
+% \chapter (có số/chữ) thường tự gọi \markboth qua book.cls, nhưng đặt tường minh
+% thêm ở đây để chắc chắn đúng ngay cả khi titlesec can thiệp vào cơ chế đánh dấu
+% (xem docs/report/report-compliance-audit.md mục C12).
+\markboth{PHỤ LỤC \Alph{chapter}. QUY ƯỚC ĐẶT MÃ (ID) CHO TEST CASE RED-TEAM}{}
+
+Khi các file dữ liệu kiểm thử thật được tạo ở giai đoạn tiếp theo (chưa thực hiện ở báo cáo này), quy ước đặt mã sau sẽ được áp dụng để đảm bảo truy vết được giữa tài liệu thiết kế, file dữ liệu, và báo cáo đánh giá:
+
+\begin{quote}
+\texttt{RT-<NHÓM>-<NNN>}, trong đó \texttt{<NHÓM>} $\in$ \{\texttt{CLEAN}, \texttt{POISON}, \texttt{INJ-DIRECT}, \texttt{INJ-ROLE}, \texttt{INJ-HIER}, \texttt{INJ-JAILBREAK}, \texttt{INJ-EXTRACT}, \texttt{INJ-RAGCTX}, \texttt{INJ-TOOL}\}, và \texttt{<NNN>} là số thứ tự 3 chữ số.
+\end{quote}
+
+\chapter{Danh sách nguồn tham khảo cần đọc toàn văn}
+\label{ap:pending-review}
+\markboth{PHỤ LỤC \Alph{chapter}. DANH SÁCH NGUỒN THAM KHẢO CẦN ĐỌC TOÀN VĂN}{}
+
+Các nguồn sau đã được xác minh \textbf{tồn tại} qua tra cứu trực tuyến (đúng tác giả, năm xuất bản, đường dẫn) nhưng \textbf{chưa được thành viên nào trong nhóm đọc toàn văn}. Đây là danh sách công khai, minh bạch về mức độ xác minh, tránh gây hiểu nhầm rằng các trích dẫn đã được thẩm định đầy đủ:
+
+\begin{itemize}
+    \item \cite{zou2024poisonedrag} -- PoisonedRAG (arXiv:2402.07867)
+    \item \cite{wang2026pidpattack} -- PIDP-Attack (arXiv:2603.25164, preprint tháng 3/2026, chưa qua bình duyệt)
+    \item \cite{gulyamov2026review} -- Bài tổng quan trên tạp chí \textit{Information} (MDPI), Volume 17, Article 54 (2026)
+\end{itemize}
+
+\chapter{Ghi chú về môi trường biên dịch báo cáo}
+\label{ap:build-notes}
+\markboth{PHỤ LỤC \Alph{chapter}. GHI CHÚ VỀ MÔI TRƯỜNG BIÊN DỊCH BÁO CÁO}{}
+
+Tại thời điểm chuẩn bị báo cáo này, môi trường làm việc của nhóm \textbf{chưa cài đặt sẵn bộ công cụ TeX} (MiKTeX/TeX Live) nên chưa biên dịch thử \texttt{main.tex} thành PDF để kiểm tra trực quan (font chữ, dấu tiếng Việt, ngắt trang). Việc biên dịch thử cần được thực hiện thủ công trước khi nộp báo cáo -- xem hướng dẫn biên dịch tại \texttt{docs/report/template-compliance-checklist.md} và \texttt{docs/report/report-compliance-fix-summary.md} của kho mã nguồn dự án.
+
+\textbf{Ghi chú về Danh mục hình:} tại thời điểm này, \textbf{Danh mục hình (\texttt{\textbackslash listoffigures}) sẽ hiển thị rỗng} vì báo cáo chưa chèn hình ảnh nào -- các sơ đồ kiến trúc, threat model và luồng dữ liệu hiện chỉ được trình bày dưới dạng bảng/văn bản (xem \texttt{docs/diagrams/*.md} của kho mã nguồn dự án, viết bằng Mermaid). Đây là \textbf{TODO cho một phiên làm việc sau}: xuất các sơ đồ Mermaid thành ảnh (PNG/PDF) và chèn vào Chương 2 kèm \texttt{\textbackslash caption} và ghi chú nguồn, theo đúng yêu cầu mục 1.8 của \texttt{docs/report/report-compliance-audit.md}. Không có hình ảnh giả/dựng sẵn nào được thêm vào báo cáo để "lấp chỗ trống" cho danh mục này.
+
+\chapter{Cấu hình hệ thống dùng khi đánh giá}
+\label{ap:eval-config}
+\markboth{PHỤ LỤC \Alph{chapter}. CẤU HÌNH HỆ THỐNG DÙNG KHI ĐÁNH GIÁ}{}
+
+\textit{Chưa có -- sẽ được bổ sung khi Phase 7 (đánh giá) được thực hiện thật.}
+
+\chapter{Log/kết quả chạy thử}
+\label{ap:eval-results}
+\markboth{PHỤ LỤC \Alph{chapter}. LOG/KẾT QUẢ CHẠY THỬ}{}
+
+\textit{Chưa có -- sẽ được bổ sung khi có kết quả chạy đánh giá thực tế, kèm phiên bản bộ dữ liệu và ngày chạy cụ thể.}

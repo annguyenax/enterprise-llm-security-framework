@@ -1,0 +1,106 @@
+\input{styles/settings}
+\begin{document}
+
+% ==========================================================================
+% Thứ tự các phần dưới đây bám theo cấu trúc bắt buộc của Báo cáo định kỳ
+% Thực tập tốt nghiệp Đại học (xem docs/report/template-compliance-checklist.md).
+% Lưu ý: "Lời cam đoan" (pages/declaration.tex) KHÔNG nằm trong cấu trúc bắt buộc
+% của báo cáo định kỳ nên không được \input ở đây; file vẫn được giữ lại và cập
+% nhật nội dung để tái sử dụng cho quyển Đồ án tốt nghiệp đầy đủ sau này.
+% ==========================================================================
+
+% --- 1. Bìa ngoài ---
+\coverpage
+
+% --- 2. Bìa đệm ---
+\innercoverpage
+
+% --- 3. Phiếu giao đề cương TTTN được phê duyệt ---
+\input{pages/approved-proposal-placeholder}
+
+% Từ đây bắt đầu đánh số La Mã (i, ii, iii...) cho tới hết "Kế hoạch thực hiện
+% công việc nhóm", theo đúng quy định đánh số trang.
+\frontmatter
+
+% --- 4. Mục lục ---
+\cleardoublepage
+\begin{spacing}{1.15}
+\tableofcontents
+\end{spacing}
+
+% --- 5. Lời cảm ơn ---
+\input{pages/acknowledgments}
+
+% --- 6. Danh mục ký hiệu và chữ viết tắt ---
+% LƯU Ý XUNG ĐỘT NGUỒN: mục "I. BỐ CỤC" của văn bản gốc PTIT liệt kê Danh mục ký
+% hiệu TRƯỚC Danh mục bảng/hình (thứ tự áp dụng ở đây), nhưng ghi chú riêng ở
+% trang mẫu "KÝ HIỆU CÁC CỤM TỪ VIẾT TẮT" trong cùng văn bản lại ghi "được xếp
+% SAU trang Danh mục Các bảng, sơ đồ, hình" -- tức ngược lại. Theo chỉ thị ưu
+% tiên mục "BỐ CỤC" khi có mâu thuẫn, thứ tự Danh mục ký hiệu TRƯỚC Danh mục
+% bảng/hình được giữ nguyên. Xem docs/report/report-compliance-audit.md mục C02.
+\input{pages/abbreviations}
+
+% --- 7. Danh mục bảng ---
+\cleardoublepage
+\begingroup
+\singlespacing
+\listoftables
+\endgroup
+
+% --- 8. Danh mục hình ---
+\cleardoublepage
+\begingroup
+\singlespacing
+\listoffigures
+\endgroup
+
+% --- 9. Kế hoạch thực hiện công việc nhóm ---
+\input{pages/group-work-plan}
+
+% Từ đây bắt đầu đánh số Ả Rập (1, 2, 3...) cho tới hết Phụ lục.
+\mainmatter
+
+% --- 10. Mở đầu ---
+\input{chapters/chap-0.phan-mo-dau}
+
+% --- 11. Chương 1: Tổng quan và quá trình tìm hiểu ---
+\input{chapters/chap-1-background}
+
+% --- 12. Chương 2: Phân tích yêu cầu, kiến trúc và threat model ---
+\input{chapters/chap-2-method}
+
+% --- 13. Chương 3: Đề cương chi tiết công việc thực hiện ---
+\input{chapters/chap-3}
+
+% --- 14. Chương 4: Kế hoạch kiểm thử, đánh giá và hướng triển khai ---
+\input{chapters/chap4}
+
+% --- 15. Kết luận, kiến nghị ---
+\input{chapters/conclusion}
+
+% --- 16. Tài liệu tham khảo ---
+% LƯU Ý XUNG ĐỘT NGUỒN: mục "I. BỐ CỤC" của văn bản gốc PTIT liệt kê Tài liệu
+% tham khảo TRƯỚC Phụ lục (thứ tự áp dụng ở đây), nhưng mục II.5 (ghi chú cách
+% trình bày Tài liệu tham khảo) và chính bản mục lục mẫu đính kèm trong văn bản
+% gốc lại thể hiện Phụ lục (trang 121) TRƯỚC Tài liệu tham khảo (trang 130) --
+% tức ngược lại. Theo chỉ thị ưu tiên mục "BỐ CỤC" khi có mâu thuẫn, thứ tự Tài
+% liệu tham khảo TRƯỚC Phụ lục được giữ nguyên ở đây. Nếu GVHD/Khoa xác nhận
+% thứ tự khác, chỉ cần đảo vị trí 2 khối lệnh "Tài liệu tham khảo" và "Phụ lục"
+% bên dưới. Xem docs/report/report-compliance-audit.md mục C01.
+\cleardoublepage
+\phantomsection
+\addcontentsline{toc}{chapter}{Tài liệu tham khảo}
+\bibliographystyle{plain}
+\bibliography{refs}
+
+% --- 17. Phụ lục (nếu có) ---
+\appendix
+% Đổi tiền tố tiêu đề chương thành "Phụ lục X" thay vì "Chương X" cho phần này
+% (mặc định của titlesec trong styles/settings.tex chỉ có tiền tố "Chương").
+\titleformat{name=\chapter}[block]
+  {\normalfont\fontsize{14pt}{20pt}\bfseries\centering}
+  {Phụ lục \thechapter.}{1em}{\MakeUppercase}
+\renewcommand{\cftchappresnum}{Phụ lục }
+\input{chapters/appendix}
+
+\end{document}

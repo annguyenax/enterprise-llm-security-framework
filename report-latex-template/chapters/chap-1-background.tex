@@ -1,0 +1,87 @@
+\chapter{Tổng quan và quá trình tìm hiểu}
+\label{ch:tong-quan}
+
+\section{Tổng quan về LLM và ứng dụng RAG trong doanh nghiệp}
+
+Mô hình ngôn ngữ lớn (LLM) ngày càng được triển khai trong các quy trình nghiệp vụ doanh nghiệp, đặc biệt thông qua kiến trúc RAG: thay vì chỉ dựa vào tri thức đã học sẵn, hệ thống truy hồi các tài liệu nội bộ liên quan rồi đưa vào ngữ cảnh (context) của LLM trước khi sinh câu trả lời. Cách tiếp cận này giúp câu trả lời bám sát dữ liệu doanh nghiệp hơn, nhưng đồng thời mở rộng bề mặt tấn công: bất kỳ tài liệu nào lọt được vào kho tri thức truy hồi cũng có khả năng ảnh hưởng tới hành vi của LLM khi được truy hồi và đưa vào ngữ cảnh.
+
+\section{Các dạng tấn công đặc thù}
+
+Nhóm đã tìm hiểu 5 nhóm rủi ro chính, tương ứng đúng với phạm vi đề tài đã xác định:
+
+\begin{itemize}
+    \item \textbf{Prompt injection (chèn lệnh trực tiếp):} người dùng cố tình chèn nội dung nhằm ghi đè chỉ dẫn hệ thống (system prompt).
+    \item \textbf{Indirect prompt injection (chèn lệnh gián tiếp):} chỉ dẫn độc hại được giấu trong tài liệu/nội dung được truy hồi, không đến trực tiếp từ người dùng.
+    \item \textbf{Jailbreak:} các kỹ thuật (đóng vai, mã hóa, câu đố logic...) nhằm vượt qua ràng buộc an toàn vốn có của mô hình.
+    \item \textbf{Rò rỉ thông tin nhạy cảm:} mô hình để lộ system prompt, secret, hoặc dữ liệu riêng tư có trong ngữ cảnh.
+    \item \textbf{Đầu độc tài liệu RAG (RAG document poisoning):} chèn tài liệu độc hại/gây hiểu lầm vào kho tri thức để thao túng câu trả lời về sau.
+\end{itemize}
+
+\section{OWASP Top 10 for LLM Applications}
+
+Nhóm đã khảo sát khung phân loại rủi ro \textit{OWASP Top 10 for LLM Applications} \cite{owasp_llm_top10} để làm cơ sở ánh xạ các mối đe dọa của đề tài. Bảng~\ref{tab:owasp-mapping} tóm tắt việc ánh xạ này (chi tiết đầy đủ tại \texttt{docs/research/owasp-llm-top10-mapping.md} của kho mã nguồn dự án).
+
+\begin{table}[H]
+\centering
+\caption{Ánh xạ phạm vi đề tài với OWASP Top 10 for LLM Applications}
+\label{tab:owasp-mapping}
+\begin{tabular}{@{}p{0.32\linewidth}p{0.13\linewidth}p{0.45\linewidth}@{}}
+\toprule
+\textbf{Danh mục OWASP} & \textbf{Trong phạm vi?} & \textbf{Ghi chú} \\
+\midrule
+Prompt Injection & Có & Trọng tâm chính -- Input Guard + RAG Guard \\
+Insecure Output Handling & Một phần & Output Guard bao phủ phần rò rỉ; xử lý output khác (thực thi mã) ngoài phạm vi \\
+Training Data Poisoning & Không (đổi hướng) & Đề tài nhắm tới đầu độc tài liệu RAG, không phải dữ liệu huấn luyện mô hình \\
+Model Denial of Service & Không & Ngoài phạm vi MVP \\
+Supply Chain Vulnerabilities & Không & Ngoài phạm vi MVP \\
+Sensitive Information Disclosure & Có & Trọng tâm của Output Guard \\
+Insecure Plugin Design & Không & MVP không có tool/plugin \\
+Excessive Agency & Không & MVP không có agent/tool-use tự động \\
+Overreliance & Một phần & Chỉ bàn trong phần hạn chế của báo cáo \\
+Model Theft & Không & Ngoài phạm vi \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{OWASP LLM Security Verification Standard (LLMSVS)}
+
+Nhóm cũng đã khảo sát \textit{OWASP Large Language Model Security Verification Standard} \cite{owasp_llmsvs} như một tài liệu tham chiếu (không phải chuẩn tuân thủ đầy đủ) để xây dựng một checklist kỹ thuật nội bộ, quy mô nhỏ, dùng để tự kiểm tra các guard trước khi đánh giá (chi tiết tại \texttt{docs/research/llmsvs-checklist.md}). Checklist này \textbf{không} phải là bằng chứng tuân thủ LLMSVS đầy đủ mà chỉ lấy cảm hứng từ các mục liên quan tới kiến trúc và vận hành mô hình.
+
+\section{Khảo sát công trình liên quan}
+
+Nhóm đã khảo sát 3 nguồn học thuật liên quan trực tiếp tới đầu độc RAG và prompt injection kết hợp, được xác minh tồn tại qua tra cứu trực tuyến trước khi trích dẫn:
+
+\begin{itemize}
+    \item \textbf{PoisonedRAG} \cite{zou2024poisonedrag} -- đề xuất tấn công chèn một số lượng nhỏ văn bản độc hại vào kho tri thức RAG để thao túng câu trả lời của LLM.
+    \item \textbf{PIDP-Attack} \cite{wang2026pidpattack} -- đề xuất tấn công kết hợp: đầu độc một số văn bản trong kho truy hồi cùng lúc với chèn hậu tố độc hại vào truy vấn người dùng, cho thấy phòng thủ một lớp là chưa đủ.
+    \item Một bài tổng quan trên tạp chí \textit{Information} (MDPI) \cite{gulyamov2026review} về các dạng tấn công prompt injection trên LLM và hệ agent AI.
+\end{itemize}
+
+\textbf{Lưu ý về mức độ xác minh:} nhóm mới xác minh các nguồn này thực sự tồn tại và đối chiếu đúng thông tin tác giả/năm xuất bản (qua tra cứu trực tuyến), \textbf{chưa đọc toàn văn từng bài}. Việc đọc toàn văn và đánh giá chi tiết được lên kế hoạch cho giai đoạn tìm hiểu tiếp theo, trước khi các số liệu trong các bài này (nếu có) được trích dẫn cụ thể hơn trong báo cáo cuối kỳ.
+
+\section{So sánh công cụ và framework hiện có}
+
+Nhóm đã khảo sát sơ bộ 5 công cụ guardrail/red-teaming mã nguồn mở và thương mại liên quan tới bảo mật LLM (Bảng~\ref{tab:tool-comparison}), nhằm tham khảo cách tiếp cận trước khi tự thiết kế các guard của riêng nhóm.
+
+\begin{table}[H]
+\centering
+\caption{Công cụ guardrail/red-teaming đã khảo sát}
+\label{tab:tool-comparison}
+\begin{tabular}{@{}p{0.22\linewidth}p{0.24\linewidth}p{0.44\linewidth}@{}}
+\toprule
+\textbf{Công cụ} & \textbf{Loại} & \textbf{Mô tả ngắn} \\
+\midrule
+NVIDIA NeMo Guardrails & Framework mã nguồn mở & Dùng ngôn ngữ Colang để định nghĩa ràng buộc chủ đề/an toàn/hội thoại có thể lập trình \\
+Lakera Guard & Sản phẩm thương mại & Lớp bảo mật hosted, dùng nhiều classifier để phát hiện injection/rò rỉ PII \\
+deepteam & Framework red-team mã nguồn mở & Mô phỏng tấn công đối kháng đa lượt, chạy cục bộ \\
+garak & Công cụ quét lỗ hổng mã nguồn mở & Dò quét tự động các điểm yếu, rò rỉ prompt đã biết \\
+Microsoft PyRIT & Framework tự động hóa mã nguồn mở & Xác định rủi ro bảo mật/quyền riêng tư ở quy mô doanh nghiệp \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Cả 5 công cụ trên mới dừng ở mức khảo sát tài liệu, \textbf{chưa được cài đặt hay chạy thử} trong dự án này.
+
+\section{Tóm tắt quá trình tìm hiểu}
+
+Quá trình tìm hiểu của nhóm gồm: (1) tìm hiểu tổng quan các dạng tấn công LLM/RAG; (2) khảo sát hướng tiếp cận kỹ thuật -- dùng LLM Security Gateway/Guardrail Proxy thay vì huấn luyện mô hình; (3) xác định ràng buộc kỹ thuật ban đầu (dùng LLM qua API, dữ liệu tổng hợp, không dùng PII/secret thật); (4) khảo sát khung OWASP và các công cụ hiện có nêu trên. Một phần tài liệu nghiên cứu ban đầu được tổng hợp với sự hỗ trợ của công cụ AI (Gemini), sau đó \textbf{toàn bộ trích dẫn đều được nhóm xác minh chéo qua tra cứu trực tuyến thực tế} trước khi đưa vào tài liệu chính thức của dự án, nhằm tránh trích dẫn sai hoặc bịa đặt.

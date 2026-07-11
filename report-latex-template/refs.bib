@@ -1,0 +1,54 @@
+% Tài liệu tham khảo cho báo cáo định kỳ TTTN.
+%
+% Quy tắc (xem AGENT_RULES.md mục 2):
+% - Chỉ thêm entry cho nguồn đã được xác minh tồn tại (qua tra cứu trực tuyến,
+%   xem docs/research/related-work.md, owasp-llm-top10-mapping.md,
+%   llmsvs-checklist.md).
+% - "Đã xác minh tồn tại" KHÔNG đồng nghĩa với "đã đọc toàn văn" -- 3 entry học
+%   thuật bên dưới vẫn cần một thành viên trong nhóm đọc toàn văn trước khi các
+%   số liệu cụ thể trong đó được trích dẫn chi tiết hơn trong báo cáo cuối kỳ
+%   (xem Phụ lục B của báo cáo, chapters/appendix.tex, mục ap:pending-review).
+% - Không bịa tác giả/tiêu đề/năm/URL.
+
+@misc{owasp_llm_top10,
+  title        = {OWASP Top 10 for Large Language Model Applications},
+  author       = {{OWASP Foundation}},
+  year         = {2025},
+  howpublished = {\url{https://owasp.org/www-project-top-10-for-large-language-model-applications/}},
+  note         = {Đã xác minh tồn tại qua tra cứu trực tuyến 2026-07-11; cần xác nhận đúng phiên bản/năm cụ thể trước khi dùng số liệu chi tiết}
+}
+
+@misc{owasp_llmsvs,
+  title        = {OWASP Large Language Model Security Verification Standard (LLMSVS)},
+  author       = {{OWASP Foundation}},
+  year         = {2024},
+  howpublished = {\url{https://owasp.org/www-project-llm-verification-standard/}},
+  note         = {Phiên bản ổn định mới nhất xác minh được: v0.1 (02/2024); đã xác minh tồn tại qua tra cứu trực tuyến 2026-07-11}
+}
+
+@article{zou2024poisonedrag,
+  title   = {PoisonedRAG: Knowledge Corruption Attacks to Retrieval-Augmented Generation of Large Language Models},
+  author  = {Zou, Wei and Geng, Runpeng and Wang, Binghui and Jia, Jinyuan},
+  journal = {arXiv preprint arXiv:2402.07867},
+  year    = {2024},
+  note    = {Đã xác minh tồn tại qua tra cứu trực tuyến 2026-07-11 (tác giả đầu đúng là Zou, W. -- bản nháp nghiên cứu ban đầu ghi nhầm là Zou, Y.); nhóm chưa đọc toàn văn}
+}
+
+@article{wang2026pidpattack,
+  title   = {PIDP-Attack: Combining Prompt Injection with Database Poisoning Attacks on Retrieval-Augmented Generation Systems},
+  author  = {Wang, Haozhen and Liu, Haoyue and Zhu, Jionghao and Wang, Zhichao and Guo, Yongxin and Tang, Xiaoying},
+  journal = {arXiv preprint arXiv:2603.25164},
+  year    = {2026},
+  note    = {Preprint (nộp 03/2026), chưa qua bình duyệt; đã xác minh tồn tại qua tra cứu trực tuyến 2026-07-11; nhóm chưa đọc toàn văn}
+}
+
+@article{gulyamov2026review,
+  title   = {Prompt Injection Attacks in Large Language Models and AI Agent Systems: A Comprehensive Review of Vulnerabilities, Attack Vectors, and Defense Mechanisms},
+  author  = {Gulyamov and Rodionov and Khursanov and Mekhmonov and Babaev and Rakhimjonov},
+  journal = {Information (MDPI, ISSN 2078-2489)},
+  volume  = {17},
+  number  = {1},
+  pages   = {54},
+  year    = {2026},
+  note    = {Bản nháp nghiên cứu ban đầu ghi nhầm năm 2025 -- đã xác minh đúng là 2026 (Volume 17) qua tra cứu trực tuyến 2026-07-11; nhóm chưa đọc toàn văn}
+}

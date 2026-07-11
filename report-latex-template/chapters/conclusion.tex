@@ -1,0 +1,30 @@
+\chapter*{Kết luận, kiến nghị}
+\addcontentsline{toc}{chapter}{Kết luận, kiến nghị}
+% \chapter* không tự gọi \markboth -- set thủ công để Header phải hiển thị đúng
+% (xem docs/report/report-compliance-audit.md mục C12).
+\markboth{KẾT LUẬN, KIẾN NGHỊ}{}
+
+\section*{Tổng kết những nội dung đã hoàn thành}
+
+Trong giai đoạn thực tập tính đến báo cáo định kỳ này, nhóm đã hoàn thành ở mức \textbf{tài liệu thiết kế} (chưa có mã nguồn ứng dụng):
+
+\begin{itemize}
+    \item Khởi tạo cấu trúc dự án, kế hoạch thực hiện, và quy tắc làm việc rõ ràng (không mở rộng phạm vi tùy tiện, không bịa số liệu/trích dẫn, không dùng dữ liệu thật).
+    \item Tìm hiểu và khảo sát các dạng tấn công LLM/RAG, khung OWASP Top 10 for LLM Applications và OWASP LLMSVS, cùng 5 công cụ guardrail/red-teaming hiện có và 3 nguồn học thuật liên quan (đã xác minh tồn tại, chưa đọc toàn văn).
+    \item Xây dựng đầy đủ yêu cầu chức năng/phi chức năng, kiến trúc gateway, bảng phân chia trách nhiệm module, và threat model theo mô hình STRIDE.
+    \item Phân định rõ ràng phạm vi MVP so với hướng mở rộng tương lai (Kubernetes, SIEM, fine-tune mô hình cục bộ \textbf{không} thuộc phạm vi MVP).
+    \item Thiết kế bộ dữ liệu kiểm thử red-team tổng hợp (tài liệu sạch, tài liệu nhiễm độc, prompt injection) và định nghĩa 6 metric đánh giá kèm phương pháp so sánh baseline/có-guard.
+\end{itemize}
+
+\section*{Hạn chế hiện tại}
+
+\begin{itemize}
+    \item Chưa có mã nguồn ứng dụng nào được hiện thực -- toàn bộ nội dung trên là thiết kế, chưa được kiểm chứng bằng thực nghiệm.
+    \item Chưa có bất kỳ số liệu ASR, FPR, FNR, hay độ trễ nào được đo -- mọi số liệu trong các báo cáo sau phải đến từ một lần chạy thật.
+    \item Một số quyết định thiết kế (ví dụ lựa chọn framework RAG, vector store, nhà cung cấp LLM, ranh giới Sanitize/Log-only) vẫn còn để ngỏ, chờ ADR ở giai đoạn tiếp theo.
+    \item Các trích dẫn học thuật mới dừng ở mức xác minh tồn tại, chưa được nhóm đọc toàn văn.
+\end{itemize}
+
+\section*{Kiến nghị}
+
+Nhóm kiến nghị tiếp tục triển khai đúng theo lộ trình Phase 3--9 đã trình bày ở Chương 4, ưu tiên hoàn thiện khung Gateway và Input Guard trước để có thể chạy thử nghiệm sớm với bộ dữ liệu tổng hợp đã thiết kế, làm cơ sở cho các báo cáo định kỳ tiếp theo có số liệu thực nghiệm cụ thể thay vì chỉ có kế hoạch.

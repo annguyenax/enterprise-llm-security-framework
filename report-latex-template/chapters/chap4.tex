@@ -1,0 +1,58 @@
+\chapter{Kế hoạch kiểm thử, đánh giá và hướng triển khai}
+\label{ch:ke-hoach-kiem-thu}
+
+\textit{Toàn bộ nội dung chương này là \textbf{kế hoạch dự kiến}. Chưa có gateway, guard, hay bộ chạy đánh giá nào được hiện thực; không có số liệu ASR/FPR/FNR/độ trễ nào được đo tại thời điểm báo cáo này (chi tiết đầy đủ tại \texttt{docs/evaluation/} của kho mã nguồn dự án).}
+
+\section{Phương pháp đánh giá dự kiến}
+
+Nhóm dự kiến đánh giá theo phương pháp so sánh \textbf{baseline (không có guard) và có guard} trên cùng bộ dữ liệu kiểm thử tổng hợp đã thiết kế ở Chương 3:
+
+\begin{enumerate}
+    \item \textbf{Chạy baseline:} gửi toàn bộ test case qua gateway với các guard bị tắt, ghi nhận hành vi LLM thô và thời gian phản hồi -- làm mốc tham chiếu.
+    \item \textbf{Chạy có guard:} gửi cùng bộ test case với các guard được bật, ghi nhận quyết định của từng guard, kết quả cuối cùng, và thời gian phản hồi.
+    \item \textbf{So sánh:} tính các metric ở mục~\ref{sec:metrics} cho lần chạy có guard, và tính độ trễ tăng thêm so với baseline.
+    \item \textbf{Phân tích theo từng nhóm test case} (tài liệu sạch, từng loại tài liệu nhiễm độc, từng loại prompt injection), không chỉ báo cáo một con số gộp duy nhất.
+\end{enumerate}
+
+\section{Định nghĩa các metric đánh giá}
+\label{sec:metrics}
+
+Bảng~\ref{tab:metrics} liệt kê 6 metric đã được nhóm định nghĩa chính xác kèm công thức (chi tiết tại \texttt{docs/evaluation/metrics-definition.md}). \textbf{Đây là định nghĩa/công thức, không phải kết quả đo.}
+
+\begin{table}[H]
+\centering
+\caption{Định nghĩa các metric đánh giá}
+\label{tab:metrics}
+\begin{tabular}{@{}p{0.24\linewidth}p{0.76\linewidth}@{}}
+\toprule
+\textbf{Metric} & \textbf{Định nghĩa / công thức} \\
+\midrule
+Attack Success Rate (ASR) & Tỉ lệ test case tấn công mà hiệu ứng gây hại thực sự xuất hiện ở đầu ra cuối cùng, bất kể guard nào đã can thiệp: $\text{ASR} = \dfrac{\text{số case tấn công thành công}}{\text{tổng số case tấn công}} \times 100\%$ \\
+Block Rate & Tỉ lệ test case tấn công dẫn tới kết quả \textit{Block}: $\text{Block Rate} = \dfrac{\text{số case bị Block}}{\text{tổng số case tấn công}} \times 100\%$ \\
+False Positive Rate (FPR) & Tỉ lệ test case hợp lệ (tài liệu sạch, truy vấn bình thường) bị gắn cờ nhầm: $\text{FPR} = \dfrac{\text{số case hợp lệ bị gắn cờ nhầm}}{\text{tổng số case hợp lệ}} \times 100\%$ \\
+False Negative Rate (FNR) & Tỉ lệ test case tấn công bị bỏ sót hoàn toàn (kết quả Allow dù đáng lẽ phải Block/Sanitize...): $\text{FNR} = \dfrac{\text{số case tấn công bị bỏ sót}}{\text{tổng số case tấn công}} \times 100\%$ \\
+Latency Overhead & Độ trễ tăng thêm do pipeline 3 guard so với baseline không guard: $\text{Latency Overhead} = \overline{t}_{\text{có guard}} - \overline{t}_{\text{baseline}}$ \\
+Reason Logging Completeness & Tỉ lệ quyết định của guard có bản ghi log đầy đủ (mã lý do, timestamp, request ID): $= \dfrac{\text{số quyết định có log đầy đủ}}{\text{tổng số quyết định}} \times 100\%$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Đối chiếu với Phase 1:} metric ASR ở đây tổng quát hóa "Jailbreak Success Rate (JSR)" đã ghi nhận sơ bộ ở Phase 1 -- JSR chỉ tính riêng cho nhóm jailbreak, còn ASR bao phủ toàn bộ các nhóm tấn công.
+
+\section{Ràng buộc và phạm vi ngoài đánh giá}
+
+\begin{itemize}
+    \item Chỉ dùng dữ liệu tổng hợp; không chạy đánh giá trên hệ thống/dữ liệu thật.
+    \item Không gọi API trả phí lặp lại khi chưa được phê duyệt; ưu tiên chế độ dry-run khi phát triển guard.
+    \item Không đo kiểm chịu tải/DoS -- rủi ro DoS được chấp nhận, ngoài phạm vi MVP (đã nêu ở Chương 2).
+    \item Không đánh giá kịch bản tấn công đa lượt (multi-turn) trong MVP -- bộ test hiện tại chỉ gồm các case đơn lượt.
+    \item Không đánh giá trên hạ tầng Kubernetes/SIEM/mô hình fine-tune -- các hạng mục này ngoài phạm vi MVP.
+\end{itemize}
+
+\section{Hướng triển khai tiếp theo}
+
+Sau khi báo cáo định kỳ này được xác nhận, nhóm dự kiến triển khai tuần tự theo Bảng~\ref{tab:phase-overview} (Chương 3): Phase 3 (khung Gateway) $\rightarrow$ Phase 4 (Input Guard) $\rightarrow$ Phase 5 (RAG Guard + demo RAG) $\rightarrow$ Phase 6 (Output Guard) $\rightarrow$ Phase 7 (chạy đánh giá thật theo phương pháp ở mục 4.1, dùng đúng các metric ở mục~\ref{sec:metrics}) $\rightarrow$ Phase 8--9 (tổng hợp báo cáo, hoàn thiện, demo).
+
+\section{Lưu ý quan trọng}
+
+Tại thời điểm nộp báo cáo định kỳ này: \textbf{chưa có mã nguồn ứng dụng, chưa cài đặt package, chưa gọi API LLM nào, và chưa có bất kỳ số liệu ASR/Block Rate/FPR/FNR/độ trễ nào được đo thực tế.} Mọi con số xuất hiện trong các báo cáo định kỳ sau này phải xuất phát từ một lần chạy thật, có thể tái lập từ mã nguồn/dữ liệu đã lưu trong kho mã nguồn dự án.
