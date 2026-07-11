@@ -1,21 +1,28 @@
-# Phase 0 placeholder. No application code exists yet, so nothing is
-# strictly required to install. Pinned versions will be added starting
-# Phase 3 (Gateway skeleton) once framework decisions (see
-# docs/decisions/ and docs/research/tool-comparison.md) are finalized.
+# Phase 4 — Gateway Skeleton dependencies.
 #
-# Planned (per PROJECT_PLAN.md), to be added with real version pins
-# when implementation starts -- ask before installing heavy deps
-# (AGENT_RULES.md rule 11):
+# Minimal, lightweight stack only (AGENT_RULES.md rule 11 — no heavy deps
+# without approval). Version ranges, not exact pins, to avoid guessing a
+# specific patch release that may not exist; narrow the range once the
+# team has actually run `pip install` in their own environment.
 #
-# fastapi
-# pydantic
-# uvicorn
-# pytest
-# python-dotenv
-#
-# Deferred (decision pending, see docs/decisions/):
+# NOT YET INSTALLED in the agent's working environment as of Phase 4 --
+# these packages must be installed by a human running:
+#   pip install -r requirements.txt
+# before `uvicorn app.main:app --reload` or `pytest` will work.
+
+fastapi>=0.110,<1.0
+pydantic>=2.5,<3.0
+uvicorn[standard]>=0.27,<1.0
+pytest>=7.4,<9.0
+httpx>=0.26,<1.0
+
+# python-dotenv intentionally NOT included: config.py reads plain
+# environment variables with safe defaults and does not require a .env file
+# (see app/core/config.py and README.md "Phase 4 local run").
+
+# Deferred (decision pending, see docs/decisions/ and Phase 5):
 # llama-index OR langchain
 # chromadb
-#
+
 # Optional / later phase:
 # streamlit

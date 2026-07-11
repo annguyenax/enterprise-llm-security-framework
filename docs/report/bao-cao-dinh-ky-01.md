@@ -10,7 +10,7 @@
 
 **Thời hạn nộp báo cáo:** 12–13/07/2026
 
-**Giai đoạn hiện tại:** Phase 0 hoàn tất (scaffold). Phase 1 (nghiên cứu) đã có bản nháp đầu tiên. Phase 2 (kiến trúc & threat model) đã có bản thiết kế đầy đủ, bao gồm cả phần thiết kế dữ liệu red-team & tiêu chí đánh giá (gọi tắt "Phase 2.5"). **Phase 3 (Controlled Synthetic Enterprise Benchmark) đã bắt đầu** — thiết kế ở Phase 2.5 nay đã được hiện thực hóa thành file dữ liệu thật trong `datasets/` và `redteam/`. Vẫn chỉ ở mức dữ liệu/tài liệu — chưa triển khai code ứng dụng, chưa cài đặt package, chưa gọi API nào.
+**Giai đoạn hiện tại:** Phase 0 hoàn tất (scaffold). Phase 1 (nghiên cứu) đã có bản nháp đầu tiên. Phase 2 (kiến trúc & threat model) đã có bản thiết kế đầy đủ, bao gồm cả phần thiết kế dữ liệu red-team & tiêu chí đánh giá (gọi tắt "Phase 2.5"). Phase 3 (Controlled Synthetic Enterprise Benchmark) và Phase 3.1 (rà soát độ tin cậy dữ liệu) đã hoàn thành ở mức dữ liệu/tài liệu. **Phase 4 (FastAPI Security Gateway Skeleton) đã bắt đầu** — đây là **mã nguồn ứng dụng đầu tiên** của dự án: Gateway FastAPI chạy được với Input/Output Guard rule-based, logging JSONL, và bộ test pytest. Vẫn chưa gọi LLM thật, chưa có RAG thật, và package cần thiết (FastAPI, Pydantic...) chưa được cài đặt trong môi trường làm việc — cần một thành viên tự cài đặt và chạy thử.
 
 ---
 
@@ -52,6 +52,14 @@
 
 - Thiết kế ở Phase 2.5 đã được hiện thực hóa thành file dữ liệu thật: 5 tài liệu doanh nghiệp "sạch" và 5 tài liệu "nhiễm độc" trong `datasets/`, cùng 40 prompt red-team (`redteam/prompts.jsonl`) kèm taxonomy hành vi guard (`redteam/expected-behaviors.yaml`) và giải thích từng nhóm tấn công (`redteam/attack-categories.md`). Chi tiết đầy đủ xem `datasets/README.md` và `redteam/README.md`.
 - Vẫn là phiên làm việc **chỉ tạo dữ liệu/tài liệu** — chưa có code Gateway, chưa có guard logic, chưa gọi API nào.
+
+### Giai đoạn Phase 4 (FastAPI Security Gateway Skeleton — đã bắt đầu)
+
+- Viết **mã nguồn ứng dụng đầu tiên của dự án**: một FastAPI Gateway skeleton tại `app/` với 4 endpoint (`/health`, `/v1/guard/input`, `/v1/guard/output`, `/v1/gateway/chat`), Input Guard và Output Guard dựa trên luật (regex/keyword) — không dùng machine learning, ánh xạ trực tiếp tới taxonomy 5 trạng thái đã định nghĩa ở `redteam/expected-behaviors.yaml`.
+- Endpoint `/v1/gateway/chat` chỉ trả về **một chuỗi phản hồi cố định (mock)** — hoàn toàn **chưa gọi bất kỳ LLM thật nào** (không OpenAI, Anthropic, Gemini, Ollama).
+- Ghi log JSONL có che (redact) chuỗi giống bí mật vào `logs/audit.jsonl`, và viết 4 file test pytest (~13 test case).
+- **Do không được phép cài đặt package trong phiên này**, nhóm chưa tự chạy được `uvicorn`/`pytest` thật — đã xác minh mã nguồn bằng 2 cách thay thế: kiểm tra cú pháp Python (`py_compile`, 100% pass) và chạy thử độc lập bộ luật regex của guard (chỉ dùng thư viện chuẩn Python) đối chiếu với toàn bộ prompt/output trong bộ test, xác nhận đúng 9/9 kết quả kỳ vọng. **Việc chạy thử thật với `pip install` cần một thành viên thực hiện.**
+- Chưa triển khai: RAG Guard, truy hồi RAG thật, ingestion dữ liệu, và LLM Provider Adapter — đây là Phase 5 tiếp theo.
 
 ## 2. Đề cương chi tiết các công việc thực hiện
 

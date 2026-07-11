@@ -56,7 +56,30 @@ See [TASK_BOARD.md](TASK_BOARD.md) for the full phase breakdown (Phase 0–9). W
 
 ## Getting Started
 
-Nothing to run yet. Phase 0 only produces scaffolding, planning docs, and the LaTeX report skeleton. See [PROJECT_PLAN.md](PROJECT_PLAN.md) for what comes next.
+### Phase 4 local run (Gateway skeleton)
+
+As of Phase 4, `app/` contains a runnable FastAPI skeleton: rule-based Input/Output guards, a mock chat pipeline (**no real LLM call**), and JSONL audit logging. Dependencies are **not installed** in this repository — you must install them yourself:
+
+```bash
+python -m venv .venv
+# Windows: .venv\Scripts\Activate.ps1   |   macOS/Linux: source .venv/bin/activate
+pip install -r requirements.txt
+
+uvicorn app.main:app --reload
+# then visit http://127.0.0.1:8000/docs for interactive Swagger UI
+```
+
+Run the test suite:
+
+```bash
+pytest
+```
+
+On Windows, `scripts/run_dev.ps1` automates the venv-create + install + run steps above.
+
+**What this skeleton does NOT do yet:** call a real LLM API, perform real RAG retrieval/vector search, or make any network call at all. See `app/README.md` for the full scope and `TASK_BOARD.md` for what's next.
+
+Everything before Phase 4 was documentation/data only — Phase 0–3.1 produced scaffolding, research, architecture/threat-model docs, and the synthetic benchmark (`datasets/`, `redteam/`). See [PROJECT_PLAN.md](PROJECT_PLAN.md) for the full roadmap.
 
 ## License
 

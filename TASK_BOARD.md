@@ -74,33 +74,33 @@ This is the same work recorded against the two Phase 2 rows above ("Synthetic re
 
 **Corpus is frozen as of this review** (2026-07-11) pending the manual read-through. Any future content change to `datasets/`/`redteam/` should be treated as a new corpus version per `docs/dataset/dataset-methodology.md` §9.
 
-**Next concrete implementation tasks** (unblocked by Phase 3/3.1, not yet started):
-1. **Phase 4: FastAPI Security Gateway Skeleton** — tracked below under the existing "Phase 3 — Gateway Skeleton" table (FastAPI app scaffold, config, JSONL logging, test harness). See disambiguation note below.
-2. Implement Input Guard — tracked below (Phase 4 — Input Guard), will be tested against `redteam/prompts.jsonl`.
-3. Implement JSONL structured logging — tracked below (Phase 3 — Gateway Skeleton, "JSONL structured logging"), format anticipated by FR7/NFR3 in `docs/diagrams/architecture.md`.
-4. Implement the evaluation runner — tracked below (Phase 7, "Automated red-team runner against gateway"), will consume `datasets/` and `redteam/` per `docs/evaluation/evaluation-plan.md` §4.
+**Next concrete implementation tasks (status as of the Phase 4 session, 2026-07-11):**
+1. ~~FastAPI Security Gateway Skeleton~~ — **Done**, see "Phase 3 — Gateway Skeleton" below.
+2. ~~Implement Input Guard~~ — **Done**, see "Phase 4 — Input Guard" below.
+3. ~~Implement JSONL structured logging~~ — **Done**, see "Phase 3 — Gateway Skeleton" below.
+4. Implement the evaluation runner — tracked below (Phase 7, "Automated red-team runner against gateway"), will consume `datasets/` and `redteam/` per `docs/evaluation/evaluation-plan.md` §4. **Still Not Started.**
+5. New: implement RAG Guard + dataset ingestion (Phase 5) and an LLM Provider Adapter (Phase 5) — see notes under Phase 5/6/7 below.
 
-## Phase 3 — Gateway Skeleton
-
-| Task | Owner | Status |
-|---|---|---|
-| FastAPI app scaffold | Nguyen Van An | Not Started |
-| Config management (pydantic settings) | Nguyen Van An | Not Started |
-| JSONL structured logging | Le Dinh Nghia | Not Started |
-| Base test harness (pytest) | Le Dinh Nghia | Not Started |
-
-**Note (phase-numbering disambiguation):** This project has accumulated three different things people have called "Phase 3":
-1. This board's *original* Phase 3 (this section) — **Gateway Skeleton** (code: FastAPI, config, logging, test harness). Still **Not Started**.
-2. The 2026-07-11 data session's "**Phase 3: Controlled Synthetic Enterprise Benchmark**" — recorded above as its own "Phase 3 — Controlled Synthetic Enterprise Benchmark (data)" section. **Done.**
-3. Session shorthand "**Phase 4: FastAPI Security Gateway Skeleton**" used after the Phase 3.1 dataset review — this refers to the *same work* as item 1 above (this section), not a new phase. Do not create a second, separate FastAPI task list — use this section.
-
-## Phase 4 — Input Guard
+## Phase 3 — Gateway Skeleton — **Status: Done**
 
 | Task | Owner | Status |
 |---|---|---|
-| Prompt injection heuristics/detectors | Nguyen Van An | Not Started |
-| Jailbreak pattern detectors | Le Dinh Nghia | Not Started |
-| Input Guard unit tests | Both | Not Started |
+| FastAPI app scaffold | Nguyen Van An | Done — `app/main.py`, `app/api/routes.py` (4 endpoints: `/health`, `/v1/guard/input`, `/v1/guard/output`, `/v1/gateway/chat`) |
+| Config management | Nguyen Van An | Done — `app/core/config.py`, plain env-var settings with safe defaults, no `.env` required |
+| JSONL structured logging | Le Dinh Nghia | Done — `app/services/audit_logger.py`, writes to `logs/audit.jsonl`, redacts secret-like patterns before writing |
+| Base test harness (pytest) | Le Dinh Nghia | Done — `tests/` (4 modules, ~13 test cases), root `conftest.py` |
+
+**Note (phase-numbering disambiguation, resolved 2026-07-11):** This board previously had three different things called "Phase 3" (see prior note, now superseded): the original code section (this one), the 2026-07-11 data session ("Phase 3 — Controlled Synthetic Enterprise Benchmark (data)", done), and session shorthand "Phase 4: FastAPI Security Gateway Skeleton" — all three now point to completed work. Going forward, use this section's name ("Phase 3 — Gateway Skeleton") for the code, and refer to the data work as "Phase 3 (data)" if disambiguation is needed.
+
+**Important limits of this implementation (see `app/README.md` for full detail):** no real LLM API is called anywhere (mock response only); no real RAG retrieval/vector database exists; only Input Guard and Output Guard are implemented — RAG Guard (the middle stage) does not exist yet. Dependencies (FastAPI, Pydantic, Uvicorn, pytest, httpx) are **not installed** in this repository — a human must run `pip install -r requirements.txt` before the app or tests can actually execute; this session validated the code by (1) `py_compile` syntax-checking every file and (2) extracting and testing the guard regex rules directly against every test-suite prompt/output using only Python's standard library, confirming all expected decisions match — but did not run `uvicorn` or `pytest` themselves.
+
+## Phase 4 — Input Guard — **Status: Done**
+
+| Task | Owner | Status |
+|---|---|---|
+| Prompt injection heuristics/detectors | Nguyen Van An | Done — `app/guards/input_guard.py`, rule-based (direct injection, role override, instruction hierarchy, sensitive extraction, RAG context manipulation, tool/action misuse) |
+| Jailbreak pattern detectors | Le Dinh Nghia | Done — same file, jailbreak-keyword and fictional-framing rules |
+| Input Guard unit tests | Both | Done — `tests/test_input_guard.py` |
 
 ## Phase 5 — RAG Guard + Demo RAG Pipeline
 
@@ -108,24 +108,27 @@ This is the same work recorded against the two Phase 2 rows above ("Synthetic re
 |---|---|---|
 | RAG framework decision (ADR) | Both | Not Started |
 | Vector store decision (ADR) | Both | Not Started |
-| Demo document ingestion (synthetic corpus) | Le Dinh Nghia | Not Started |
-| Retrieved-content sanitization / indirect injection defense | Nguyen Van An | Not Started |
+| Demo document ingestion (synthetic corpus) | Le Dinh Nghia | Not Started — will ingest `datasets/clean/` and `datasets/poisoned/` (frozen benchmark from Phase 3.1) |
+| Retrieved-content sanitization / indirect injection defense (RAG Guard) | Nguyen Van An | Not Started |
+| LLM Provider Adapter (mock-first; real provider call requires `AGENT_RULES.md` rule 4 approval) | Nguyen Van An | Not Started — see `docs/diagrams/architecture.md` §4, module target phase "Phase 3/5"; replaces `app/services/gateway.py`'s fixed `MOCK_RESPONSE` once implemented |
 
-## Phase 6 — Output Guard
+## Phase 6 — Output Guard — **Status: Done (basic rule-based skeleton)**
 
 | Task | Owner | Status |
 |---|---|---|
-| Sensitive info leakage detectors | Nguyen Van An | Not Started |
-| Output policy enforcement | Le Dinh Nghia | Not Started |
-| Output Guard unit tests | Both | Not Started |
+| Sensitive info leakage detectors | Nguyen Van An | Done — `app/guards/output_guard.py` (fake-secret marker, realistic API-key/token patterns, system-prompt leakage phrases) |
+| Output policy enforcement | Le Dinh Nghia | Done (basic) — decision/redaction logic exists; no dynamic/configurable policy engine, still a fixed rule list |
+| Output Guard unit tests | Both | Done — `tests/test_output_guard.py` |
 
 ## Phase 7 — Evaluation Harness
 
 | Task | Owner | Status |
 |---|---|---|
-| Automated red-team runner against gateway | Both | Not Started — methodology pre-specified in `docs/evaluation/evaluation-plan.md` §4 |
+| Automated red-team runner against gateway | Both | Not Started — methodology pre-specified in `docs/evaluation/evaluation-plan.md` §4; can now target the real `/v1/guard/input`, `/v1/guard/output`, `/v1/gateway/chat` endpoints once dependencies are installed |
 | Metrics collection + reporting scripts | Le Dinh Nghia | Not Started — metric formulas pre-specified in `docs/evaluation/metrics-definition.md` |
 | Baseline (no-guard) vs guarded comparison run | Nguyen Van An | Not Started — comparison structure pre-specified in `docs/evaluation/evaluation-plan.md` §3 |
+
+**Note (Phase 4 session, 2026-07-11 — "next tasks" mapping):** the instruction to add "Phase 5: RAG context guard and dataset ingestion", "Phase 6: LLM provider adapter", "Phase 7: evaluation runner" as next tasks is recorded as follows, since this board's existing Phase 6 already means Output Guard (now done): RAG context guard + dataset ingestion → **Phase 5** rows above; LLM provider adapter → new row added under **Phase 5** above (not Phase 6, to avoid colliding with the existing Output Guard section); evaluation runner → **Phase 7** rows above (unchanged).
 
 ## Phase 8 — Report Consolidation
 

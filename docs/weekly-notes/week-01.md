@@ -68,13 +68,26 @@ Phase 0 kickoff. Focus was entirely on scaffolding: repository structure, planni
 - **Honesty note:** no team member has yet completed a full manual read-through of all 50 items against the checklist — this is tracked as `pending` in `docs/dataset/source-mapping.md` and `docs/dataset/manual-review-checklist.md` §2, not silently assumed done.
 - No code was written, no packages were installed, no LLM API was called this session — validation used only Python's standard library.
 
+## Phase 4 — FastAPI Security Gateway Skeleton (same week, 2026-07-11)
+
+- **First application code of the project.** Implemented a runnable FastAPI skeleton under `app/`: `main.py` (entrypoint), `api/routes.py` (4 endpoints), `core/config.py` + `core/decisions.py`, `guards/input_guard.py` + `guards/output_guard.py` (rule-based), `schemas/requests.py` + `schemas/responses.py` (Pydantic models), `services/gateway.py` + `services/audit_logger.py`.
+- Implemented 4 endpoints: `GET /health`, `POST /v1/guard/input`, `POST /v1/guard/output`, `POST /v1/gateway/chat`. The chat endpoint runs Input Guard → a **fixed mock response** (no real LLM call anywhere) → Output Guard → one JSONL audit log entry.
+- Input Guard covers all 7 required categories (direct prompt injection, ignore-instructions, role override, jailbreak wording, sensitive extraction, malicious retrieved-context following, tool/action misuse) via ~20 regex rules, each traceable to a category in `redteam/attack-categories.md`.
+- Output Guard covers the fake-secret marker (`FAKE-SECRET-0000-EXAMPLE`), realistic API-key/token patterns, email-like PII, system-prompt leakage phrases, and confidentiality/classification markers — deliberately designed so all 5 taxonomy states (allow/block/sanitize/log_only/human_review) are reachable through genuine, non-contrived rules rather than forced examples.
+- `app/services/audit_logger.py` writes redacted JSONL events to `logs/audit.jsonl` (auto-creates the directory), redacting secret-like patterns independent of what the guard itself decided.
+- Wrote 4 pytest modules (`tests/test_health.py`, `test_input_guard.py`, `test_output_guard.py`, `test_gateway_routes.py`, ~13 test cases) plus a root `conftest.py` for import resolution.
+- **Verification without installing packages:** FastAPI/Pydantic/Uvicorn/pytest/httpx are **not installed** in this environment (installing packages was out of scope this session). Verified correctness two ways instead: (1) `python -m py_compile` on every new file — all pass; (2) extracted the guard regex rule sets into a standalone script and tested them directly (stdlib `re` only) against every prompt/output used in the test suite — all 9 cases resolved to the exact expected decision. Actually running `uvicorn`/`pytest` is deferred to whoever installs `requirements.txt`.
+- Updated `README.md` (new "Phase 4 local run" section), `app/README.md`, `tests/README.md`, `scripts/README.md` (new `run_dev.ps1`), `requirements.txt` (fastapi/pydantic/uvicorn/pytest/httpx version ranges), and `TASK_BOARD.md` (Phase 3 — Gateway Skeleton, Phase 4 — Input Guard, and Phase 6 — Output Guard all marked Done; added an LLM Provider Adapter row under Phase 5).
+- **Explicitly not implemented:** no real LLM API call (OpenAI/Anthropic/Gemini/Ollama or otherwise), no real RAG retrieval/vector database, no RAG Guard. `datasets/clean/`/`datasets/poisoned/` are not yet ingested by any code.
+
 ## In Progress / Not Started
 
 - LlamaIndex vs. LangChain, ChromaDB vs. alternative, and API-based LLM provider comparisons — not covered by the Gemini research pass yet, still Not Started.
 - Direct team read-through of the three academic papers logged in `related-work.md` — needed before any citation is added to `report-latex/references.bib`.
 - Standalone public red-team dataset review — still Not Started.
 - Full manual read-through of the 50-item benchmark against `docs/dataset/manual-review-checklist.md` — still Not Started (0 of 50 items signed off by a named reviewer).
-- Gateway Skeleton (Phase 3 in `TASK_BOARD.md`'s original sense / "Phase 4: FastAPI Security Gateway Skeleton" in session shorthand — FastAPI app, config, JSONL logging) — still Not Started; this is the next phase that will actually consume the now-frozen `datasets/`/`redteam/` benchmark.
+- **Actually running the Phase 4 gateway** — a team member needs to `pip install -r requirements.txt` and run `pytest`/`uvicorn` themselves; this has not been done by anyone yet, only static/logic-level verification.
+- RAG Guard, dataset ingestion, and LLM Provider Adapter (Phase 5) — still Not Started; this is what will replace the fixed mock response with real retrieval and (eventually, with approval) a real API-based LLM call.
 
 ## Blockers / Open Questions
 
