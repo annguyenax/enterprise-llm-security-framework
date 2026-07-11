@@ -205,3 +205,92 @@ Phase 0 kickoff. Focus was entirely on scaffolding: repository structure, planni
 - Added `submission-package-checklist.md` and `latex-compile-notes.md`. Phase 11
   is In Review pending screenshots, signed sheet if required, Overleaf compile,
   warning fixes, Vietnamese proofread, supervisor review, and final packaging.
+
+## Phase 12A - Modernization Scope Lock and V2 Architecture (same week, 2026-07-11)
+
+- Three independent external reviews of the Phase 0-11 system were read
+  (`docs/modernization-ai-reviews/`: Codex code-architecture, Gemini
+  academic-methodology, Grok red-team/security-scope), alongside this
+  project's own earlier `claude-repo-feasibility-review.md`. All four
+  converge on the same core finding: the biggest gap is that retrieval is
+  not real (callers supply `context_chunks` directly) and the v1 40/40
+  result was reached by iteratively tuning rules against the same 40 cases
+  (a calibration process, honestly recorded in Phase 7.1, but not evidence
+  of generalization).
+- Produced 5 new planning documents, no application code:
+  `docs/modernization-final-plan.md` (scope lock and full reconciliation of
+  the three reviews, including where they conflicted),
+  `docs/modernization-v2-architecture.md` (target v2 component/module/API
+  design plus Phase 12B-12H boundary definitions, each with objective/
+  allowed files/prohibited files/acceptance criteria/tests/rollback/report
+  impact/stop condition), `docs/modernization-v2-threat-model.md` (STRIDE
+  extension covering the new retrieval/ingestion/provenance/DLP surface,
+  including two new attack families with no v1 equivalent: FTS5
+  query-syntax injection and multi-chunk coordinated injection),
+  `docs/decisions/ADR-002-retrieval-engine.md` (SQLite FTS5/BM25 chosen
+  over vector/hybrid/mock-only, resolving the vector-store decision
+  `ADR-001-mvp-scope.md` originally deferred), and
+  `docs/decisions/ADR-003-v2-benchmark.md` (v2 benchmark dev/validation/
+  holdout split rules, freezing rules, and relationship to the untouched
+  v1 corpus).
+- **Key resolved conflict:** Grok's review proposed hard numeric acceptance
+  thresholds (ASR < 20%, FPR < 5%, latency < 50ms) as phase gates. Rejected
+  as binding criteria per `AGENT_RULES.md` rule 3 (no fabricated/
+  pre-committed benchmark numbers) - adopting a target before any v2 data
+  exists risks reproducing the same tune-to-the-benchmark pattern already
+  seen in v1, one level up. The numbers are kept only as labeled external
+  reference points in the threat model document, not as gates.
+- Approved final direction (in priority order): SQLite FTS5/BM25 retrieval,
+  persistent ingestion, server-controlled provenance/trust, end-to-end RAG
+  query service, centralized DLP, new v2 benchmark with holdout, and
+  ablation/retrieval-security/leakage/latency metrics as the core scope;
+  vector/hybrid retrieval, a local LLM/semantic guard, and a dashboard are
+  explicitly optional and later (Phases 12F/12G/12H).
+- No file under `app/`, `tests/`, `scripts/`, `datasets/`, `redteam/`,
+  `reports/evaluation/`, or `report-latex-template/` was modified. Verified
+  with `git diff --check` and a changed-path review against the prohibited
+  list. Short pointer notes added to `README.md` and a new Phase 12A
+  section added to `TASK_BOARD.md`.
+- **Phase 12B (Retrieval Foundation) does not start automatically** - per
+  `AGENT_RULES.md` rule 12 (stop at phase boundaries), this session stopped
+  after the planning documents were produced and is awaiting explicit
+  approval before any `app/` code is written.
+
+## Phase 12A Audit Resolution (same week, 2026-07-11)
+
+- Two independent audits of the Phase 12A commit (`a814a14`) were reviewed:
+  `docs/modernization-ai-reviews/gemini-phase-12a-audit.md` and
+  `grok-phase-12a-audit.md`, both returning verdict REVISE with specific
+  Critical/Major/Minor findings (not a rejection of the approved direction -
+  Grok's own words: "strong foundation overall, proceed after fixes").
+- Every Critical (5) and Major (6) finding was resolved - accepted or
+  partially accepted with documented rationale, never silently ignored.
+  Notable corrections: FTS5 fail-fast wording made absolute (no fallback
+  under any circumstance) across `modernization-final-plan.md`,
+  `ADR-002-retrieval-engine.md`, and `modernization-v2-architecture.md`;
+  concrete FTS5 query tokenization/escaping spec added; exact metric
+  formulas added (`modernization-v2-architecture.md` new section 8); v2
+  benchmark given a minimum floor of >=100 cases while still deferring the
+  exact upper bound/split to Phase 12D; v1 explicitly and formally
+  prohibited from being merged into v2 validation/holdout; multi-chunk
+  coordination mitigation converted from "documented only" into a
+  required Phase 12C decision point, without unilaterally mandating new
+  engineering scope from a documentation-only correction pass.
+- Two findings were only *partially* accepted, with rationale recorded in
+  `docs/modernization-ai-reviews/phase-12a-audit-resolution.md`: Grok's
+  request to mandate a working cross-chunk heuristic (converted into a
+  decision-point requirement instead, to avoid committing a future phase's
+  engineering scope from a docs-only pass) and Gemini's exact 100-case
+  50/50 named-subcount benchmark split (only the minimum floor was
+  adopted, consistent with Phase 12A's own earlier reasoning against
+  locking exact counts before Phase 12D authoring).
+- Created `docs/modernization-ai-reviews/phase-12a-audit-resolution.md`
+  (full traceable record: verdicts, every finding's resolution, deferred
+  decisions, and a 10-point Phase 12B entry-gate checklist - all PASS).
+  No file under `app/`, `tests/`, `scripts/`, `datasets/`, `redteam/`,
+  `reports/evaluation/`, `report-latex-template/`, or `requirements.txt`
+  was modified; verified with `git diff --check` and a changed-path review.
+- **Final recommendation: APPROVE PHASE 12B** (audit gate satisfied). This
+  is not itself the go-ahead to implement - per `AGENT_RULES.md` rule 12,
+  Phase 12B still requires a separate, explicit instruction before any
+  `app/` code is written.

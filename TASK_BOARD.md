@@ -253,6 +253,76 @@ compile warnings, PDF inspection, proofreading, and supervisor review are done.
 No application, test, script, dataset, red-team, guard, or evaluation artifact
 was changed.
 
+## Phase 12A — Modernization Scope Lock and V2 Architecture — **Status: Done (documentation/architecture only)**
+
+| Task | Owner | Status |
+|---|---|---|
+| Reconcile 3 external modernization reviews (Codex code-architecture, Gemini academic-methodology, Grok red-team) plus the earlier `claude-repo-feasibility-review.md` | Both | Done - `docs/modernization-final-plan.md` §3 lists every topic where the reviews agreed or conflicted, with an explicit resolution and rationale for each conflict |
+| Target v2 architecture (retrieval, ingestion, provenance, centralized DLP, API surface) | Nguyen Van An | Done - `docs/modernization-v2-architecture.md` |
+| Target v2 threat model extension | Le Dinh Nghia | Done - `docs/modernization-v2-threat-model.md` |
+| ADR-002: retrieval engine decision (SQLite FTS5/BM25 over vector/hybrid/mock-only) | Nguyen Van An | Done - `docs/decisions/ADR-002-retrieval-engine.md` |
+| ADR-003: v2 benchmark structure, splits, freezing rules | Le Dinh Nghia | Done - `docs/decisions/ADR-003-v2-benchmark.md` |
+| Phase 12B-12H boundary definitions (objective/allowed files/prohibited files/acceptance criteria/tests/rollback/report impact/stop condition, each) | Both | Done - `docs/modernization-v2-architecture.md` §7 |
+
+**Key resolved conflict:** `grok-phase-12a-redteam-gate.md` proposed hard
+numeric acceptance thresholds (e.g. ASR < 20%, FPR < 5%, latency < 50ms) as
+phase gates. This was **not adopted** as binding acceptance criteria -
+`AGENT_RULES.md` rule 3 ("no fake benchmarks or results... never fabricate
+evaluation numbers... only report numbers produced by an actual run") argues
+against pre-committing to an outcome number before any v2 data exists, since
+that creates pressure to hit the number through benchmark/rule tuning - the
+same calibration-not-generalization problem already observed in the v1
+40/40 result (see `TASK_BOARD.md` Phase 7.1 above). Grok's numbers are kept
+only as external reference points in `docs/modernization-v2-threat-model.md`
+§6, explicitly labeled non-binding. Full reconciliation table:
+`docs/modernization-final-plan.md` §3.
+
+**No application code, test, script, dataset, red-team, or evaluation
+artifact was touched this phase** - verified via `git diff --check` and a
+changed-path review against the prohibited-paths list (`app/`, `tests/`,
+`scripts/`, `datasets/`, `redteam/`, `reports/evaluation/`,
+`report-latex-template/`).
+
+### Phase 12A Audit Resolution — **Status: Done**
+
+Two independent audits of the Phase 12A commit (`a814a14`) were reviewed -
+`docs/modernization-ai-reviews/gemini-phase-12a-audit.md` (verdict: REVISE)
+and `docs/modernization-ai-reviews/grok-phase-12a-audit.md` (verdict:
+REVISE, "strong foundation... proceed after fixes"). Full traceable
+resolution: `docs/modernization-ai-reviews/phase-12a-audit-resolution.md`.
+
+- **5 Critical findings** (2 Gemini, 3 Grok) - all accepted or partially
+  accepted: explicit non-production/non-absolute disclaimer added to the
+  threat model; FTS5 query safety strengthened with a concrete
+  tokenization/escaping spec; FTS5 fail-fast wording made absolute (no
+  fallback ever, startup or runtime) across all three affected documents;
+  benchmark v2 given a minimum floor of >=100 cases; multi-chunk
+  coordination mitigation converted from "documented only" into an
+  explicit Phase 12C decision-point requirement (implement a lightweight
+  heuristic or explicitly justify deferring it - not silently ignored,
+  but also not unilaterally mandated as new engineering scope from a
+  docs-only pass).
+- **6 Major findings** (3 Gemini, 3 Grok) - all accepted: acceptance
+  criteria reworded as verifiable pass/fail conditions (without inventing
+  numeric thresholds); exact metric formulas added
+  (`docs/modernization-v2-architecture.md` new §8); a baseline research
+  question added; v1 explicitly and formally prohibited from being merged
+  into v2 validation/holdout; ingestion trust decisions now require audit
+  logging; holdout authoring now requires an independence safeguard
+  (different author, time gap, or review pass); centralized DLP
+  consolidation now has a named pre/post regression-parity test
+  requirement.
+- **Minor findings:** 5 fixed now (small, clear, no scope expansion - see
+  the resolution report), 3 deferred (Grok's own "optional improvements"),
+  0 rejected.
+- **Phase 12B entry gate:** all 10 checked requirements PASS. **Final
+  recommendation: APPROVE PHASE 12B** (audit gate satisfied).
+
+**Next phase:** Phase 12B — Retrieval Foundation. Per `AGENT_RULES.md` rule
+12 (stop at phase boundaries), Phase 12B does not start automatically and
+still requires a separate, explicit go-ahead referencing this plan -
+audit approval is not itself that go-ahead.
+
 ## Notes
 
 ### Phase 5.1 - RAG Guard Red-team Hardening - **Status: Done**

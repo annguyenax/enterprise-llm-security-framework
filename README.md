@@ -303,6 +303,32 @@ approval are complete.
 - `context_chunks` must be supplied directly by the caller (as if retrieval had already happened elsewhere) — there is no retrieval step.
 - Real-provider implementations and a real vector database are future work; Phase 7 adds the evaluation runner.
 
+### Phase 12A Modernization Planning (v2 scope lock)
+
+Phase 12A is documentation/architecture only — **no code in `app/`, `tests/`,
+`scripts/`, `datasets/`, `redteam/`, or `reports/evaluation/` changed.** It
+reconciles three independent external reviews of the Phase 0-11 system (all
+under `docs/modernization-ai-reviews/`) into one approved v2 direction:
+real local retrieval (SQLite FTS5/BM25) replacing caller-supplied
+`context_chunks`, persistent ingestion with server-controlled provenance/
+trust, centralized DLP, a new independently-governed v2 benchmark with a
+holdout split, and ablation/retrieval-security/latency evaluation. See:
+
+- [docs/modernization-final-plan.md](docs/modernization-final-plan.md) — scope lock, review reconciliation, required decisions.
+- [docs/modernization-v2-architecture.md](docs/modernization-v2-architecture.md) — target v2 architecture and Phase 12B-12H boundaries.
+- [docs/modernization-v2-threat-model.md](docs/modernization-v2-threat-model.md) — v2 threat model extension.
+- [docs/decisions/ADR-002-retrieval-engine.md](docs/decisions/ADR-002-retrieval-engine.md) and [ADR-003-v2-benchmark.md](docs/decisions/ADR-003-v2-benchmark.md).
+
+This plan was independently audited twice (Gemini, Grok); both returned
+REVISE with Critical/Major findings, all of which were resolved (accepted
+or partially accepted with documented rationale — see
+[docs/modernization-ai-reviews/phase-12a-audit-resolution.md](docs/modernization-ai-reviews/phase-12a-audit-resolution.md)).
+The Phase 12B entry gate now passes on all 10 checked requirements.
+
+Phase 12B (the first phase that touches `app/`) requires a separate,
+explicit go-ahead — it does not start automatically from this plan or from
+audit approval.
+
 Everything before Phase 4 was documentation/data only — Phase 0–3.1 produced scaffolding, research, architecture/threat-model docs, and the synthetic benchmark (`datasets/`, `redteam/`). See [PROJECT_PLAN.md](PROJECT_PLAN.md) for the full roadmap.
 
 ## License
