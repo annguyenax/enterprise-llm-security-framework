@@ -17,7 +17,7 @@ from typing import Any
 
 from app.core.config import settings
 from app.core.decisions import Decision
-from app.schemas.responses import GuardDecisionResponse
+from app.schemas.responses import GuardDecisionResponse, RAGGuardResponse
 
 _WRITE_LOCK = threading.Lock()
 
@@ -44,7 +44,9 @@ def _preview(text: str, max_len: int = 200) -> str:
     return redacted
 
 
-def _guard_summary(result: GuardDecisionResponse | None) -> dict[str, Any] | None:
+def _guard_summary(
+    result: GuardDecisionResponse | RAGGuardResponse | None,
+) -> dict[str, Any] | None:
     if result is None:
         return None
     return {
@@ -60,6 +62,7 @@ def log_event(
     request_id: str,
     input_preview: str | None = None,
     input_decision: GuardDecisionResponse | None = None,
+    rag_decision: RAGGuardResponse | None = None,
     output_decision: GuardDecisionResponse | None = None,
     final_decision: Decision,
     reasons: list[str],
@@ -70,7 +73,10 @@ def log_event(
     Per FR7/NFR3 (docs/diagrams/architecture.md), every guard decision made
     by this gateway should be logged with enough detail to reconstruct why a
     request was allowed/flagged/blocked, without ever persisting a real-
-    looking secret in plain text.
+    looking secret in plain text. `input_preview` already passes through
+    `_redact_secrets` (via `_preview`) as a defense-in-depth safety net
+    covering the RAG Guard path too (e.g. FAKE-SECRET-0000-EXAMPLE inside a
+    logged context-chunk preview).
     """
     if not settings.enable_audit_log:
         return
@@ -81,6 +87,7 @@ def log_event(
         "endpoint": endpoint,
         "input_preview": _preview(input_preview) if input_preview else None,
         "input_decision": _guard_summary(input_decision),
+        "rag_decision": _guard_summary(rag_decision),
         "output_decision": _guard_summary(output_decision),
         "final_decision": final_decision.value,
         "reasons": reasons,
