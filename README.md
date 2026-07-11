@@ -105,6 +105,46 @@ Or run `scripts/smoke_test_gateway.ps1` to exercise all of the above automatical
 - **Audit log location:** `logs/audit.jsonl` by default (`LOG_PATH` env var to change it). One JSON object per line, UTF-8 encoded; secret-like patterns are redacted before being written, and rule-authored reason strings use plain ASCII (no em dashes) so the file renders correctly in any PowerShell console codepage.
 - **Still intentionally mocked, not a bug:** `/v1/gateway/chat` never calls a real LLM (fixed mock response only) and there is no real RAG retrieval anywhere in this repository yet - see `app/README.md`.
 
+### Phase 5 RAG Context Guard
+
+As of Phase 5, `app/` also contains a **RAG Context Guard** (`app/guards/rag_guard.py`) and a **dataset ingestion loader** (`app/services/dataset_loader.py`) that reads the existing synthetic benchmark under `datasets/clean/` and `datasets/poisoned/`. This is still **not** a real RAG pipeline — see "What is intentionally not implemented yet" below.
+
+**Inspect the dataset** (standard library only, no dependencies required):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/inspect_dataset.ps1
+```
+
+Prints the number of clean docs, poisoned docs, total chunks generated, and sample doc IDs.
+
+**Call the new endpoint** (server must be running, e.g. `uvicorn app.main:app --reload`):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/test_rag_guard.ps1
+```
+
+Or manually:
+
+```powershell
+$body = @{
+    query = "What is the Aurora Widget's warranty period?"
+    context_chunks = @(
+        @{ doc_id = "NW-PRD-004"; text = "The Aurora Widget ships with a 2-year limited warranty..."; metadata = @{} }
+    )
+} | ConvertTo-Json -Depth 5
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/v1/guard/rag-context" -Method Post -Body $body -ContentType "application/json"
+```
+
+`POST /v1/gateway/chat` also accepts an optional `context_chunks` field; if supplied, the RAG Guard runs after the Input Guard, before the (mock) LLM stage — `block`/`human_review` stop the pipeline, `sanitize` continues with the cleaned chunks.
+
+**RAG Guard decision rules:** hidden HTML-comment instructions and quoted-transcript injection are `sanitize` (strip the malicious fragment, keep legitimate text); an explicit system-instruction-override document with no legitimate content is `block`; the fake secret marker `FAKE-SECRET-0000-EXAMPLE` is `sanitize` + redacted (the Output Guard independently blocks the same marker as a backstop); policy-bypass wording is `sanitize`; a narrow "must be treated as final/authoritative" pattern is `human_review`; the bare word "override" alone is `log_only`. See the module docstring in `app/guards/rag_guard.py` for the full rationale, including the one deliberate deviation from a dataset file's literal `expected_guard_decision`.
+
+**What is intentionally not implemented yet (not a bug):**
+- No real vector database, no embeddings, no similarity search — `dataset_loader.py` uses simple deterministic fixed-size character-window chunking only.
+- No real LLM call anywhere in this repository.
+- `context_chunks` must be supplied directly by the caller (as if retrieval had already happened elsewhere) — there is no retrieval step.
+- A real vector database and a real LLM provider adapter are later phases (Phase 5's "LLM Provider Adapter" row and Phase 7's evaluation runner — see `TASK_BOARD.md`).
+
 Everything before Phase 4 was documentation/data only — Phase 0–3.1 produced scaffolding, research, architecture/threat-model docs, and the synthetic benchmark (`datasets/`, `redteam/`). See [PROJECT_PLAN.md](PROJECT_PLAN.md) for the full roadmap.
 
 ## License
