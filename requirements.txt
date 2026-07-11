@@ -1,0 +1,21 @@
+# Phase 0 placeholder. No application code exists yet, so nothing is
+# strictly required to install. Pinned versions will be added starting
+# Phase 3 (Gateway skeleton) once framework decisions (see
+# docs/decisions/ and docs/research/tool-comparison.md) are finalized.
+#
+# Planned (per PROJECT_PLAN.md), to be added with real version pins
+# when implementation starts -- ask before installing heavy deps
+# (AGENT_RULES.md rule 11):
+#
+# fastapi
+# pydantic
+# uvicorn
+# pytest
+# python-dotenv
+#
+# Deferred (decision pending, see docs/decisions/):
+# llama-index OR langchain
+# chromadb
+#
+# Optional / later phase:
+# streamlit

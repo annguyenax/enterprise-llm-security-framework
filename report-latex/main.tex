@@ -1,0 +1,61 @@
+\documentclass[12pt,a4paper]{report}
+
+% ---- Page geometry: A4, 3cm left margin, 2cm top/right/bottom ----
+\usepackage[a4paper,left=3cm,top=2cm,right=2cm,bottom=2cm]{geometry}
+
+% ---- Font: Times New Roman equivalent under pdflatex ----
+% If compiling with xelatex/lualatex + fontspec, replace this with:
+%   \usepackage{fontspec}
+%   \setmainfont{Times New Roman}
+\usepackage{times}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+
+% ---- Vietnamese text support ----
+\usepackage[vietnamese,english]{babel}
+
+% ---- Line spacing 1.1-1.2 ----
+\usepackage{setspace}
+\setstretch{1.15}
+
+% ---- Justified body text (LaTeX default; no raggedright used) ----
+
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{amsmath}
+\usepackage[numbers]{natbib}
+
+\title{Xây dựng Hệ thống Bảo mật LLM Chống Tấn công \\ Prompt Injection và Data Poisoning \\ trong Môi trường Doanh nghiệp \\[0.5em]
+\large Enterprise LLM Security Framework for Prompt Injection \\ and Data Poisoning Defense}
+\author{Nguyễn Văn An -- N22DCAT001 -- D22CQAT01-N \\ Lê Đình Nghĩa -- N22DCAT038 -- D22CQAT01-N \\[1em] Giảng viên hướng dẫn: Nguyễn Hoàng Thanh}
+\date{2026}
+
+\begin{document}
+
+% ---- Cover page ----
+\maketitle
+
+% ---- Front matter ----
+\tableofcontents
+
+% ---- Main chapters ----
+% NOTE: chapter files are placeholders (Phase 0). Content is added as each
+% implementation/research phase produces real, verified material -- see
+% docs/report/report-outline.md and AGENT_RULES.md (no fabricated content).
+
+\input{chapters/00-mo-dau}
+\input{chapters/01-tong-quan}
+\input{chapters/02-phan-tich-thiet-ke}
+\input{chapters/03-trien-khai}
+\input{chapters/04-kiem-thu-danh-gia}
+\input{chapters/05-ket-luan}
+
+% ---- References ----
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+% ---- Appendix ----
+\appendix
+\input{chapters/06-phu-luc}
+
+\end{document}
