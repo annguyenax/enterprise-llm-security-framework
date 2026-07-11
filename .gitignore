@@ -41,3 +41,23 @@ Thumbs.db
 
 # --- Docker ---
 docker/*.env
+# Original school template, kept as local reference only
+Mau-De-An-Tot-Nghiep-PTIT-2409/
+
+# LaTeX build files
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz
+*.toc
+*.lof
+*.lot
+
+# School official/private templates and requirements
+school-requirements/
+*.doc
+*.docx
