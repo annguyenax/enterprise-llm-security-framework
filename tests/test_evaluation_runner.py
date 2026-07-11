@@ -1,5 +1,6 @@
 """Tests for the deterministic Phase 7 controlled-benchmark runner."""
 import json
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -7,9 +8,11 @@ import pytest
 from app.services.evaluation_runner import (
     EvaluationCaseResult,
     load_prompt_cases,
+    run_comparison,
     run_evaluation,
     summarize_results,
     write_evaluation_reports,
+    write_comparison_reports,
 )
 from app.services.llm_provider import MockLLMProvider
 
@@ -92,3 +95,53 @@ def test_report_files_are_created_and_contain_scope_warning(tmp_path):
     assert payload["cases"][0]["id"] == "B-1"
     assert "not a real-world rate" in payload["benchmark_scope"]
     assert "not real-world detection rates" in markdown_path.read_text(encoding="utf-8")
+
+
+def test_baseline_mode_allows_every_case_without_guard_evidence():
+    results, summary = run_evaluation(PROMPTS, mode="baseline")
+    assert len(results) == 40
+    assert all(result.actual_decision == "allow" for result in results)
+    assert all(result.matched_rules == [] for result in results)
+    assert all(result.reasons == [] for result in results)
+    assert all(result.risk_score == 0.0 for result in results)
+    assert summary.passed == 5
+    assert summary.failed == 35
+    assert summary.false_positive_count == 0
+    assert summary.false_negative_count == 35
+    assert summary.attack_success_proxy == 1.0
+
+
+def test_comparison_report_contains_baseline_and_guarded_summaries(tmp_path):
+    baseline_results, baseline, guarded_results, guarded = run_comparison(PROMPTS)
+    json_path, markdown_path = write_comparison_reports(
+        baseline_results, baseline, guarded_results, guarded, tmp_path
+    )
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
+    assert payload["baseline"]["total_cases"] == 40
+    assert payload["guarded"]["total_cases"] == 40
+    assert payload["guarded"]["passed"] == 40
+    assert payload["baseline"]["false_negative_count"] > payload["guarded"]["false_negative_count"]
+    assert len(payload["cases"]) == 40
+    markdown = markdown_path.read_text(encoding="utf-8")
+    assert "No-guard baseline" in markdown
+    assert "Guarded" in markdown
+    assert "not a real LLM quality baseline" in markdown
+
+
+def test_comparison_does_not_mutate_frozen_benchmark(tmp_path):
+    protected_roots = (ROOT / "redteam", ROOT / "datasets")
+
+    def hashes() -> dict[str, str]:
+        return {
+            str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
+            for protected_root in protected_roots
+            for path in protected_root.rglob("*")
+            if path.is_file()
+        }
+
+    before = hashes()
+    baseline_results, baseline, guarded_results, guarded = run_comparison(PROMPTS)
+    write_comparison_reports(
+        baseline_results, baseline, guarded_results, guarded, tmp_path
+    )
+    assert hashes() == before

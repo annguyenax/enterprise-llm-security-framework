@@ -5,7 +5,7 @@ import json
 from collections import Counter
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from app.core.decisions import Decision
 from app.guards.input_guard import evaluate_input
@@ -20,6 +20,7 @@ REQUIRED_FIELDS = {
 DECISION_VALUES = tuple(decision.value for decision in Decision)
 PROTECTIVE_DECISIONS = {"block", "sanitize", "human_review"}
 NON_PROTECTIVE_DECISIONS = {"allow", "log_only"}
+EvaluationMode = Literal["guarded", "baseline"]
 
 
 @dataclass(frozen=True)
@@ -97,12 +98,25 @@ def _validate_case(case: Any, line_number: int, seen_ids: set[str]) -> None:
         raise ValueError(f"Line {line_number} has invalid target_guard {case['target_guard']!r}")
 
 
-def evaluate_cases(cases: list[dict[str, Any]]) -> list[EvaluationCaseResult]:
-    """Evaluate cases directly against guards; no provider or network is used."""
+def evaluate_cases(
+    cases: list[dict[str, Any]], mode: EvaluationMode = "guarded"
+) -> list[EvaluationCaseResult]:
+    """Evaluate guarded or no-guard decisions without provider/network use."""
+    if mode not in {"guarded", "baseline"}:
+        raise ValueError(f"Unsupported evaluation mode: {mode!r}")
     results: list[EvaluationCaseResult] = []
     for case in cases:
-        guard_result = _run_target_guard(case)
-        actual = guard_result.decision.value
+        if mode == "baseline":
+            actual = Decision.ALLOW.value
+            matched_rules: list[str] = []
+            reasons: list[str] = []
+            risk_score = 0.0
+        else:
+            guard_result = _run_target_guard(case)
+            actual = guard_result.decision.value
+            matched_rules = list(guard_result.matched_rules)
+            reasons = list(guard_result.reasons)
+            risk_score = guard_result.risk_score
         results.append(EvaluationCaseResult(
             id=case["id"],
             category=case["category"],
@@ -110,9 +124,9 @@ def evaluate_cases(cases: list[dict[str, Any]]) -> list[EvaluationCaseResult]:
             actual_decision=actual,
             passed=actual == case["expected_decision"],
             target_guard=case["target_guard"],
-            matched_rules=list(guard_result.matched_rules),
-            reasons=list(guard_result.reasons),
-            risk_score=guard_result.risk_score,
+            matched_rules=matched_rules,
+            reasons=reasons,
+            risk_score=risk_score,
         ))
     return results
 
@@ -183,9 +197,28 @@ def _decision_counts(counter: Counter[str]) -> dict[str, int]:
     return {decision: counter[decision] for decision in DECISION_VALUES}
 
 
-def run_evaluation(path: str | Path) -> tuple[list[EvaluationCaseResult], EvaluationSummary]:
-    results = evaluate_cases(load_prompt_cases(path))
+def run_evaluation(
+    path: str | Path, mode: EvaluationMode = "guarded"
+) -> tuple[list[EvaluationCaseResult], EvaluationSummary]:
+    results = evaluate_cases(load_prompt_cases(path), mode=mode)
     return results, summarize_results(results)
+
+
+def run_comparison(
+    path: str | Path,
+) -> tuple[
+    list[EvaluationCaseResult], EvaluationSummary,
+    list[EvaluationCaseResult], EvaluationSummary,
+]:
+    cases = load_prompt_cases(path)
+    baseline_results = evaluate_cases(cases, mode="baseline")
+    guarded_results = evaluate_cases(cases, mode="guarded")
+    return (
+        baseline_results,
+        summarize_results(baseline_results),
+        guarded_results,
+        summarize_results(guarded_results),
+    )
 
 
 def write_evaluation_reports(
@@ -211,6 +244,94 @@ def write_evaluation_reports(
         _render_markdown(results, summary, source_path), encoding="utf-8"
     )
     return json_path, markdown_path
+
+
+def write_comparison_reports(
+    baseline_results: list[EvaluationCaseResult],
+    baseline_summary: EvaluationSummary,
+    guarded_results: list[EvaluationCaseResult],
+    guarded_summary: EvaluationSummary,
+    output_directory: str | Path,
+    source_path: str = "redteam/prompts.jsonl",
+) -> tuple[Path, Path]:
+    output = Path(output_directory)
+    output.mkdir(parents=True, exist_ok=True)
+    json_path = output / "baseline-vs-guarded.json"
+    markdown_path = output / "baseline-vs-guarded.md"
+    guarded_by_id = {result.id: result for result in guarded_results}
+    comparisons = [
+        {
+            "id": baseline.id,
+            "category": baseline.category,
+            "expected_decision": baseline.expected_decision,
+            "baseline_actual_decision": baseline.actual_decision,
+            "guarded_actual_decision": guarded_by_id[baseline.id].actual_decision,
+            "baseline_passed": baseline.passed,
+            "guarded_passed": guarded_by_id[baseline.id].passed,
+        }
+        for baseline in baseline_results
+    ]
+    interpretation = (
+        "On this controlled synthetic decision benchmark, the no-guard baseline "
+        "allows every case and therefore misses cases expecting a protective "
+        "decision. The guarded mode applies the current rule-based guards. This "
+        "does not compare real LLM response quality or establish real-world rates."
+    )
+    payload = {
+        "benchmark_scope": "Controlled synthetic benchmark only; not a real-world detection rate.",
+        "baseline_definition": "No-guard decision baseline: always allow; not a real LLM quality baseline.",
+        "source": source_path,
+        "baseline": asdict(baseline_summary),
+        "guarded": asdict(guarded_summary),
+        "interpretation": interpretation,
+        "cases": comparisons,
+    }
+    json_path.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    markdown_path.write_text(
+        _render_comparison_markdown(
+            baseline_summary, guarded_summary, comparisons, source_path, interpretation
+        ),
+        encoding="utf-8",
+    )
+    return json_path, markdown_path
+
+
+def _render_comparison_markdown(
+    baseline: EvaluationSummary,
+    guarded: EvaluationSummary,
+    comparisons: list[dict[str, Any]],
+    source_path: str,
+    interpretation: str,
+) -> str:
+    lines = [
+        "# Baseline vs Guarded Controlled Benchmark", "",
+        f"Source: `{source_path}`", "",
+        "> This is a controlled synthetic benchmark, not a real-world detection rate.", "",
+        "> Baseline means an always-allow no-guard decision baseline; it is not a real LLM quality baseline.", "",
+        "## Summary", "",
+        "| Metric | No-guard baseline | Guarded |", "|---|---:|---:|",
+        f"| Total | {baseline.total_cases} | {guarded.total_cases} |",
+        f"| Passed | {baseline.passed} | {guarded.passed} |",
+        f"| Failed | {baseline.failed} | {guarded.failed} |",
+        f"| Pass rate | {baseline.pass_rate:.4f} | {guarded.pass_rate:.4f} |",
+        f"| False positives | {baseline.false_positive_count} | {guarded.false_positive_count} |",
+        f"| False negatives | {baseline.false_negative_count} | {guarded.false_negative_count} |",
+        f"| Attack success proxy | {baseline.attack_success_proxy:.4f} | {guarded.attack_success_proxy:.4f} |",
+        "", "## Interpretation", "", interpretation, "", "## Cases", "",
+        "| ID | Expected | Baseline | Guarded |", "|---|---|---|---|",
+    ]
+    lines.extend(
+        f"| {case['id']} | {case['expected_decision']} | "
+        f"{case['baseline_actual_decision']} | {case['guarded_actual_decision']} |"
+        for case in comparisons
+    )
+    lines.extend(["", "## Limitations", "",
+        "- The benchmark contains 40 frozen synthetic prompt cases.",
+        "- The baseline models decision behavior only and does not generate or score LLM output.",
+        "- The comparison does not measure retrieval quality, semantic generalization, latency, or real-world attack outcomes.", ""])
+    return "\n".join(lines)
 
 
 def _render_markdown(

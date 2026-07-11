@@ -220,6 +220,27 @@ Full verification in the project-local `.venv` passed 79 tests. Starlette
 emitted one deprecation warning mentioning `httpx2`; the project does not depend
 on or install that package.
 
+### Phase 7.2 Baseline vs Guarded Comparison
+
+Phase 7.2 adds an always-allow no-guard decision baseline while leaving guarded
+evaluation unchanged. Run the comparison with either command:
+
+```powershell
+python scripts/run_evaluation.py --comparison
+.\scripts\run_evaluation.ps1 -Comparison
+```
+
+The generated `baseline-vs-guarded.json` and `.md` reports show:
+
+- No-guard baseline: 5/40 exact matches, 35 false negatives, attack-success
+  proxy `1.0000`.
+- Guarded: 40/40 exact matches, 0 false negatives, attack-success proxy
+  `0.0000`.
+
+This is a controlled synthetic decision benchmark, not a real-world detection
+rate. The baseline does not run or score an LLM, so it is not a real LLM quality
+baseline. Full project-local verification after Phase 7.2 passed 82 tests.
+
 **What is intentionally not implemented yet (not a bug):**
 - No real vector database, no embeddings, no similarity search — `dataset_loader.py` uses simple deterministic fixed-size character-window chunking only.
 - No real external LLM call anywhere in this repository; only the local deterministic mock provider is available.

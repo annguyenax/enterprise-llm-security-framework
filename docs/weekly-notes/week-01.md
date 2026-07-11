@@ -150,6 +150,14 @@ Phase 0 kickoff. Focus was entirely on scaffolding: repository structure, planni
 - Added exact regression prompts, nearby attack variants, and benign counterexamples for each calibration area. The focused offline group passed 52 tests; the complete project-local `.venv` suite passed 79 tests with one non-blocking Starlette `httpx2` deprecation warning. No package was installed.
 - Regenerated the controlled report: 40/40 exact decision matches, zero false positives, and zero false negatives on the unchanged synthetic prompt suite. This is not a real-world protection claim; semantic and unseen paraphrase gaps remain.
 
+## Phase 7.2 - Baseline vs Guarded Comparison (same week, 2026-07-11)
+
+- Added an explicit no-guard evaluation mode that allows every case with no rules, reasons, or risk score. Existing guarded evaluation logic was not changed.
+- Added comparison JSON/Markdown generation and `--comparison` / `-Comparison` CLI options. Reports clearly distinguish the always-allow decision baseline from a real LLM quality baseline.
+- Actual controlled result: baseline 5/40 exact matches, 35 false negatives, proxy 1.0000; guarded 40/40, zero false negatives, proxy 0.0000. These are synthetic benchmark values only.
+- Tests cover baseline behavior, guarded stability, comparison artifacts, relative false negatives, and SHA-256 immutability of frozen benchmark files. Full `.venv` suite passed 82 tests with one non-blocking Starlette warning; no package was installed.
+- Phase 7 implementation tasks are complete. Phase 8 Report Evidence Packaging can start.
+
 ## Next Week Plan
 
 - Team members personally read the three logged academic papers and confirm/replace the placeholder "Summary" fields in `related-work.md` with their own understanding.

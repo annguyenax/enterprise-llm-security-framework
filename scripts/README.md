@@ -14,6 +14,13 @@ python scripts/run_evaluation.py
 .\scripts\run_evaluation.ps1
 ```
 
+Baseline versus guarded comparison:
+
+```powershell
+python scripts/run_evaluation.py --comparison
+.\scripts\run_evaluation.ps1 -Comparison
+```
+
 ## Other Helpers
 
 - `run_dev.ps1` starts the local FastAPI application.

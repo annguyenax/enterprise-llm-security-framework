@@ -142,13 +142,13 @@ This is the same work recorded against the two Phase 2 rows above ("Synthetic re
 | Output policy enforcement | Le Dinh Nghia | Done (basic) — decision/redaction logic exists; no dynamic/configurable policy engine, still a fixed rule list |
 | Output Guard unit tests | Both | Done — `tests/test_output_guard.py` |
 
-## Phase 7 — Evaluation Harness — **Status: In Review**
+## Phase 7 — Evaluation Harness — **Status: Done**
 
 | Task | Owner | Status |
 |---|---|---|
 | Automated red-team runner against gateway | Both | Done - offline direct-guard runner validates and evaluates all 40 frozen prompt cases without provider, network, or dataset mutation |
 | Metrics collection + reporting scripts | Le Dinh Nghia | Done - JSON/Markdown reports include exact decision pass rate, decision distribution, controlled FP/FN rates, category failures, and attack-success proxy |
-| Baseline (no-guard) vs guarded comparison run | Nguyen Van An | Not Started — comparison structure pre-specified in `docs/evaluation/evaluation-plan.md` §3 |
+| Baseline (no-guard) vs guarded comparison run | Nguyen Van An | Done - deterministic always-allow baseline compared with unchanged guarded mode; JSON/Markdown artifacts include per-case decisions and scoped interpretation |
 
 **Phase 7 evidence (2026-07-11):** `python scripts/run_evaluation.py` generated
 `reports/evaluation/latest-evaluation.json` and `.md` from the unchanged 40-case
@@ -158,9 +158,7 @@ regenerated at 40 exact matches and 0 failures. The project-local `.venv` full
 suite passed 79 tests; its Starlette dependency emitted one `httpx2` deprecation
 warning, but no package was installed.
 
-**Next phase after review:** Phase 8 Report Evidence Packaging. Baseline-vs-
-guarded comparison remains an open Phase 7 task and must not be silently treated
-as complete.
+**Next phase:** Phase 8 Report Evidence Packaging.
 
 ### Phase 7.1 - Evaluation Failure Triage and Guard Calibration - **Status: Done**
 
@@ -169,6 +167,14 @@ as complete.
 - Regenerated the unchanged 40-case benchmark: 40 passed, 0 failed, 0 false positives, and 0 false negatives.
 - Full project-local `.venv` pytest verification: 79 passed, with one non-blocking Starlette `httpx2` deprecation warning; `httpx2` was not installed.
 - Evidence: `reports/evaluation/failure-triage.md`, `latest-evaluation.json`, and `latest-evaluation.md`. Results remain controlled synthetic benchmark measurements only.
+
+### Phase 7.2 - Baseline vs Guarded Evaluation Comparison - **Status: Done**
+
+- Added a no-guard mode that deterministically returns `allow`, empty rules/reasons, and zero risk for every case; guarded mode is unchanged.
+- Generated `reports/evaluation/baseline-vs-guarded.json` and `.md`: baseline 5/40 exact matches with 35 false negatives and proxy 1.0000; guarded 40/40 with 0 false negatives and proxy 0.0000.
+- Added tests for always-allow baseline behavior, both comparison summaries, guarded 40/40 stability, higher baseline false negatives, and SHA-256 immutability of every file under `redteam/` and `datasets/`.
+- Full project-local `.venv` suite: 82 passed with one non-blocking Starlette `httpx2` deprecation warning; no package was installed.
+- Scope remains a controlled synthetic decision benchmark. The baseline is not an LLM response-quality baseline and the metrics are not real-world rates.
 
 **Note (Phase 4 session, 2026-07-11 — "next tasks" mapping):** the instruction to add "Phase 5: RAG context guard and dataset ingestion", "Phase 6: LLM provider adapter", "Phase 7: evaluation runner" as next tasks is recorded as follows, since this board's existing Phase 6 already means Output Guard (now done): RAG context guard + dataset ingestion → **Phase 5** rows above; LLM provider adapter → new row added under **Phase 5** above (not Phase 6, to avoid colliding with the existing Output Guard section); evaluation runner → **Phase 7** rows above (unchanged).
 
