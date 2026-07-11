@@ -1,50 +1,59 @@
 \chapter*{Mở đầu}
 \addcontentsline{toc}{chapter}{Mở đầu}
-% \chapter* không tự gọi \markboth -- set thủ công để Header phải hiển thị đúng.
 \markboth{MỞ ĐẦU}{}
 
-\begingroup
-  \setcounter{section}{0}
-  \setcounter{secnumdepth}{2}
-  \setcounter{tocdepth}{2}
-  \renewcommand{\thesection}{\arabic{section}.}
-  \renewcommand{\thesubsection}{\thesection\arabic{subsection}.}
+\section*{Lý do chọn đề tài}
 
-\section{Lý do chọn đề tài}
+Các ứng dụng doanh nghiệp ngày càng sử dụng mô hình ngôn ngữ lớn (Large
+Language Model -- LLM) và kiến trúc sinh văn bản có truy hồi tri thức
+(Retrieval-Augmented Generation -- RAG). Bên cạnh lợi ích về khai thác tài liệu,
+các hệ thống này mở rộng bề mặt tấn công thông qua prompt injection, chỉ dẫn độc
+hại trong tài liệu truy hồi, jailbreak và rò rỉ dữ liệu. Nội dung do người dùng
+hoặc nguồn tài liệu không tin cậy kiểm soát có thể bị mô hình diễn giải như chỉ
+dẫn có thẩm quyền nếu hệ thống không phân tách và kiểm tra phù hợp.
 
-Các ứng dụng doanh nghiệp ngày càng tích hợp mô hình ngôn ngữ lớn (LLM) đứng sau các pipeline sinh văn bản có truy hồi tri thức (Retrieval-Augmented Generation -- RAG) để trả lời câu hỏi dựa trên tài liệu nội bộ. Cách tiếp cận này mang lại nhiều lợi ích nhưng cũng mở ra một lớp rủi ro bảo mật mới mà các biện pháp AppSec truyền thống chưa bao trùm hết: prompt injection (chèn lệnh trực tiếp), indirect prompt injection (chèn lệnh gián tiếp qua tài liệu được truy hồi), jailbreak (vượt rào an toàn), rò rỉ thông tin nhạy cảm, và đầu độc dữ liệu RAG (RAG document poisoning).
+Đề tài lựa chọn hướng phòng vệ nhiều lớp bằng một cổng bảo mật đặt trước bước
+sinh câu trả lời. Hướng tiếp cận này phù hợp với phạm vi thực tập vì có thể hiện
+thực bằng các rule giải thích được, chạy ngoại tuyến và đánh giá bằng dữ liệu
+tổng hợp mà không sử dụng dữ liệu doanh nghiệp thật hoặc API trả phí.
 
-Nhóm chúng em chọn đề tài này vì đây là hướng nghiên cứu ứng dụng thực tế, gắn với chuyên ngành An toàn thông tin, đồng thời phù hợp để triển khai ở quy mô đồ án thực tập (lab-scale) trong thời gian thực tập tốt nghiệp.
+\section*{Mục tiêu}
 
-\section{Mục tiêu đề tài}
+Mục tiêu của đề tài là nghiên cứu và triển khai một proof-of-concept cho LLM
+Security Gateway/Guardrail Proxy, gồm các chức năng chính:
 
-Mục tiêu của đề tài là tìm hiểu, thiết kế và xây dựng (ở mức \textbf{proof-of-concept / MVP}) một \textbf{LLM Security Gateway / Guardrail Proxy} đặt trước một ứng dụng RAG minh họa, nhằm phát hiện và giảm thiểu 5 nhóm rủi ro: prompt injection, indirect prompt injection, jailbreak, rò rỉ thông tin nhạy cảm, và các rủi ro cơ bản về đầu độc tài liệu RAG.
-
-Đây \textbf{không} phải là một sản phẩm bảo mật thương mại hay hệ thống production-ready; phạm vi được giới hạn có chủ đích để phù hợp với nguồn lực 2 sinh viên thực tập (xem thêm quyết định phạm vi trong \texttt{docs/decisions/ADR-001-mvp-scope.md} của kho mã nguồn dự án).
-
-\section{Đối tượng và phạm vi nghiên cứu}
-
-\textbf{Đối tượng nghiên cứu:} các kỹ thuật tấn công và phòng thủ liên quan đến LLM/RAG nêu trên, cùng kiến trúc gateway/guardrail phù hợp để triển khai phòng thủ theo lớp (defense-in-depth).
-
-\textbf{Phạm vi:}
 \begin{itemize}
-    \item Sử dụng LLM thông qua API có sẵn, \textbf{không} huấn luyện hay fine-tune mô hình cục bộ trong phạm vi MVP.
-    \item Toàn bộ dữ liệu thử nghiệm là dữ liệu \textbf{tổng hợp (synthetic)}, không sử dụng PII, secret hay dữ liệu tổ chức thật.
-    \item Không đưa Kubernetes, tích hợp SIEM, hay huấn luyện mô hình cục bộ vào phạm vi MVP -- các hạng mục này chỉ được ghi nhận như hướng mở rộng cho đồ án/luận văn tương lai.
-    \item Toàn hệ thống được thiết kế để chạy được trên laptop cá nhân 16GB RAM của thành viên nhóm, không yêu cầu GPU hay hạ tầng máy chủ riêng.
+    \item kiểm tra prompt trước khi chuyển sang bước xử lý tiếp theo;
+    \item kiểm tra và làm sạch context chunk trước khi đưa vào provider;
+    \item kiểm tra dữ liệu đầu ra trước khi trả về phía gọi;
+    \item ghi log quyết định có cấu trúc và che giấu chuỗi nhạy cảm;
+    \item đánh giá ngoại tuyến trên benchmark red-team tổng hợp, có thể tái lập.
 \end{itemize}
 
-\section{Phương pháp thực hiện}
+\section*{Đối tượng và phạm vi nghiên cứu}
 
-Nhóm thực hiện đề tài theo các bước: (1) tìm hiểu lý thuyết và khảo sát công trình liên quan; (2) phân tích yêu cầu, thiết kế kiến trúc và threat model; (3) thiết kế bộ dữ liệu kiểm thử tổng hợp và tiêu chí đánh giá; (4) hiện thực hóa gateway và các guard (giai đoạn tiếp theo, chưa thực hiện ở báo cáo này); (5) đánh giá theo bộ dữ liệu tổng hợp và tổng hợp báo cáo. \textbf{Tại thời điểm báo cáo định kỳ này, nhóm mới hoàn thành các bước (1)--(3) ở mức tài liệu thiết kế; chưa có mã nguồn ứng dụng, chưa cài đặt package, và chưa có số liệu đo lường thực nghiệm nào.}
+Đối tượng nghiên cứu là các cơ chế guardrail cho prompt đầu vào, ngữ cảnh RAG
+và đầu ra, cùng quy trình đánh giá quyết định của guard. Hệ thống đã triển khai
+FastAPI gateway, ba guard dựa trên rule/regex, mock provider cục bộ, audit log,
+bộ nạp dữ liệu tổng hợp và evaluation runner.
 
-\section{Bố cục báo cáo}
+Phạm vi không bao gồm LLM thực, API trả phí, embedding, vector database, truy
+hồi tương đồng hoặc pipeline RAG hoàn chỉnh. Context trong demo được truyền trực
+tiếp bởi phía gọi. Đề tài không xử lý dữ liệu thật và không tuyên bố hệ thống
+sẵn sàng cho môi trường sản xuất.
 
-Ngoài phần Mở đầu và Kết luận, báo cáo gồm các chương sau:
-\begin{itemize}
-    \item Chương 1. Tổng quan và quá trình tìm hiểu.
-    \item Chương 2. Phân tích yêu cầu, kiến trúc và threat model.
-    \item Chương 3. Đề cương chi tiết công việc thực hiện.
-    \item Chương 4. Kế hoạch kiểm thử, đánh giá và hướng triển khai.
-\end{itemize}
-\endgroup
+\section*{Phương pháp thực hiện}
+
+Nhóm tiến hành theo các bước: khảo sát tài liệu và khung rủi ro; xây dựng yêu
+cầu, kiến trúc và threat model; tạo corpus tổng hợp; hiện thực gateway và các
+guard; kiểm thử; chạy đánh giá có kiểm soát; phân tích false negative; hiệu chỉnh
+rule hẹp; và so sánh chế độ guarded với baseline không guard. Mọi số liệu trong
+báo cáo được lấy từ artifact có thể tái tạo trong kho mã nguồn.
+
+\section*{Bố cục báo cáo}
+
+Chương 1 trình bày nền tảng LLM/RAG, prompt injection, rò rỉ dữ liệu và
+guardrail. Chương 2 mô tả yêu cầu, kiến trúc và threat model. Chương 3 trình bày
+implementation, bộ dữ liệu và các module. Chương 4 mô tả thiết lập đánh giá,
+kết quả, baseline và phân tích lỗi. Phần kết luận tổng hợp đóng góp, hạn chế và
+hướng phát triển.

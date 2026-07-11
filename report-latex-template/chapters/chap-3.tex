@@ -1,67 +1,115 @@
-\chapter{Đề cương chi tiết công việc thực hiện}
-\label{ch:de-cuong-cong-viec}
+\chapter{Hiện thực hệ thống và bộ dữ liệu thử nghiệm}
+\label{chap:implementation}
 
-\section{Outline quyển báo cáo cuối kỳ}
+\section{Công nghệ và cấu trúc mã nguồn}
 
-Quyển báo cáo cuối kỳ dự kiến gồm: Mở đầu; Chương 1 -- Tổng quan và cơ sở lý thuyết; Chương 2 -- Phân tích và thiết kế hệ thống; Chương 3 -- Triển khai; Chương 4 -- Kiểm thử và đánh giá; Kết luận và hướng phát triển; Tài liệu tham khảo; Phụ lục (chi tiết đầy đủ tại \texttt{docs/report/report-outline.md} của kho mã nguồn dự án). Báo cáo định kỳ hiện tại tương ứng với phần nội dung đã hoàn thành của Chương 1--2 nêu trên, trình bày lại dưới cấu trúc bắt buộc của báo cáo định kỳ TTTN.
-
-\section{Đề cương chi tiết theo giai đoạn (phase)}
-
-Bảng~\ref{tab:phase-overview} liệt lại các giai đoạn thực hiện đề tài (chi tiết đầy đủ tại \texttt{TASK\_BOARD.md} của kho mã nguồn dự án), trong đó Phase 0--2 đã hoàn thành ở mức tài liệu tại thời điểm báo cáo này.
+Proof-of-concept sử dụng Python, FastAPI, Pydantic và pytest. Các module được
+chia thành API route, core configuration/decision, guard, schema và service.
+Không có provider SDK, framework RAG, vector database hoặc thư viện machine
+learning bổ sung.
 
 \begin{table}[H]
 \centering
-\caption{Đề cương công việc theo giai đoạn}
-\label{tab:phase-overview}
-\begin{tabular}{@{}p{0.08\linewidth}p{0.55\linewidth}p{0.27\linewidth}@{}}
+\caption{Các module chính đã triển khai}
+\label{tab:implemented-modules}
+\begin{tabularx}{\textwidth}{p{4.2cm}X}
 \toprule
-\textbf{Phase} & \textbf{Nội dung chính} & \textbf{Trạng thái} \\
+Module & Trách nhiệm \\
 \midrule
-0 & Scaffold repo, kế hoạch dự án, khung nghiên cứu, quy tắc agent, khung báo cáo LaTeX & Hoàn thành \\
-1 & Nghiên cứu sâu: OWASP LLM Top 10, related work, so sánh công cụ/framework & Bản nháp đầu, đang xác minh \\
-2 & Threat modeling STRIDE, yêu cầu FR/NFR, kiến trúc, thiết kế bộ dữ liệu kiểm thử tổng hợp và tiêu chí đánh giá & Đã thiết kế đầy đủ \\
-3 & Khung Gateway: FastAPI app, cấu hình, logging & Chưa bắt đầu \\
-4 & Input Guard: phát hiện prompt injection, jailbreak & Chưa bắt đầu \\
-5 & RAG Guard + pipeline RAG demo & Chưa bắt đầu \\
-6 & Output Guard: chống rò rỉ thông tin nhạy cảm & Chưa bắt đầu \\
-7 & Bộ đánh giá (evaluation harness) + chạy red-team trên MVP & Chưa bắt đầu (đã có kế hoạch/metric) \\
-8 & Tổng hợp kết quả, hoàn thiện báo cáo, sơ đồ & Chưa bắt đầu \\
-9 & Hoàn thiện, chuẩn bị demo, nộp bài & Chưa bắt đầu \\
+\texttt{app/api/routes.py} & Health, endpoint guard riêng và full gateway chat. \\
+\texttt{app/guards/input\_guard.py} & Phát hiện injection, jailbreak, extraction, RAG manipulation và tool misuse. \\
+\texttt{app/guards/rag\_guard.py} & Chuẩn hóa bản detection, kiểm tra context và sanitize có mục tiêu. \\
+\texttt{app/guards/output\_guard.py} & Kiểm tra secret/PII dạng mẫu và instruction leakage trong output. \\
+\texttt{app/services/llm\_provider.py} & Provider contract và MockLLMProvider ngoại tuyến. \\
+\texttt{app/services/gateway.py} & Điều phối thứ tự guard, stopping decision và provider. \\
+\texttt{app/services/audit\_logger.py} & Ghi JSONL và redaction phòng vệ bổ sung. \\
+\texttt{app/services/evaluation\_runner.py} & Đọc benchmark, tính metric và sinh artifact đánh giá. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{Input Guard}
+
+Input Guard là tập rule regex ánh xạ vào các nhóm direct prompt injection, role
+override, instruction hierarchy, jailbreak, sensitive extraction, RAG-context
+manipulation và tool/action misuse. Mỗi rule có ID, category, decision, risk
+weight và lý do. Khi nhiều rule khớp, hệ thống chọn quyết định nghiêm trọng nhất.
+
+Trong Phase 7.1, năm false negative ban đầu được phân tích và bổ sung bằng năm
+rule hẹp. Mỗi rule mới có prompt hồi quy, biến thể lân cận và prompt lành tính
+đối chứng. Nhãn benchmark không bị sửa. Cách hiệu chỉnh này làm tăng độ khớp
+trên corpus hiện tại nhưng cũng tạo nguy cơ overfitting, được nêu trong phần hạn
+chế.
+
+\section{RAG Context Guard}
+
+RAG Guard tạo một bản sao dùng riêng cho detection: chuyển chữ thường, gộp
+khoảng trắng, loại zero-width character và chuẩn hóa leetspeak nhẹ. Văn bản gốc
+vẫn được giữ để sanitize/output. Guard nhận diện comment HTML/XML đa dòng hoặc
+lỗi định dạng, block comment JS/CSS, system/developer override, transcript
+injection, policy bypass và fake-secret marker.
+
+Sanitize loại đúng hidden block hoặc dòng nguy hiểm khi có thể, đồng thời giữ
+\texttt{doc\_id} và metadata. Cơ chế này không phải semantic classifier và
+không thay thế retrieval provenance hoặc kiểm tra nguồn tài liệu.
+
+\section{Output Guard và audit logging}
+
+Output Guard kiểm tra fake-secret marker, chuỗi có dạng API key/token, địa chỉ
+email, system prompt leakage và classification marker. Logger thực hiện
+redaction độc lập trên preview và metadata lồng nhau trước khi ghi file JSONL,
+nhằm tránh việc guard miss dẫn tới lưu secret dạng rõ.
+
+\section{Provider adapter}
+
+Provider adapter gồm request/response type, abstract interface, factory và
+MockLLMProvider. Mock provider tạo câu trả lời xác định, công bố rõ không có LLM
+thực và chỉ ghi số context chunk đã được guard chấp nhận. Gateway response và
+audit event chứa \texttt{provider\_name}, \texttt{model\_name} và
+\texttt{is\_mock}, không lưu provider prompt/context/output đầy đủ.
+
+Không có real LLM provider, API key, SDK hoặc network call trong implementation.
+
+\section{Bộ dữ liệu tổng hợp}
+
+Corpus được đóng băng sau bước validation và gồm các thành phần trong
+Bảng~\ref{tab:dataset-composition}.
+
+\begin{table}[H]
+\centering
+\caption{Thành phần bộ dữ liệu tổng hợp}
+\label{tab:dataset-composition}
+\begin{tabular}{lr}
+\toprule
+Thành phần & Số lượng \\
+\midrule
+Tài liệu sạch & 5 \\
+Tài liệu bị đầu độc & 5 \\
+Prompt red-team & 40 \\
+Tổng số phần tử benchmark & 50 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\section{Thiết kế bộ dữ liệu kiểm thử red-team (đã thiết kế, chưa hiện thực hóa)}
+Bốn mươi prompt được chia thành 8 category, mỗi category có 5 case: benign,
+direct injection, role override, instruction hierarchy, jailbreak, sensitive
+extraction, RAG-context manipulation và tool/action misuse. Validation xác nhận
+JSONL hợp lệ, ID không trùng và không phát hiện PII/secret thật theo các pattern
+đã kiểm tra. Corpus chỉ dùng dữ liệu giả lập Northwind Retail Group.
 
-Là một phần của Phase 2, nhóm \textbf{đã thiết kế} (chưa tạo file dữ liệu thật) một bộ dữ liệu kiểm thử tổng hợp, chi tiết đầy đủ tại \texttt{docs/evaluation/red-team-test-design.md}. Toàn bộ ví dụ đều là dữ liệu hư cấu 100\%, dùng công ty giả định "Northwind Retail Group", không chứa PII/secret thật.
+Kiểm tra tự động không thay thế đọc thủ công đầy đủ. Việc full manual review
+corpus vẫn là công việc cần hoàn thiện trước khi đưa ra nhận định định tính sâu
+hơn về độ đại diện.
 
-\begin{itemize}
-    \item \textbf{5 tài liệu doanh nghiệp "sạch"} dùng làm baseline: chính sách nhân sự (HR), chính sách IT helpdesk, hướng dẫn an toàn nội bộ, FAQ sản phẩm, chính sách hoàn ứng chi phí (finance reimbursement).
-    \item \textbf{5 nhóm tài liệu RAG "nhiễm độc"}: chứa chỉ dẫn ẩn; cố ghi đè chỉ dẫn hệ thống; cố làm rò rỉ bí mật (dùng chuỗi giả rõ ràng, ví dụ \texttt{FAKE-SECRET-0000-EXAMPLE}); yêu cầu bỏ qua chính sách; mô phỏng indirect prompt injection qua transcript hỗ trợ khách hàng.
-    \item \textbf{7 nhóm prompt injection}: direct injection, role override, instruction hierarchy attack, jailbreak, trích xuất thông tin nhạy cảm, thao túng ngữ cảnh RAG, yêu cầu lạm dụng tool/action (dù MVP chưa có tool nào, dùng để kiểm tra hệ thống không "ảo giác" có năng lực đó).
-\end{itemize}
+\section{Kiểm thử và tái lập}
 
-\section{Hành vi guard kỳ vọng}
+Test suite bao phủ guard, route, gateway ordering, provider skip path, audit
+redaction, dataset loader, evaluation, calibration và bất biến SHA-256 của dữ
+liệu đóng băng. Lần xác minh hiện tại ghi nhận 82 test pass và một warning
+deprecation từ Starlette. Warning không làm thất bại test và dự án không cài
+\texttt{httpx2}.
 
-Mỗi test case được ánh xạ tới một trong 5 hành vi kỳ vọng (Bảng~\ref{tab:guard-behavior}), là ngôn ngữ chung dùng xuyên suốt thiết kế dữ liệu và định nghĩa metric ở Chương 4.
+\section{Kết luận chương}
 
-\begin{table}[H]
-\centering
-\caption{Đơn vị hành vi guard kỳ vọng}
-\label{tab:guard-behavior}
-\begin{tabular}{@{}p{0.18\linewidth}p{0.72\linewidth}@{}}
-\toprule
-\textbf{Hành vi} & \textbf{Ý nghĩa} \\
-\midrule
-Allow & Guard không phát hiện vấn đề, request đi tiếp không thay đổi \\
-Block & Guard phát hiện vi phạm rõ ràng, dừng pipeline, trả về phản hồi từ chối an toàn \\
-Sanitize & Guard phát hiện vấn đề cục bộ (ví dụ chỉ dẫn ẩn trong tài liệu), loại bỏ phần đó, giữ lại phần nội dung hợp lệ \\
-Log only & Tín hiệu mức thấp/mơ hồ, request vẫn đi tiếp nhưng được ghi log để phân tích sau \\
-Require human review & Trường hợp mức độ nghiêm trọng cao nhưng còn mơ hồ, chưa nên tự động quyết định (ở MVP, hiệu ứng thực tế tương đương Block kèm mã lý do riêng) \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\section{Phân chia công việc theo phase}
-
-Việc phân chia công việc cho từng phase bám theo Bảng phân chia vai trò đã trình bày ở phần "Kế hoạch thực hiện công việc nhóm" đầu báo cáo, và được cập nhật chi tiết hơn theo tuần tại \texttt{docs/weekly-notes/} của kho mã nguồn dự án.
+Implementation hiện thực đầy đủ luồng bảo mật ngoại tuyến trong phạm vi PoC.
+Chương tiếp theo trình bày phương pháp và kết quả đánh giá có kiểm soát.

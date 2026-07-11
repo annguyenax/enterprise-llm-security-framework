@@ -2,7 +2,7 @@
 
 **Xây dựng Hệ thống Bảo mật LLM Chống Tấn công Prompt Injection và Data Poisoning trong Môi trường Doanh nghiệp**
 
-> Status: **Phase 8 - Evidence packaging and report preparation.** The lab-scale gateway, guards, offline mock provider, and controlled evaluation harness are implemented. This is a university internship proof-of-concept (PoC), not a production system.
+> Status: **Phase 10 - Final LaTeX report integration (In Review).** The lab-scale gateway, guards, offline mock provider, controlled evaluation harness, and final report content are integrated. This is a university internship proof-of-concept (PoC), not a production system.
 
 ## Project Summary
 
@@ -40,7 +40,7 @@ This is an **academic internship MVP**. It is explicitly **not** production-read
 
 ## Current Phase
 
-See [TASK_BOARD.md](TASK_BOARD.md) for the authoritative phase breakdown. Core implementation and controlled evaluation through Phase 7.2 are complete; **Phase 8 evidence packaging/report preparation is in review**.
+See [TASK_BOARD.md](TASK_BOARD.md) for the authoritative phase breakdown. Core implementation, controlled evaluation, evidence packaging and LaTeX content integration are complete; **Phase 10 remains in review pending figures, PDF compilation and manual review**.
 
 ## Guiding Principles
 
@@ -269,6 +269,18 @@ The official title in `report-latex-template/thesis.sty` was verified unchanged:
 Prompt Injection và rò rỉ dữ liệu”. LaTeX chapter content still contains stale
 early-phase status statements and must be integrated/reviewed before final PDF
 compilation.
+
+### Phase 10 Final LaTeX Report Integration
+
+The official chapter files now describe the implemented gateway, dataset,
+guards, mock provider, controlled evaluation, failure triage, baseline comparison,
+limitations and future work. See the
+[final report review checklist](reports/evidence/final-report-review-checklist.md)
+for compile, figure, citation, claim-safety and final PDF gates.
+
+No TeX toolchain was available in the integration environment, so PDF compile
+success is not claimed. Three explicit figure TODOs remain for architecture,
+guarded evaluation and baseline comparison screenshots.
 
 **What is intentionally not implemented yet (not a bug):**
 - No real vector database, no embeddings, no similarity search — `dataset_loader.py` uses simple deterministic fixed-size character-window chunking only.

@@ -1,58 +1,139 @@
-\chapter{Kế hoạch kiểm thử, đánh giá và hướng triển khai}
-\label{ch:ke-hoach-kiem-thu}
+\chapter{Đánh giá thực nghiệm và kết quả}
+\label{chap:evaluation}
 
-\textit{Toàn bộ nội dung chương này là \textbf{kế hoạch dự kiến}. Chưa có gateway, guard, hay bộ chạy đánh giá nào được hiện thực; không có số liệu ASR/FPR/FNR/độ trễ nào được đo tại thời điểm báo cáo này (chi tiết đầy đủ tại \texttt{docs/evaluation/} của kho mã nguồn dự án).}
+\section{Thiết lập đánh giá}
 
-\section{Phương pháp đánh giá dự kiến}
+Evaluation runner đọc \texttt{redteam/prompts.jsonl}, kiểm tra required field,
+ID, decision taxonomy và target guard. Chế độ guarded gọi trực tiếp guard tương
+ứng để loại bỏ ảnh hưởng của provider/network. Mỗi kết quả lưu ID, category,
+expected/actual decision, pass/fail, matched rule, reason và risk score.
 
-Nhóm dự kiến đánh giá theo phương pháp so sánh \textbf{baseline (không có guard) và có guard} trên cùng bộ dữ liệu kiểm thử tổng hợp đã thiết kế ở Chương 3:
+Đây là đánh giá quyết định trên controlled synthetic benchmark. Nó không đo
+chất lượng câu trả lời LLM, retrieval, latency, tải hoặc harmful output ngoài
+đời thực.
 
-\begin{enumerate}
-    \item \textbf{Chạy baseline:} gửi toàn bộ test case qua gateway với các guard bị tắt, ghi nhận hành vi LLM thô và thời gian phản hồi -- làm mốc tham chiếu.
-    \item \textbf{Chạy có guard:} gửi cùng bộ test case với các guard được bật, ghi nhận quyết định của từng guard, kết quả cuối cùng, và thời gian phản hồi.
-    \item \textbf{So sánh:} tính các metric ở mục~\ref{sec:metrics} cho lần chạy có guard, và tính độ trễ tăng thêm so với baseline.
-    \item \textbf{Phân tích theo từng nhóm test case} (tài liệu sạch, từng loại tài liệu nhiễm độc, từng loại prompt injection), không chỉ báo cáo một con số gộp duy nhất.
-\end{enumerate}
+\section{Chỉ số}
 
-\section{Định nghĩa các metric đánh giá}
-\label{sec:metrics}
+Các chỉ số dùng trong báo cáo gồm exact-label pass rate, số false positive, số
+false negative, tỷ lệ theo năm decision và attack-success proxy. Trong runner,
+false positive là case benign mong đợi allow/log-only nhưng thực tế block hoặc
+human review. False negative là case attack mong đợi block/sanitize/human review
+nhưng thực tế allow/log-only. Attack-success proxy được tính bằng số false
+negative chia tổng 35 attack case.
 
-Bảng~\ref{tab:metrics} liệt kê 6 metric đã được nhóm định nghĩa chính xác kèm công thức (chi tiết tại \texttt{docs/evaluation/metrics-definition.md}). \textbf{Đây là định nghĩa/công thức, không phải kết quả đo.}
+Proxy này là chỉ số dựa trên decision, không phải Attack Success Rate đo tác hại
+ở đầu ra cuối cùng.
+
+\section{Kết quả guarded và phân tích lỗi}
+
+Lần chạy đầu tiên ghi nhận 35/40 decision khớp nhãn, 0 false positive và 5 false
+negative. Năm case thất bại thuộc direct injection (2), jailbreak (1), sensitive
+extraction (1) và RAG-context manipulation (1). Phân tích nguyên nhân cho thấy
+rule cũ có khoảng trống từ vựng. Nhóm bổ sung năm rule hẹp và test đối chứng,
+không sửa prompt hoặc expected label.
+
+Sau hiệu chỉnh, cùng bộ 40 prompt không thay đổi cho kết quả trong
+Bảng~\ref{tab:guarded-results}.
 
 \begin{table}[H]
 \centering
-\caption{Định nghĩa các metric đánh giá}
-\label{tab:metrics}
-\begin{tabular}{@{}p{0.24\linewidth}p{0.76\linewidth}@{}}
+\caption{Kết quả guarded trên controlled synthetic benchmark}
+\label{tab:guarded-results}
+\begin{tabular}{lr}
 \toprule
-\textbf{Metric} & \textbf{Định nghĩa / công thức} \\
+Chỉ số & Kết quả \\
 \midrule
-Attack Success Rate (ASR) & Tỉ lệ test case tấn công mà hiệu ứng gây hại thực sự xuất hiện ở đầu ra cuối cùng, bất kể guard nào đã can thiệp: $\text{ASR} = \dfrac{\text{số case tấn công thành công}}{\text{tổng số case tấn công}} \times 100\%$ \\
-Block Rate & Tỉ lệ test case tấn công dẫn tới kết quả \textit{Block}: $\text{Block Rate} = \dfrac{\text{số case bị Block}}{\text{tổng số case tấn công}} \times 100\%$ \\
-False Positive Rate (FPR) & Tỉ lệ test case hợp lệ (tài liệu sạch, truy vấn bình thường) bị gắn cờ nhầm: $\text{FPR} = \dfrac{\text{số case hợp lệ bị gắn cờ nhầm}}{\text{tổng số case hợp lệ}} \times 100\%$ \\
-False Negative Rate (FNR) & Tỉ lệ test case tấn công bị bỏ sót hoàn toàn (kết quả Allow dù đáng lẽ phải Block/Sanitize...): $\text{FNR} = \dfrac{\text{số case tấn công bị bỏ sót}}{\text{tổng số case tấn công}} \times 100\%$ \\
-Latency Overhead & Độ trễ tăng thêm do pipeline 3 guard so với baseline không guard: $\text{Latency Overhead} = \overline{t}_{\text{có guard}} - \overline{t}_{\text{baseline}}$ \\
-Reason Logging Completeness & Tỉ lệ quyết định của guard có bản ghi log đầy đủ (mã lý do, timestamp, request ID): $= \dfrac{\text{số quyết định có log đầy đủ}}{\text{tổng số quyết định}} \times 100\%$ \\
+Tổng số prompt & 40 \\
+Decision khớp nhãn & 40 \\
+Decision không khớp & 0 \\
+Exact-label pass rate & 1.0000 \\
+False positive & 0 \\
+False negative & 0 \\
+Attack-success proxy & 0.0000 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\textbf{Đối chiếu với Phase 1:} metric ASR ở đây tổng quát hóa "Jailbreak Success Rate (JSR)" đã ghi nhận sơ bộ ở Phase 1 -- JSR chỉ tính riêng cho nhóm jailbreak, còn ASR bao phủ toàn bộ các nhóm tấn công.
+\textbf{Diễn giải bắt buộc:} 40/40 chỉ là exact-label match trên benchmark tổng
+hợp có kiểm soát của nhóm sau calibration. Kết quả này không phải real-world
+detection rate, không chứng minh tổng quát hóa và không phải chứng nhận an toàn.
 
-\section{Ràng buộc và phạm vi ngoài đánh giá}
+\begin{figure}[H]
+\centering
+\fbox{\parbox{0.88\textwidth}{\centering
+\textbf{TODO: add evaluation result screenshot}\\
+Chụp đầu ra \texttt{python scripts/run\_evaluation.py} thể hiện 40/40, 0 FP và 0 FN.}}
+\caption{Vị trí dự kiến chèn ảnh kết quả đánh giá guarded}
+\label{fig:evaluation-todo}
+\end{figure}
+
+\section{So sánh baseline và guarded}
+
+Baseline được định nghĩa là hệ thống không có guard và luôn trả về
+\texttt{allow}. Baseline không sinh hoặc chấm điểm câu trả lời LLM. Đây chỉ là
+decision baseline để so sánh tác động của rule guard.
+
+\begin{table}[H]
+\centering
+\caption{So sánh always-allow baseline và guarded}
+\label{tab:baseline-comparison}
+\begin{tabular}{lrr}
+\toprule
+Chỉ số & Baseline & Guarded \\
+\midrule
+Tổng số prompt & 40 & 40 \\
+Decision khớp nhãn & 5 & 40 \\
+Decision không khớp & 35 & 0 \\
+Pass rate & 0.1250 & 1.0000 \\
+False positive & 0 & 0 \\
+False negative & 35 & 0 \\
+Attack-success proxy & 1.0000 & 0.0000 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Trong benchmark này, baseline cho phép toàn bộ case nên chỉ khớp 5 prompt
+benign và bỏ sót 35 attack case. Chế độ guarded khớp toàn bộ nhãn hiện tại. So
+sánh không phản ánh chất lượng LLM hoặc hiệu quả ngoài phân bố benchmark.
+
+\begin{figure}[H]
+\centering
+\fbox{\parbox{0.88\textwidth}{\centering
+\textbf{TODO: add baseline comparison screenshot}\\
+Chụp bảng từ \texttt{reports/evaluation/baseline-vs-guarded.md}.}}
+\caption{Vị trí dự kiến chèn ảnh so sánh baseline và guarded}
+\label{fig:baseline-todo}
+\end{figure}
+
+\section{Khả năng tái lập}
+
+Các lệnh chính để tái lập kết quả:
+
+\begin{verbatim}
+python -m pytest -q
+python scripts/run_evaluation.py
+python scripts/run_evaluation.py --comparison
+\end{verbatim}
+
+Artifact JSON/Markdown được ghi dưới \texttt{reports/evaluation/}. Test kiểm tra
+SHA-256 bảo đảm evaluation không sửa file trong \texttt{datasets/} hoặc
+\texttt{redteam/}.
+
+\section{Hạn chế của thực nghiệm}
 
 \begin{itemize}
-    \item Chỉ dùng dữ liệu tổng hợp; không chạy đánh giá trên hệ thống/dữ liệu thật.
-    \item Không gọi API trả phí lặp lại khi chưa được phê duyệt; ưu tiên chế độ dry-run khi phát triển guard.
-    \item Không đo kiểm chịu tải/DoS -- rủi ro DoS được chấp nhận, ngoài phạm vi MVP (đã nêu ở Chương 2).
-    \item Không đánh giá kịch bản tấn công đa lượt (multi-turn) trong MVP -- bộ test hiện tại chỉ gồm các case đơn lượt.
-    \item Không đánh giá trên hạ tầng Kubernetes/SIEM/mô hình fine-tune -- các hạng mục này ngoài phạm vi MVP.
+    \item Benchmark nhỏ, tổng hợp và chỉ gồm 40 prompt đơn lượt.
+    \item Guard dựa trên rule/regex, không phải semantic classifier.
+    \item Quá trình calibration trên năm failure có thể làm kết quả chịu ảnh
+    hưởng overfitting đối với corpus hiện tại.
+    \item Không có LLM thực, vector database, embedding hoặc retrieval thực.
+    \item Không đo latency, load/DoS, chất lượng câu trả lời hoặc real-world
+    attack outcome.
+    \item Chưa đánh giá multi-turn attack hoặc một holdout set độc lập.
 \end{itemize}
 
-\section{Hướng triển khai tiếp theo}
+\section{Kết luận chương}
 
-Sau khi báo cáo định kỳ này được xác nhận, nhóm dự kiến triển khai tuần tự theo Bảng~\ref{tab:phase-overview} (Chương 3): Phase 3 (khung Gateway) $\rightarrow$ Phase 4 (Input Guard) $\rightarrow$ Phase 5 (RAG Guard + demo RAG) $\rightarrow$ Phase 6 (Output Guard) $\rightarrow$ Phase 7 (chạy đánh giá thật theo phương pháp ở mục 4.1, dùng đúng các metric ở mục~\ref{sec:metrics}) $\rightarrow$ Phase 8--9 (tổng hợp báo cáo, hoàn thiện, demo).
-
-\section{Lưu ý quan trọng}
-
-Tại thời điểm nộp báo cáo định kỳ này: \textbf{chưa có mã nguồn ứng dụng, chưa cài đặt package, chưa gọi API LLM nào, và chưa có bất kỳ số liệu ASR/Block Rate/FPR/FNR/độ trễ nào được đo thực tế.} Mọi con số xuất hiện trong các báo cáo định kỳ sau này phải xuất phát từ một lần chạy thật, có thể tái lập từ mã nguồn/dữ liệu đã lưu trong kho mã nguồn dự án.
+Kết quả cho thấy rule guard tạo khác biệt rõ so với always-allow baseline trên
+bộ nhãn hiện tại. Tuy nhiên, phạm vi benchmark và calibration không cho phép mở
+rộng kết luận thành hiệu quả bảo mật thực tế.

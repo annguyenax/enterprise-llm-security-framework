@@ -1,5 +1,9 @@
 # Report Integration Plan
 
+Integration status: chapters, conclusion, appendix, declaration and group-work
+plan have been updated from current evidence. Static checks passed; figure TODOs,
+TeX compilation, proofreading and supervisor review remain open.
+
 Official title (must remain unchanged):
 
 > Nghiên cứu và triển khai cơ chế Guardrails bảo vệ hệ thống RAG trước tấn công Prompt Injection và rò rỉ dữ liệu

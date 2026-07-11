@@ -215,6 +215,23 @@ code/results yet”; these are identified in `report-integration-plan.md` and mu
 be replaced with reviewed current evidence before final compilation. No app,
 test, benchmark, evaluation, or core behavior changed in this phase.
 
+## Phase 10 — Final LaTeX Report Integration — **Status: In Review**
+
+| Task | Owner | Status |
+|---|---|---|
+| Integrate final chapter content | Both | Done - introduction, background, architecture/threat model, implementation/dataset, evaluation/results, conclusion and appendix updated from evidence |
+| Preserve official title/template structure | Both | Done - `titlethesis` verified byte-for-byte unchanged; main include order preserved |
+| Update group-work plan | Both | Done - An mapped to gateway/guards/evaluation/report integration; Nghĩa mapped to dataset/red-team/documentation/demo evidence review; team review noted |
+| Static LaTeX/citation audit | Both | Done - brace scan clean and all five used citation keys exist in `refs.bib` |
+| Add screenshots/figures | Both | Not Started - three explicit TODO placeholders remain |
+| Compile final PDF and fix warnings | Both | Blocked on manual TeX environment - no `latexmk`, `pdflatex`, `xelatex`, or `bibtex` available in current environment |
+| Vietnamese proofread and supervisor review | Both | Not Started |
+| Final submission package | Both | Not Started |
+
+**Phase 10 evidence:** `reports/evidence/final-report-review-checklist.md` records
+compile, figure, citation, claim-safety and PDF review gates. No app, test,
+script, benchmark, guard, evaluation artifact or generated result changed.
+
 ## Notes
 
 ### Phase 5.1 - RAG Guard Red-team Hardening - **Status: Done**
