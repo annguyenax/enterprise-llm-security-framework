@@ -26,21 +26,34 @@ Phase 0 kickoff. Focus was entirely on scaffolding: repository structure, planni
 - No public red-team dataset was found and reviewed directly yet; only candidate tool-bundled probe sets (garak, PyRIT, deepteam) were noted for future review.
 - No code was written; this was documentation-only work, per the Phase 1 scope and `AGENT_RULES.md` rule 12 (stop at phase boundaries).
 
+## Phase 2 Kickoff (same week, 2026-07-11)
+
+- Wrote functional requirements (FR1–FR9) and non-functional requirements (NFR1–NFR9) for the MVP in `docs/diagrams/architecture.md` §1–2, explicitly including the 16GB-RAM-laptop, no-GPU, no-paid-API-without-approval constraints.
+- Expanded the architecture Mermaid diagram to show Config/Settings and Vector Store explicitly, and added a Module Responsibility Table (9 modules, their responsibilities, and target phase).
+- Added a second Mermaid diagram to `docs/diagrams/data-flow.md`: a document ingestion flow (synthetic source → ingestion script → provenance tagging → vector store), complementing the existing request/response sequence diagram.
+- Expanded the STRIDE threat model in `docs/diagrams/threat-model.md` with qualitative risk ratings (High/Medium/Low — team judgment, not measured) and a new section listing threats deliberately deferred to future thesis scope (Kubernetes container-escape/RBAC risks, SIEM log-tampering, training-data poisoning for a fine-tuning pipeline) — recorded so they aren't silently forgotten, but explicitly not modeled in detail since they're not MVP architecture.
+- Added an explicit "MVP Scope vs. Future Thesis Scope" table to `docs/diagrams/architecture.md` §5 and a matching addendum to `docs/decisions/ADR-001-mvp-scope.md`, stating plainly that **Kubernetes, SIEM integration, and local model fine-tuning are not MVP requirements** for this internship.
+- Documented architecture-level risks and mitigations (gateway as a single point of failure, guard false positive/negative risk, 16GB RAM constraint on embedding model choice, scope-creep risk, latency risk, framework lock-in risk).
+- No code was written, no packages were installed, and no APIs were called this session — documentation-only, per the explicit Phase 2 constraints and `AGENT_RULES.md` rule 12.
+
 ## In Progress / Not Started
 
 - LlamaIndex vs. LangChain, ChromaDB vs. alternative, and API-based LLM provider comparisons — not covered by the Gemini research pass yet, still Not Started.
 - Direct team read-through of the three academic papers logged in `related-work.md` — needed before any citation is added to `report-latex/references.bib`.
 - Standalone public red-team dataset review — still Not Started.
+- Actual synthetic red-team prompt set and poisoned-document set — the threat model and ingestion flow that will drive their design now exist, but no actual data files have been created yet.
 
 ## Blockers / Open Questions
 
 - RAG framework (LlamaIndex vs LangChain) and vector store choice deferred — needs further Phase 1 research before an ADR can be written.
 - Choice of API-based LLM provider not yet finalized — pending team decision and budget/approval discussion per `AGENT_RULES.md` rule 4.
 - AI-assisted research (Gemini) requires a mandatory verification pass before being trusted — adds time but caught two real citation errors this week, so the process is being kept for future research sessions.
+- Latency and false-positive/false-negative NFR targets are intentionally left qualitative until Phase 7 produces real measurements — this is correct per `AGENT_RULES.md` rule 3, but means the report cannot yet state concrete performance numbers.
 
 ## Next Week Plan
 
 - Team members personally read the three logged academic papers and confirm/replace the placeholder "Summary" fields in `related-work.md` with their own understanding.
 - Research LlamaIndex vs. LangChain, ChromaDB vs. alternatives, and candidate API-based LLM providers.
 - Review garak/PyRIT/deepteam's bundled probe sets for licensing and content type, logging proper entries in `dataset-review.md`.
-- Confirm Phase 0 deliverables satisfy periodic report 01 requirements.
+- Begin deriving concrete synthetic test cases from each STRIDE threat-model row (Phase 2 continuation, still documentation/design work before any dataset files are created).
+- Confirm Phase 0/1/2 documentation deliverables satisfy periodic report 01 requirements.

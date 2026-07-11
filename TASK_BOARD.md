@@ -12,7 +12,7 @@ Owners: **Nguyen Van An**, **Le Dinh Nghia**, or **Both**. Status values: `Not S
 | TASK_BOARD.md | Both | Done |
 | docs/report/ skeleton + periodic report 01 draft | Both | In Progress |
 | docs/research/ skeleton | Both | In Progress |
-| docs/diagrams/ (architecture, threat model, data flow) | Both | In Progress |
+| docs/diagrams/ (architecture, threat model, data flow) | Both | Done — expanded in Phase 2 (2026-07-11) with FR/NFR, module table, MVP-vs-future-scope, risk ratings; see Phase 2 section below |
 | docs/decisions/ADR-001-mvp-scope.md | Both | Done |
 | report-latex/ skeleton (compiles) | Both | In Progress |
 | requirements.txt / .env.example / .gitignore | Both | Done |
@@ -33,10 +33,17 @@ Owners: **Nguyen Van An**, **Le Dinh Nghia**, or **Both**. Status values: `Not S
 
 | Task | Owner | Status |
 |---|---|---|
-| STRIDE threat model for gateway + RAG | Both | Not Started |
-| Synthetic red-team prompt set (prompt injection) | Nguyen Van An | Not Started |
-| Synthetic poisoned-document set (RAG poisoning) | Le Dinh Nghia | Not Started |
-| Define evaluation metrics | Both | Not Started |
+| STRIDE threat model for gateway + RAG | Both | In Progress — STRIDE table expanded with qualitative risk ratings and module cross-references (`docs/diagrams/threat-model.md`); still needs Phase 2 continuation to derive concrete synthetic test cases per row |
+| Functional & non-functional requirements | Both | Done — documented in `docs/diagrams/architecture.md` §1–2 (2026-07-11) |
+| Module responsibility table | Both | Done — documented in `docs/diagrams/architecture.md` §4 (2026-07-11) |
+| MVP scope vs. future thesis scope (Kubernetes/SIEM/fine-tuning explicitly deferred) | Both | Done — documented in `docs/diagrams/architecture.md` §5 and `docs/decisions/ADR-001-mvp-scope.md` addendum (2026-07-11) |
+| Architecture-level risks and mitigations | Both | Done — documented in `docs/diagrams/architecture.md` §6 (2026-07-11) |
+| Document ingestion data flow diagram | Both | Done — documented in `docs/diagrams/data-flow.md` §2 (2026-07-11) |
+| Synthetic red-team prompt set (prompt injection) | Nguyen Van An | Not Started — this documentation pass only designed the threat model rows; actual synthetic prompt data is still to be created |
+| Synthetic poisoned-document set (RAG poisoning) | Le Dinh Nghia | Not Started — referenced conceptually in the ingestion data-flow diagram; no actual documents created yet |
+| Define evaluation metrics | Both | In Progress — candidate metrics (JSR, False Positive Rate, Latency Overhead, LLM-as-Judge) already logged in `docs/research/tool-comparison.md` from Phase 1; not yet finalized against this project's specific test set |
+
+**Note:** This Phase 2 pass (2026-07-11) was documentation-only — no code, no package installs, no API calls, per the explicit constraints for this session. Kubernetes, SIEM integration, and local fine-tuning were deliberately kept out of MVP requirements and recorded only as future thesis scope.
 
 ## Phase 3 — Gateway Skeleton
 

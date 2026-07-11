@@ -31,6 +31,19 @@ Technical constraints adopted for the MVP:
 - Evaluation results will only cover the synthetic test set actually built in Phase 2 — no generalization claims beyond that set.
 - Any request to expand scope (e.g., add agentic tool-use security, multi-modal input, additional attack classes) requires an explicit new decision, not silent expansion (`AGENT_RULES.md` rule 1).
 - Framework/vector-store lock-in risk is deferred but must be resolved before Phase 5 begins in earnest.
+- The system must run entirely on a **two-student team's own laptops (16GB RAM each)** — no infrastructure requiring a server fleet, container cluster, or paid always-on hosting is assumed for the MVP.
+
+## MVP Scope vs. Future Thesis Scope (Phase 2 addendum, 2026-07-11)
+
+Phase 2 architecture work (`docs/diagrams/architecture.md` §5) made explicit a distinction that was implicit in this ADR's original decision: several enterprise-grade capabilities are **future thesis scope only** and must never be treated as MVP requirements, regardless of how the report frames the project's ambitions.
+
+| Explicitly future thesis scope (NOT MVP) | Why it's excluded from MVP |
+|---|---|
+| **Kubernetes** / container orchestration | Adds operational complexity far beyond a lab-scale, single/dual-laptop setup; no scaling need exists for a demo with a synthetic corpus and two users. |
+| **SIEM integration** (e.g., Splunk/ELK/Sentinel log shipping) | Assumes an enterprise security-operations context this internship does not have; JSONL local logging is sufficient for Phase 7 evaluation. |
+| **Local model fine-tuning / training** | Already excluded by the original decision above (no local training in MVP); restated here for clarity now that it's being explicitly asked about per phase. |
+
+If a future continuation of this work (e.g., a full thesis beyond the internship) wants to pursue any of these, that requires a **new ADR**, not an extension of this one — per `AGENT_RULES.md` rule 1 (no scope creep) and rule 12 (stop at phase boundaries).
 
 ## Alternatives Considered
 

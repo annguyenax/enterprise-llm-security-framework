@@ -10,7 +10,7 @@
 
 **Thời hạn nộp báo cáo:** 12–13/07/2026
 
-**Giai đoạn hiện tại:** Phase 0 hoàn tất (scaffold). Phase 1 (nghiên cứu) đã bắt đầu — hiện chỉ ở mức tài liệu nghiên cứu (research documentation), chưa triển khai code ứng dụng.
+**Giai đoạn hiện tại:** Phase 0 hoàn tất (scaffold). Phase 1 (nghiên cứu) đã có bản nháp đầu tiên. Phase 2 (kiến trúc & threat model) đã bắt đầu — hiện chỉ ở mức tài liệu thiết kế (architecture & threat-model documentation), chưa triển khai code ứng dụng, chưa cài đặt package, chưa gọi API nào.
 
 ---
 
@@ -28,6 +28,15 @@
 - Toàn bộ trích dẫn từ bản nghiên cứu AI này đã được **xác minh chéo qua tìm kiếm web thực tế** (không chỉ tin vào AI) trước khi đưa vào tài liệu chính thức, theo đúng AGENT_RULES.md mục 2 (không bịa trích dẫn). Quá trình xác minh phát hiện và sửa 2 lỗi nhỏ trong bản gốc của Gemini: sai tên tác giả đầu của PoisonedRAG (Zou, Y. → đúng là Zou, W.), và sai năm xuất bản của bài MDPI (2025 → đúng là 2026).
 - Kết quả đã được cập nhật vào `docs/research/related-work.md`, `owasp-llm-top10-mapping.md`, `llmsvs-checklist.md`, `tool-comparison.md`, `dataset-review.md`. Đây vẫn là **nghiên cứu thứ cấp có AI hỗ trợ**, các thành viên trong nhóm chưa đọc trực tiếp toàn văn các bài báo — cần xác minh thủ công trước khi trích dẫn chính thức trong báo cáo LaTeX.
 - Chưa tìm được bộ dataset red-team công khai cụ thể nào để review trực tiếp; chỉ ghi nhận garak/PyRIT/deepteam có kèm theo bộ probe/dataset riêng, cần mở và đánh giá ở phiên làm việc sau.
+
+### Giai đoạn Phase 2 (kiến trúc & threat model — đang triển khai)
+
+- Xây dựng đầy đủ **yêu cầu chức năng (Functional Requirements)** và **yêu cầu phi chức năng (Non-Functional Requirements)** cho MVP, ghi tại `docs/diagrams/architecture.md` mục 1–2 — bao gồm ràng buộc tường minh: toàn bộ hệ thống phải chạy được trên laptop 16GB RAM của 2 sinh viên, không cần GPU, không cần hạ tầng cloud ngoài API của nhà cung cấp LLM.
+- Cập nhật sơ đồ kiến trúc Mermaid (`architecture.md`) chi tiết hơn: thêm khối Config/Settings, Vector Store, và đường log riêng cho từng guard; cập nhật sơ đồ luồng dữ liệu Mermaid (`data-flow.md`) với 2 luồng — (1) luồng request/response như Phase 0, và (2) luồng ingestion tài liệu tổng hợp vào Vector Store kèm gắn provenance/source ID.
+- Thêm **bảng phân chia trách nhiệm module** (Module Responsibility Table) — liệt kê rõ 9 module (Demo UI/API, Security Gateway, Config, Input Guard, RAG Guard, Vector Store, LLM Provider Adapter, Output Guard, Logging/Evaluation), trách nhiệm, module liên quan, và phase triển khai dự kiến.
+- Mở rộng threat model STRIDE (`threat-model.md`) với mức đánh giá rủi ro định tính (High/Medium/Low — không phải số liệu đo thực tế), và bổ sung mục "Threats Deferred to Future Thesis Scope" liệt kê rõ các nhóm rủi ro liên quan đến Kubernetes, SIEM, fine-tuning — được ghi nhận nhưng **không mô hình hóa chi tiết** vì các hạ tầng đó không thuộc MVP.
+- Cập nhật ADR-001 với bảng **"MVP Scope vs. Future Thesis Scope"**, khẳng định rõ ràng: Kubernetes, tích hợp SIEM, và fine-tuning/huấn luyện mô hình local **không phải yêu cầu của MVP thực tập**, chỉ được ghi nhận như hướng mở rộng cho luận văn/đồ án tương lai nếu có.
+- Toàn bộ công việc Phase 2 lần này chỉ dừng ở tài liệu thiết kế — không viết code, không cài đặt package, không gọi API nào, đúng theo AGENT_RULES.md.
 
 ## 2. Đề cương chi tiết các công việc thực hiện
 
@@ -80,3 +89,6 @@ Kế hoạch thực hiện bám theo `TASK_BOARD.md`, cập nhật trạng thái
 - Thời gian giữa các giai đoạn khá sát với deadline báo cáo định kỳ; cần đảm bảo mỗi phase đều có tài liệu/evidence đầy đủ trước khi chuyển giai đoạn.
 - Sử dụng AI (Gemini, Claude) để hỗ trợ tổng hợp tài liệu nghiên cứu giúp tiết kiệm thời gian, nhưng phát sinh thêm bước xác minh trích dẫn (fact-checking) bắt buộc trước khi đưa vào báo cáo chính thức — đã phát hiện 2 lỗi trích dẫn nhỏ (tên tác giả, năm xuất bản) trong lần rà soát đầu tiên, cho thấy quy trình xác minh này là cần thiết và nên duy trì cho các phase nghiên cứu tiếp theo.
 - Các trích dẫn học thuật (đặc biệt là PIDP-Attack, công bố tháng 3/2026) đều là preprint chưa qua bình duyệt (chưa peer-reviewed) — cần thận trọng khi trích dẫn số liệu do chính tác giả tự công bố.
+- Yêu cầu phi chức năng về độ trễ (latency) của các guard hiện chưa có con số cụ thể — cố tình để ở dạng định tính ("hợp lý cho demo") vì chưa có lần chạy đánh giá thực tế nào (Phase 7); đưa số liệu giả định vào lúc này sẽ vi phạm AGENT_RULES.md mục 3.
+- Ràng buộc phần cứng 16GB RAM có thể giới hạn lựa chọn embedding model cho RAG Guard (embedding model local nặng có thể không khả thi) — quyết định cụ thể vẫn hoãn đến ADR ở Phase 5.
+- Các mức đánh giá rủi ro (High/Medium/Low) trong threat model là đánh giá định tính của nhóm, chưa dựa trên số liệu đo thực tế — cần được kiểm chứng lại bằng kết quả evaluation ở Phase 7.
