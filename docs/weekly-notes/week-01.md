@@ -122,6 +122,13 @@ Phase 0 kickoff. Focus was entirely on scaffolding: repository structure, planni
 - Latency and false-positive/false-negative NFR targets are intentionally left qualitative until Phase 7 produces real measurements — this is correct per `AGENT_RULES.md` rule 3, but means the report cannot yet state concrete performance numbers.
 - The Sanitize vs. Log only boundary for borderline poisoned-document cases (e.g., RT-POISON-004) needs team discussion before guard logic is implemented in Phase 4–6. Now tracked formally as one of 4 ambiguous cases flagged for priority manual review in `docs/dataset/dataset-validation-report.md` §11.
 
+## Phase 5.1 - RAG Guard Red-team Hardening (same week, 2026-07-11)
+
+- Hardened `app/guards/rag_guard.py` after the Grok review with detection-only normalization (case, whitespace, zero-width characters, and light leetspeak), malformed/multiline hidden comments, JS/CSS blocks, directive-replacement variants, multiline support transcripts, broader policy/approval bypass language, and deterministic compound-signal handling.
+- Sanitization still operates on original chunk text and preserves `doc_id`/`metadata`; hidden instructions are removed block-by-block and the synthetic fake-secret marker is redacted. No gateway architecture, frozen dataset, red-team label, LLM call, embedding, retrieval, or vector database changed.
+- Added bypass, sanitization, severity, cross-guard, and benign enterprise false-positive coverage. Verified 23 RAG Guard/dataset tests and 2 direct gateway integration checks. HTTP `TestClient` collection remains blocked by the documented shared Starlette environment issue; no packages were installed.
+- Remaining limitation: regex rules can still miss semantic, deeply obfuscated, or encoded attacks. A semantic classifier or LLM judge remains future work, and complete prompt-injection protection is not claimed.
+
 ## Next Week Plan
 
 - Team members personally read the three logged academic papers and confirm/replace the placeholder "Summary" fields in `related-work.md` with their own understanding.

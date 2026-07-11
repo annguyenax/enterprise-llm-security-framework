@@ -172,6 +172,16 @@ This is the same work recorded against the two Phase 2 rows above ("Synthetic re
 
 ## Notes
 
+### Phase 5.1 - RAG Guard Red-team Hardening - **Status: Done**
+
+| Task | Owner | Status |
+|---|---|---|
+| Detection normalization and bypass hardening | Nguyen Van An | Done - detection-only case/whitespace/zero-width/light-leetspeak normalization; hidden block, directive replacement, transcript, policy bypass, and compound-signal rules added without changing gateway architecture |
+| False-positive and cross-guard tests | Both | Done - benign enterprise suite plus poisoned-context continuation, malicious-input short-circuit, metadata preservation, sanitization, and severity-order coverage |
+| Phase 5.1 verification | Both | Done - 23 direct RAG Guard/dataset tests passed; 2 gateway service integration checks passed. HTTP `TestClient` collection remains blocked by the documented shared-environment issue; no packages were installed |
+
+**Next implementation phase:** Phase 6 LLM Provider Adapter (mock-first). Any real provider call still requires explicit approval under `AGENT_RULES.md`; vector retrieval remains out of scope.
+
 - This board is updated as phases progress; do not mark a task `Done` without corresponding documentation/evidence per `AGENT_RULES.md` rule 9.
 - Phase boundaries are gates — do not start Phase N+1 implementation while Phase N is still `In Progress` without explicit approval.
 - **Environment security observation (Phase 5 session, 2026-07-11, unrelated to this project's own code):** the `starlette` package installed in the shared Python environment used for this session (version reported as `1.2.1`, not a genuine upstream Starlette release) contains a modified `starlette/testclient.py` that tries to `import httpx2` before falling back to the real `httpx` package, and refuses to run at all if neither is present. `httpx2` is not this project's dependency (see `requirements.txt`, which correctly lists `httpx`) and is not a package anyone on this team asked to install. This matches a dependency-confusion / typosquat pattern. No agent session should ever run `pip install httpx2`; if `TestClient`-based tests need to run, install the genuine `httpx` package (already listed in `requirements.txt`) in a clean project-local virtual environment instead, and separately verify the integrity of the shared Python environment (`C:\Users\ADMIN\AppData\Roaming\Python\Python313\site-packages`) this was found in.
