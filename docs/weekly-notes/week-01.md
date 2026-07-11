@@ -36,12 +36,22 @@ Phase 0 kickoff. Focus was entirely on scaffolding: repository structure, planni
 - Documented architecture-level risks and mitigations (gateway as a single point of failure, guard false positive/negative risk, 16GB RAM constraint on embedding model choice, scope-creep risk, latency risk, framework lock-in risk).
 - No code was written, no packages were installed, and no APIs were called this session — documentation-only, per the explicit Phase 2 constraints and `AGENT_RULES.md` rule 12.
 
+## Phase 2.5 Kickoff — Red-Team Test & Evaluation Design (same week, 2026-07-11)
+
+- Created `docs/evaluation/` with three new design documents:
+  - `red-team-test-design.md` — designs 5 synthetic clean enterprise documents (HR, IT helpdesk, security guideline, product FAQ, finance reimbursement), 5 synthetic poisoned-document categories (hidden instructions, system-instruction override, secret leakage, policy-bypass request, indirect injection via transcript), and 7 prompt-injection test categories (direct, role override, instruction hierarchy, jailbreak, sensitive-info extraction, RAG context manipulation, tool/action misuse) — each with example synthetic text and an expected-behavior mapping.
+  - `metrics-definition.md` — precisely defines 6 metrics (ASR, Block Rate, FPR, FNR, Latency Overhead, Reason Logging Completeness) with formulas, and reconciles them against the candidate metric names logged in Phase 1's `tool-comparison.md`.
+  - `evaluation-plan.md` — defines the baseline-vs-guarded evaluation methodology, roles, and constraints for the eventual Phase 7 run.
+- All example content uses a fictional company ("Northwind Retail Group") and obviously-fake secret placeholders (e.g., `FAKE-SECRET-0000-EXAMPLE`) — no real PII, credentials, or company data, per `AGENT_RULES.md` rules 5 and 7.
+- Updated `docs/research/dataset-review.md` to cross-reference the new design, making clear it is design-only — no files exist yet under `datasets/` or `redteam/`.
+- No code was written, no packages were installed, and no APIs were called — documentation and data *design* only, per this session's explicit constraints.
+
 ## In Progress / Not Started
 
 - LlamaIndex vs. LangChain, ChromaDB vs. alternative, and API-based LLM provider comparisons — not covered by the Gemini research pass yet, still Not Started.
 - Direct team read-through of the three academic papers logged in `related-work.md` — needed before any citation is added to `report-latex/references.bib`.
 - Standalone public red-team dataset review — still Not Started.
-- Actual synthetic red-team prompt set and poisoned-document set — the threat model and ingestion flow that will drive their design now exist, but no actual data files have been created yet.
+- Actual synthetic red-team prompt set and poisoned-document set — now fully **designed** in `docs/evaluation/red-team-test-design.md`, but no actual files exist yet under `datasets/` or `redteam/`.
 
 ## Blockers / Open Questions
 
@@ -49,11 +59,12 @@ Phase 0 kickoff. Focus was entirely on scaffolding: repository structure, planni
 - Choice of API-based LLM provider not yet finalized — pending team decision and budget/approval discussion per `AGENT_RULES.md` rule 4.
 - AI-assisted research (Gemini) requires a mandatory verification pass before being trusted — adds time but caught two real citation errors this week, so the process is being kept for future research sessions.
 - Latency and false-positive/false-negative NFR targets are intentionally left qualitative until Phase 7 produces real measurements — this is correct per `AGENT_RULES.md` rule 3, but means the report cannot yet state concrete performance numbers.
+- The Sanitize vs. Log only boundary for borderline poisoned-document cases (e.g., RT-POISON-004) needs team discussion before guard logic is implemented in Phase 4–6.
 
 ## Next Week Plan
 
 - Team members personally read the three logged academic papers and confirm/replace the placeholder "Summary" fields in `related-work.md` with their own understanding.
 - Research LlamaIndex vs. LangChain, ChromaDB vs. alternatives, and candidate API-based LLM providers.
 - Review garak/PyRIT/deepteam's bundled probe sets for licensing and content type, logging proper entries in `dataset-review.md`.
-- Begin deriving concrete synthetic test cases from each STRIDE threat-model row (Phase 2 continuation, still documentation/design work before any dataset files are created).
-- Confirm Phase 0/1/2 documentation deliverables satisfy periodic report 01 requirements.
+- Materialize `docs/evaluation/red-team-test-design.md` into actual files under `datasets/` and `redteam/`, using the ID convention in that document's §6 — this is data-file creation, not code, but should be scoped/approved as its own step before Phase 3 code begins.
+- Confirm Phase 0/1/2/2.5 documentation deliverables satisfy periodic report 01 requirements.

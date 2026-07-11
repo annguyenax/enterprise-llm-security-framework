@@ -39,11 +39,14 @@ Owners: **Nguyen Van An**, **Le Dinh Nghia**, or **Both**. Status values: `Not S
 | MVP scope vs. future thesis scope (Kubernetes/SIEM/fine-tuning explicitly deferred) | Both | Done — documented in `docs/diagrams/architecture.md` §5 and `docs/decisions/ADR-001-mvp-scope.md` addendum (2026-07-11) |
 | Architecture-level risks and mitigations | Both | Done — documented in `docs/diagrams/architecture.md` §6 (2026-07-11) |
 | Document ingestion data flow diagram | Both | Done — documented in `docs/diagrams/data-flow.md` §2 (2026-07-11) |
-| Synthetic red-team prompt set (prompt injection) | Nguyen Van An | Not Started — this documentation pass only designed the threat model rows; actual synthetic prompt data is still to be created |
-| Synthetic poisoned-document set (RAG poisoning) | Le Dinh Nghia | Not Started — referenced conceptually in the ingestion data-flow diagram; no actual documents created yet |
-| Define evaluation metrics | Both | In Progress — candidate metrics (JSR, False Positive Rate, Latency Overhead, LLM-as-Judge) already logged in `docs/research/tool-comparison.md` from Phase 1; not yet finalized against this project's specific test set |
+| Synthetic red-team prompt set (prompt injection) | Nguyen Van An | In Progress — 7 test categories fully **designed** with example prompts in `docs/evaluation/red-team-test-design.md` §4; actual files under `redteam/` still Not Started |
+| Synthetic poisoned-document set (RAG poisoning) | Le Dinh Nghia | In Progress — 5 clean + 5 poisoned document categories fully **designed** with example text in `docs/evaluation/red-team-test-design.md` §2–3; actual files under `datasets/` still Not Started |
+| Define evaluation metrics | Both | Done (definitions) — 6 metrics (ASR, Block Rate, FPR, FNR, Latency Overhead, Reason Logging Completeness) precisely defined with formulas in `docs/evaluation/metrics-definition.md`, reconciled against Phase 1's candidate metric names; **no measurements exist**, only definitions |
+| Evaluation plan / methodology | Both | Done (planning) — `docs/evaluation/evaluation-plan.md` documents the baseline-vs-guarded methodology, roles, and constraints for the eventual Phase 7 run |
 
 **Note:** This Phase 2 pass (2026-07-11) was documentation-only — no code, no package installs, no API calls, per the explicit constraints for this session. Kubernetes, SIEM integration, and local fine-tuning were deliberately kept out of MVP requirements and recorded only as future thesis scope.
+
+**Note (Phase 2.5, 2026-07-11):** A follow-on documentation-only session designed the red-team test corpus and evaluation criteria in detail — see `docs/evaluation/`. This is still design work, not actual test-data files or code; the "Not Started" → "In Progress" transitions above reflect that the *design* exists, not that `datasets/`/`redteam/` contain files yet.
 
 ## Phase 3 — Gateway Skeleton
 
@@ -83,9 +86,9 @@ Owners: **Nguyen Van An**, **Le Dinh Nghia**, or **Both**. Status values: `Not S
 
 | Task | Owner | Status |
 |---|---|---|
-| Automated red-team runner against gateway | Both | Not Started |
-| Metrics collection + reporting scripts | Le Dinh Nghia | Not Started |
-| Baseline (no-guard) vs guarded comparison run | Nguyen Van An | Not Started |
+| Automated red-team runner against gateway | Both | Not Started — methodology pre-specified in `docs/evaluation/evaluation-plan.md` §4 |
+| Metrics collection + reporting scripts | Le Dinh Nghia | Not Started — metric formulas pre-specified in `docs/evaluation/metrics-definition.md` |
+| Baseline (no-guard) vs guarded comparison run | Nguyen Van An | Not Started — comparison structure pre-specified in `docs/evaluation/evaluation-plan.md` §3 |
 
 ## Phase 8 — Report Consolidation
 

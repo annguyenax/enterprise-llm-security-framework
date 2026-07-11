@@ -10,7 +10,7 @@
 
 **Thời hạn nộp báo cáo:** 12–13/07/2026
 
-**Giai đoạn hiện tại:** Phase 0 hoàn tất (scaffold). Phase 1 (nghiên cứu) đã có bản nháp đầu tiên. Phase 2 (kiến trúc & threat model) đã bắt đầu — hiện chỉ ở mức tài liệu thiết kế (architecture & threat-model documentation), chưa triển khai code ứng dụng, chưa cài đặt package, chưa gọi API nào.
+**Giai đoạn hiện tại:** Phase 0 hoàn tất (scaffold). Phase 1 (nghiên cứu) đã có bản nháp đầu tiên. Phase 2 (kiến trúc & threat model) đã có bản thiết kế đầy đủ, bao gồm cả phần thiết kế dữ liệu red-team & tiêu chí đánh giá (gọi tắt "Phase 2.5"). Vẫn chỉ ở mức tài liệu — chưa triển khai code ứng dụng, chưa cài đặt package, chưa gọi API nào.
 
 ---
 
@@ -37,6 +37,16 @@
 - Mở rộng threat model STRIDE (`threat-model.md`) với mức đánh giá rủi ro định tính (High/Medium/Low — không phải số liệu đo thực tế), và bổ sung mục "Threats Deferred to Future Thesis Scope" liệt kê rõ các nhóm rủi ro liên quan đến Kubernetes, SIEM, fine-tuning — được ghi nhận nhưng **không mô hình hóa chi tiết** vì các hạ tầng đó không thuộc MVP.
 - Cập nhật ADR-001 với bảng **"MVP Scope vs. Future Thesis Scope"**, khẳng định rõ ràng: Kubernetes, tích hợp SIEM, và fine-tuning/huấn luyện mô hình local **không phải yêu cầu của MVP thực tập**, chỉ được ghi nhận như hướng mở rộng cho luận văn/đồ án tương lai nếu có.
 - Toàn bộ công việc Phase 2 lần này chỉ dừng ở tài liệu thiết kế — không viết code, không cài đặt package, không gọi API nào, đúng theo AGENT_RULES.md.
+
+### Giai đoạn Phase 2.5 (thiết kế dữ liệu red-team & tiêu chí đánh giá — đang triển khai)
+
+- Tạo thư mục `docs/evaluation/` với 3 tài liệu thiết kế mới:
+  - `red-team-test-design.md` — thiết kế 5 tài liệu doanh nghiệp "sạch" (HR, IT helpdesk, security guideline, product FAQ, finance reimbursement), 5 nhóm tài liệu RAG "nhiễm độc" (chèn lệnh ẩn, ghi đè system instruction, rò rỉ bí mật, yêu cầu bỏ qua chính sách, indirect injection qua transcript), và 7 nhóm prompt injection (direct, role override, instruction hierarchy, jailbreak, trích xuất thông tin nhạy cảm, thao túng ngữ cảnh RAG, lạm dụng tool/action).
+  - `metrics-definition.md` — định nghĩa chính xác 6 metric: Attack Success Rate (ASR), Block Rate, False Positive Rate (FPR), False Negative Rate (FNR), Latency Overhead, và Reason Logging Completeness — kèm công thức tính, đối chiếu lại với các metric đã ghi nhận từ Phase 1 (JSR → là một trường hợp con của ASR).
+  - `evaluation-plan.md` — quy trình đánh giá dự kiến (baseline không-guard vs có-guard), phân công vai trò, ràng buộc mang từ các phase trước.
+- Toàn bộ ví dụ tài liệu/prompt trong các file trên đều là **dữ liệu hư cấu 100%** — dùng công ty giả định "Northwind Retail Group" (gợi nhớ đến công ty mẫu "Northwind Traders" nổi tiếng của Microsoft, để tín hiệu rõ đây là dữ liệu mẫu), không dùng PII/secret thật, chuỗi "bí mật" giả đều có định dạng rõ ràng không thể nhầm với secret thật (ví dụ `FAKE-SECRET-0000-EXAMPLE`).
+- Cập nhật `docs/research/dataset-review.md` để tham chiếu sang bộ thiết kế mới này, làm rõ: đây mới là **thiết kế**, chưa có file dữ liệu thật nào được tạo trong `datasets/` hay `redteam/`.
+- Chưa viết bất kỳ dòng code Python nào, chưa cài đặt package nào, chưa gọi API nào trong toàn bộ phiên làm việc Phase 2.5.
 
 ## 2. Đề cương chi tiết các công việc thực hiện
 
@@ -92,3 +102,5 @@ Kế hoạch thực hiện bám theo `TASK_BOARD.md`, cập nhật trạng thái
 - Yêu cầu phi chức năng về độ trễ (latency) của các guard hiện chưa có con số cụ thể — cố tình để ở dạng định tính ("hợp lý cho demo") vì chưa có lần chạy đánh giá thực tế nào (Phase 7); đưa số liệu giả định vào lúc này sẽ vi phạm AGENT_RULES.md mục 3.
 - Ràng buộc phần cứng 16GB RAM có thể giới hạn lựa chọn embedding model cho RAG Guard (embedding model local nặng có thể không khả thi) — quyết định cụ thể vẫn hoãn đến ADR ở Phase 5.
 - Các mức đánh giá rủi ro (High/Medium/Low) trong threat model là đánh giá định tính của nhóm, chưa dựa trên số liệu đo thực tế — cần được kiểm chứng lại bằng kết quả evaluation ở Phase 7.
+- Một số trường hợp thiết kế test (ví dụ RT-POISON-004 "yêu cầu bỏ qua chính sách") là ranh giới mờ giữa "Sanitize" và "Log only" — nhóm cần thảo luận thêm để thống nhất ngưỡng quyết định cụ thể trước khi hiện thực hóa guard logic ở Phase 4–6.
+- Toàn bộ 6 metric đánh giá (ASR, Block Rate, FPR, FNR, Latency Overhead, Reason Logging Completeness) hiện chỉ là định nghĩa/công thức — chưa có bất kỳ số liệu đo nào; cần tránh nhầm lẫn đây là kết quả thực tế khi trình bày trong báo cáo LaTeX.

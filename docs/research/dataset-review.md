@@ -28,14 +28,19 @@ _No named public dataset has been directly reviewed yet._ The Phase 1 Gemini res
 
 None of these bundled probe sets have been opened, read, or reviewed yet — they are noted here only as **candidate sources** to examine in a future Phase 1/2 session, using the entry template above once actually reviewed.
 
+## This Project's Own Synthetic Dataset (designed, not yet materialized)
+
+As of Phase 2 continuation ("Phase 2.5", 2026-07-11), this project's own synthetic red-team corpus has been **designed** — 5 clean enterprise documents, 5 poisoned-document categories, and 7 prompt-injection test categories — in `docs/evaluation/red-team-test-design.md`. This is a design document with illustrative example text only; **no files have been created yet under `datasets/` or `redteam/`**, and no code reads or serves this content. Turning the design into actual files is still Not Started (`TASK_BOARD.md` Phase 2).
+
 ## Planned Work (Phase 1/2)
 
 - Open and review garak's probe library, PyRIT's dataset directory, and deepteam's attack templates for licensing terms and content type, then log proper entries here.
 - Identify any well-known standalone public prompt-injection/jailbreak benchmark datasets (e.g., through further targeted research) not yet surfaced by the Gemini research pass.
+- Materialize `docs/evaluation/red-team-test-design.md` into actual files under `datasets/` (clean + poisoned documents) and `redteam/` (prompt injection test cases), using the ID convention defined there (§6).
 
-## Future Work (not in Phase 1 scope)
+## Future Work (not in Phase 1/2 scope)
 
-- Actual synthetic dataset construction for `datasets/` and `redteam/` — that is Phase 2 work, not Phase 1 research.
+- Cross-checking this project's own synthetic examples against the reviewed public datasets/tool probe sets above, once both exist, to identify coverage gaps.
 
 ## Reminder
 
