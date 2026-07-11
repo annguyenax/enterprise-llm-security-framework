@@ -129,6 +129,51 @@ Phase 0 kickoff. Focus was entirely on scaffolding: repository structure, planni
 - Added bypass, sanitization, severity, cross-guard, and benign enterprise false-positive coverage. Verified 23 RAG Guard/dataset tests and 2 direct gateway integration checks. HTTP `TestClient` collection remains blocked by the documented shared Starlette environment issue; no packages were installed.
 - Remaining limitation: regex rules can still miss semantic, deeply obfuscated, or encoded attacks. A semantic classifier or LLM judge remains future work, and complete prompt-injection protection is not claimed.
 
+## Phase 6 - LLM Provider Adapter and Mock Integration (same week, 2026-07-11)
+
+- Added a typed synchronous provider contract and deterministic offline `MockLLMProvider`; no provider SDK, API key, package installation, network request, or external LLM call was introduced.
+- Replaced the gateway's fixed response constant with provider generation after Input/RAG guards and before Output Guard. Block/human-review branches skip provider generation, while sanitized prompts and context are passed to it.
+- Added optional provider fields to chat responses and provider name/model/mock status to audit events. Recursive metadata redaction prevents synthetic secret markers from leaking through nested metadata.
+- Added direct provider and gateway integration tests covering deterministic output, fail-closed provider selection, skip paths, sanitized inputs, Output Guard handoff, response metadata, and audit metadata. Verified 32 provider/gateway/RAG/dataset tests plus a live local API smoke test; the full `TestClient` suite remains blocked by the documented shared Starlette issue. Phase 7 Evaluation Runner is next after the complete suite passes in a clean environment.
+
+## Phase 7 - Offline Evaluation Runner (same week, 2026-07-11)
+
+- Added `app/services/evaluation_runner.py` with strict JSONL validation, direct guard routing, per-case results, exact-label comparison, decision distributions, controlled false-positive/false-negative metrics, and deterministic report serialization. The runner never calls a provider, network, retrieval system, or vector database.
+- Added `scripts/run_evaluation.py` and `.ps1`; generated `reports/evaluation/latest-evaluation.json` and `.md` from the unchanged 40-case prompt suite.
+- The actual controlled run recorded 35 exact decision matches and 5 failures (0.8750 pass rate), zero false positives, and five decision-based false negatives. These are synthetic benchmark measurements only, not real-world rates or end-to-end harmful-output ASR.
+- Added evaluation validation, metric-definition, provider-isolation, 40-case completeness, and report-generation tests. The offline group passed 37 tests. Phase 7 remains In Review because baseline-vs-guarded comparison and a clean-environment full `TestClient` run remain open.
+
+## Phase 7.1 - Evaluation Failure Triage and Guard Calibration (same week, 2026-07-11)
+
+- Investigated the five initial false negatives and kept all expected decisions and prompt fixtures unchanged. Root causes were narrow lexical gaps in Input Guard, documented case-by-case in `reports/evaluation/failure-triage.md`.
+- Added five targeted rules for instruction override plus disclosure, start-anchored forget-prior-message imperatives, detailed offensive training pretexts, bulk confidential-context extraction, and prompt-side official-source replacement. RAG Guard was not changed because the RAG-context failure originated in user input.
+- Added exact regression prompts, nearby attack variants, and benign counterexamples for each calibration area. The focused offline group passed 52 tests; the complete project-local `.venv` suite passed 79 tests with one non-blocking Starlette `httpx2` deprecation warning. No package was installed.
+- Regenerated the controlled report: 40/40 exact decision matches, zero false positives, and zero false negatives on the unchanged synthetic prompt suite. This is not a real-world protection claim; semantic and unseen paraphrase gaps remain.
+
+## Phase 7.2 - Baseline vs Guarded Comparison (same week, 2026-07-11)
+
+- Added an explicit no-guard evaluation mode that allows every case with no rules, reasons, or risk score. Existing guarded evaluation logic was not changed.
+- Added comparison JSON/Markdown generation and `--comparison` / `-Comparison` CLI options. Reports clearly distinguish the always-allow decision baseline from a real LLM quality baseline.
+- Actual controlled result: baseline 5/40 exact matches, 35 false negatives, proxy 1.0000; guarded 40/40, zero false negatives, proxy 0.0000. These are synthetic benchmark values only.
+- Tests cover baseline behavior, guarded stability, comparison artifacts, relative false negatives, and SHA-256 immutability of frozen benchmark files. Full `.venv` suite passed 82 tests with one non-blocking Starlette warning; no package was installed.
+- Phase 7 implementation tasks are complete. Phase 8 Report Evidence Packaging can start.
+
+## Phase 8 - Report Evidence Packaging and Demo Preparation (same week, 2026-07-11)
+
+- Created `reports/evidence/evidence-index.md`, mapping project claims to architecture, threat model, dataset, guards, mock provider, evaluation, comparison, tests, commands, and limitations.
+- Added a timed 5-7 minute PowerShell demo script, clean reproduction checklist, manual screenshot guide, and Vietnamese academic report-ready summary. All evaluation language remains scoped to the controlled synthetic benchmark.
+- Corrected stale root README phase metadata and linked the evidence package. No guard, gateway, evaluation behavior, dataset, red-team label, or LaTeX template content changed.
+- Verified the packaged commands: full pytest with a system-temp basetemp passed 82 tests, and the local gateway smoke script printed `SMOKE TEST PASSED`. A workspace-local basetemp was documented as unsuitable in managed Windows shells because pytest cleanup encountered ACL denial.
+- Phase 8 is In Review: evidence packaging is complete, while team screenshot capture, demo rehearsal, diagram finalization, LaTeX integration, and internal report review remain manual tasks.
+
+## Phase 9 - Report Writing and Demo Finalization (same week, 2026-07-11)
+
+- Added `reports/evidence/report-integration-plan.md`, mapping introduction, background, architecture, threat model, dataset, guards, provider, evaluation, results, baseline, limitations, and future work to evidence and target LaTeX chapters.
+- Added `reports/evidence/demo-rehearsal-checklist.md` with timed flow, preflight commands, expected outputs, speaking points, common questions, and a no-server fallback.
+- Audited `report-ready-summary.md` and added an upfront scope statement: controlled synthetic benchmark, rule-based PoC, no real LLM/vector DB/retrieval, and no real-world interpretation of 40/40.
+- Verified the official title remains unchanged in `report-latex-template/thesis.sty`. LaTeX chapters were not automatically rewritten because several early-period status passages require deliberate team review and integration.
+- Phase 9 is In Review pending screenshots, final PDF compile, supervisor review, timed demo rehearsal, final proofread, and submission packaging.
+
 ## Next Week Plan
 
 - Team members personally read the three logged academic papers and confirm/replace the placeholder "Summary" fields in `related-work.md` with their own understanding.
@@ -136,3 +181,27 @@ Phase 0 kickoff. Focus was entirely on scaffolding: repository structure, planni
 - Review garak/PyRIT/deepteam's bundled probe sets for licensing and content type, logging proper entries in `dataset-review.md`.
 - Materialize `docs/evaluation/red-team-test-design.md` into actual files under `datasets/` and `redteam/`, using the ID convention in that document's §6 — this is data-file creation, not code, but should be scoped/approved as its own step before Phase 3 code begins.
 - Confirm Phase 0/1/2/2.5 documentation deliverables satisfy periodic report 01 requirements.
+
+## Phase 10 - Final LaTeX Report Integration (same week, 2026-07-11)
+
+- Integrated the evidence-backed introduction, background, architecture, threat
+  model, implementation, dataset, guarded evaluation, failure triage, baseline
+  comparison, limitations, future work, and appendix into the official template.
+- Preserved the official title and template include order. No application,
+  benchmark, test, script, guard, or generated evaluation result changed.
+- Static structure, citation-key, reference, and claim-safety checks passed. A
+  local PDF build was not possible because no TeX toolchain was available.
+
+## Phase 11 - Final Compile and Submission Preparation (same week, 2026-07-11)
+
+- Replaced stale early-period wording with final evidence and explicit scope
+  language. The report consistently describes a rule-based proof-of-concept and
+  controlled synthetic benchmark, not production readiness or a real-world rate.
+- Prepared three compile-safe figure slots with fixed filenames, captions,
+  labels, evidence sources, and screenshot requirements. The image files remain
+  manual capture tasks and no screenshot was invented.
+- Kept the approved-proposal sheet transparently pending; the temporary page now
+  states that it is not a substitute for a signed form.
+- Added `submission-package-checklist.md` and `latex-compile-notes.md`. Phase 11
+  is In Review pending screenshots, signed sheet if required, Overleaf compile,
+  warning fixes, Vietnamese proofread, supervisor review, and final packaging.

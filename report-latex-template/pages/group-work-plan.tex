@@ -1,29 +1,27 @@
-\chapter*{Kế hoạch thực hiện công việc nhóm}
-\addcontentsline{toc}{chapter}{Kế hoạch thực hiện công việc nhóm}
-% \chapter* không tự gọi \markboth -- set thủ công để Header phải hiển thị đúng.
-\markboth{KẾ HOẠCH THỰC HIỆN CÔNG VIỆC NHÓM}{}
-\setlength{\parskip}{6pt}
+\chapter*{Kế hoạch và phân công thực hiện công việc nhóm}
+\addcontentsline{toc}{chapter}{Kế hoạch và phân công thực hiện công việc nhóm}
+\markboth{KẾ HOẠCH VÀ PHÂN CÔNG CÔNG VIỆC NHÓM}{}
 
-Bảng dưới đây trình bày kế hoạch thực hiện công việc của \teamnameprose{} theo đúng cấu trúc mẫu chính thức của Khoa/Bộ môn (5 cột: TT, Nội dung, Người thực hiện, Thời gian thực hiện, Mức độ hoàn thành). Chi tiết bổ sung xem thêm tại \texttt{TASK\_BOARD.md} và \texttt{docs/report/bao-cao-dinh-ky-01.md} của kho mã nguồn dự án.
-
-\begin{table}[H]
-\centering
-\caption{Kế hoạch thực hiện công việc nhóm}
-\label{tab:ke-hoach-nhom}
-\begin{tabular}{@{}p{0.05\linewidth}p{0.32\linewidth}p{0.2\linewidth}p{0.18\linewidth}p{0.17\linewidth}@{}}
+\begin{longtable}{p{0.7cm}p{6.4cm}p{3.2cm}p{3.2cm}}
+\caption{Phân công công việc thực tế của nhóm}\label{tab:group-work-final}\\
 \toprule
-\textbf{TT} & \textbf{Nội dung} & \textbf{Người thực hiện} & \textbf{Thời gian thực hiện} & \textbf{Mức độ hoàn thành} \\
+STT & Hạng mục & Thành viên chính & Kết quả \\
 \midrule
-1 & Khởi tạo scaffold dự án, kế hoạch, quy tắc làm việc (Phase 0) & Cả nhóm & Tuần 1 (06--11/07/2026) & Hoàn thành \\
-2 & Nghiên cứu OWASP LLM Top 10, related work, so sánh công cụ/framework (Phase 1) & Nguyễn Văn An, Lê Đình Nghĩa & Tuần 1 (11/07/2026) & Bản nháp đầu, đang xác minh thủ công \\
-3 & Phân tích yêu cầu, thiết kế kiến trúc gateway, threat model STRIDE (Phase 2) & Cả nhóm & Tuần 1 (11/07/2026) & Đã thiết kế đầy đủ (tài liệu) \\
-4 & Thiết kế bộ dữ liệu red-team tổng hợp và tiêu chí đánh giá (Phase 2.5) & Nguyễn Văn An, Lê Đình Nghĩa & Tuần 1 (11/07/2026) & Đã thiết kế đầy đủ (tài liệu) \\
-5 & Chuẩn bị báo cáo định kỳ 01 (nội dung và định dạng LaTeX) & Cả nhóm & Tuần 1 (11--13/07/2026) & Đang hoàn thiện \\
-6 & Triển khai MVP: Gateway, Input/RAG/Output Guard, chạy đánh giá thật (Phase 3--9) & Cả nhóm & Các kỳ báo cáo tiếp theo & Chưa bắt đầu \\
+\endfirsthead
+\toprule
+STT & Hạng mục & Thành viên chính & Kết quả \\
+\midrule
+\endhead
+1 & Lập kế hoạch, yêu cầu, kiến trúc và threat model & Cả nhóm & Hoàn thành tài liệu thiết kế \\
+2 & FastAPI gateway, guard logic, provider adapter và audit logging & Nguyễn Văn An & Hoàn thành implementation và test \\
+3 & Dataset review, prompt red-team, taxonomy và validation documentation & Lê Đình Nghĩa & Hoàn thành corpus tổng hợp và tài liệu \\
+4 & Evaluation runner, failure triage, baseline comparison & Nguyễn Văn An & Hoàn thành artifact đánh giá \\
+5 & Documentation, evidence index và review kịch bản demo & Lê Đình Nghĩa & Hoàn thành gói evidence; rehearsal đang thực hiện \\
+6 & Tích hợp báo cáo LaTeX, kiểm tra claim và kết quả & Nguyễn Văn An, cả nhóm review & Bản tích hợp đang review \\
+7 & Screenshot, compile PDF, proofread và supervisor review & Cả nhóm & Đang final review trước khi nộp \\
 \bottomrule
-\end{tabular}
-\end{table}
+\end{longtable}
 
-\textbf{Mốc thời gian:} Báo cáo định kỳ 01 dự kiến nộp trong khoảng 12--13/07/2026. Phase 0--2.5 (scaffold, nghiên cứu, kiến trúc/threat model, thiết kế dữ liệu đánh giá) được hoàn thành ở dạng tài liệu trước mốc này; Phase 3 (bắt đầu viết code) chỉ khởi động sau khi các phase tài liệu được xác nhận.
-
-\textbf{Nguyên tắc phối hợp:} Mỗi giai đoạn đều phải có tài liệu và bằng chứng (evidence) đi kèm trước khi được đánh dấu hoàn thành; không mở rộng phạm vi ngoài kế hoạch nếu chưa được phê duyệt (xem thêm quy tắc trong \texttt{AGENT\_RULES.md}).
+Phân công trên phản ánh vai trò chính; các thành viên cùng review mã nguồn, dữ
+liệu, báo cáo và demo. Nếu nhật ký nhóm có khác biệt, bảng phải được điều chỉnh
+theo evidence thực tế trước khi nộp.

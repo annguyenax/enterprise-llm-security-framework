@@ -65,3 +65,5 @@ school-requirements/
 # Runtime logs
 logs/
 *.log
+.pytest-tmp/
+.pytest_cache/

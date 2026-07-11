@@ -2,9 +2,9 @@
 
 Application code for the LLM Security Gateway / Guardrail Proxy.
 
-**Status: Phase 5.1 - RAG Guard red-team hardening.** Rule-based Input,
+**Status: Phase 6 - offline LLM Provider Adapter.** Rule-based Input,
 RAG Context, and Output guards, deterministic dataset loading, JSONL audit
-logging, and a mock chat pipeline are implemented. No real LLM call or vector
+logging, and a mock chat pipeline are implemented. No external LLM call or vector
 retrieval exists yet.
 
 ## Endpoints
@@ -15,7 +15,7 @@ retrieval exists yet.
 | POST | `/v1/guard/input` | Evaluate a raw prompt. |
 | POST | `/v1/guard/output` | Evaluate a candidate output. |
 | POST | `/v1/guard/rag-context` | Evaluate caller-supplied context chunks. |
-| POST | `/v1/gateway/chat` | Input -> RAG -> mock response -> Output -> audit log. |
+| POST | `/v1/gateway/chat` | Input -> RAG -> LLM Provider -> Output -> audit log. |
 
 ## Guard Design
 
@@ -34,9 +34,21 @@ decision order `block > human_review > sanitize > log_only > allow`.
 RAG sanitization operates on original chunk text and preserves `doc_id` and
 `metadata`. Hidden instruction blocks are removed selectively when possible.
 
+## LLM Provider Adapter
+
+`services/llm_provider.py` contains typed provider request/response models,
+`BaseLLMProvider`, `MockLLMProvider`, and `get_llm_provider()`. The default
+provider is deterministic, local, and offline. Gateway responses expose
+`provider_name`, `model_name`, and `is_mock`; audit events store only those
+provider fields, never provider prompts, context, or output.
+
+Configuration defaults are `LLM_PROVIDER=mock`,
+`LLM_MODEL_NAME=mock-rag-guard-v1`, and
+`LLM_PROVIDER_TIMEOUT_SECONDS=30`.
+
 ## Not Implemented
 
-- No real LLM provider call; `services/gateway.py` returns a fixed mock string.
+- No real external LLM provider call; only `MockLLMProvider` is implemented.
 - No embeddings, similarity search, vector database, or real retrieval. Callers
   supply `context_chunks` directly.
 - No semantic classifier or LLM judge. Rule-based detection can miss semantic,

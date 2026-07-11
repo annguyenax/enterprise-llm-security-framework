@@ -17,7 +17,7 @@
 |---|---|---|---|---|
 | 1 | Bìa ngoài | Có `\coverpage`, nhưng nội dung là đề tài mẫu (hệ thống điểm rèn luyện) | Cập nhật toàn bộ biến (`\titlethesis`, `\studentname`...) và `\reporttype` thành "BÁO CÁO ĐỊNH KỲ THỰC TẬP TỐT NGHIỆP ĐẠI HỌC" trong `thesis.sty` | Đối chiếu cỡ chữ/khung trang bìa với mẫu chính thức của Khoa (chưa có file gốc để so) |
 | 2 | Bìa đệm | **Không có** — chỉ có 1 loại trang bìa | Thêm macro `\innercoverpage` mới trong `thesis.sty` (không khung trang trí, nội dung tương tự bìa ngoài) | Xác nhận bìa đệm PTIT có yêu cầu khác biệt cụ thể nào (màu giấy, không logo...) không |
-| 3 | Phiếu giao đề cương TTTN được phê duyệt | Không có | Tạo `pages/approved-proposal-placeholder.tex` với đúng câu placeholder được yêu cầu | Thay bằng bản scan/PDF phiếu đã ký khi có |
+| 3 | Phiếu giao đề cương TTTN được phê duyệt | Chờ bản đã ký | Dùng `pages/approved-proposal-pending.tex` trong bản review và ghi rõ trang này không thay thế phiếu đã ký | Thay bằng bản scan/PDF phiếu đã ký khi có |
 | 4 | Mục lục | Có (`\tableofcontents`) | Giữ nguyên cơ chế, đổi spacing 1.3 → 1.15 | — |
 | 5 | Lời cảm ơn | Có, nội dung đề tài mẫu, giọng số ít "em" | Viết lại nội dung cho đề tài này, giọng "chúng em" nhất quán | Đọc lại văn phong trước khi nộp |
 | 6 | Danh mục ký hiệu và chữ viết tắt | Có, bảng thuật ngữ Deep Learning không liên quan (CNN, GRU...) | Thay bằng bảng 20 thuật ngữ của đề tài (LLM, RAG, ASR, STRIDE, OWASP...) | Bổ sung thêm nếu chương sau phát sinh thuật ngữ mới |

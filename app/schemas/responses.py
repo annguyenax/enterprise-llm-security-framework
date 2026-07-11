@@ -36,3 +36,6 @@ class ChatResponse(BaseModel):
     output_guard: GuardDecisionResponse | None = None
     final_decision: Decision
     response: str
+    provider_name: str | None = None
+    model_name: str | None = None
+    is_mock: bool | None = None

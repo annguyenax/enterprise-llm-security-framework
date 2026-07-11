@@ -1,29 +1,61 @@
-\chapter*{Kết luận, kiến nghị}
-\addcontentsline{toc}{chapter}{Kết luận, kiến nghị}
-% \chapter* không tự gọi \markboth -- set thủ công để Header phải hiển thị đúng.
-\markboth{KẾT LUẬN, KIẾN NGHỊ}{}
+\chapter*{Kết luận và kiến nghị}
+\addcontentsline{toc}{chapter}{Kết luận và kiến nghị}
+\markboth{KẾT LUẬN VÀ KIẾN NGHỊ}{}
 
-\section*{Tổng kết những nội dung đã hoàn thành}
+\section*{Kết quả đạt được}
 
-Trong giai đoạn thực tập tính đến báo cáo định kỳ này, nhóm đã hoàn thành ở mức \textbf{tài liệu thiết kế} (chưa có mã nguồn ứng dụng):
+Đề tài đã xây dựng một LLM Security Gateway proof-of-concept chạy cục bộ, gồm
+Input Guard, RAG Context Guard, Output Guard, audit logger, provider adapter với
+mock provider và evaluation runner. Bộ dữ liệu tổng hợp gồm 5 tài liệu sạch, 5
+tài liệu bị đầu độc và 40 prompt red-team. Hệ thống có test và artifact để tái
+lập quyết định.
+
+Lần đánh giá đầu ghi nhận 35/40 case khớp nhãn và 5 false negative. Sau triage
+và calibration rule hẹp, cùng benchmark không đổi ghi nhận 40/40 exact-label
+match, 0 false positive và 0 false negative. Always-allow baseline đạt 5/40 và
+có 35 false negative; proxy lần lượt là 1.0000 cho baseline và 0.0000 cho
+guarded.
+
+Toàn bộ số liệu trên chỉ mô tả controlled synthetic benchmark của nhóm. Chúng
+không phải tỷ lệ phát hiện ngoài thực tế, không đo chất lượng LLM và không tạo
+ra bảo đảm an toàn cho triển khai sản xuất.
+
+\section*{Đóng góp chính}
 
 \begin{itemize}
-    \item Khởi tạo cấu trúc dự án, kế hoạch thực hiện, và quy tắc làm việc rõ ràng (không mở rộng phạm vi tùy tiện, không bịa số liệu/trích dẫn, không dùng dữ liệu thật).
-    \item Tìm hiểu và khảo sát các dạng tấn công LLM/RAG, khung OWASP Top 10 for LLM Applications và OWASP LLMSVS, cùng 5 công cụ guardrail/red-teaming hiện có và 3 nguồn học thuật liên quan (đã xác minh tồn tại, chưa đọc toàn văn).
-    \item Xây dựng đầy đủ yêu cầu chức năng/phi chức năng, kiến trúc gateway, bảng phân chia trách nhiệm module, và threat model theo mô hình STRIDE.
-    \item Phân định rõ ràng phạm vi MVP so với hướng mở rộng tương lai (Kubernetes, SIEM, fine-tune mô hình cục bộ \textbf{không} thuộc phạm vi MVP).
-    \item Thiết kế bộ dữ liệu kiểm thử red-team tổng hợp (tài liệu sạch, tài liệu nhiễm độc, prompt injection) và định nghĩa 6 metric đánh giá kèm phương pháp so sánh baseline/có-guard.
+    \item Kiến trúc phòng vệ nhiều lớp có stopping decision và audit trail.
+    \item Ba guard rule-based có ID, lý do và mức rủi ro giải thích được.
+    \item RAG sanitization giữ nội dung hợp lệ và provenance metadata khi có thể.
+    \item Provider abstraction ngoại tuyến giúp kiểm thử pipeline không cần API key.
+    \item Benchmark tổng hợp, evaluation runner, failure triage và baseline report
+    có thể tái lập từ kho mã nguồn.
 \end{itemize}
 
-\section*{Hạn chế hiện tại}
+\section*{Hạn chế}
+
+Hệ thống dùng rule/regex nên có thể bỏ sót biến thể semantic, encoded hoặc
+multi-turn. Benchmark nhỏ và được dùng trong calibration, vì vậy tồn tại nguy
+cơ overfitting. Full manual review corpus vẫn là bước kiểm tra thủ công cần hoàn
+tất. Semantic classifier, LLM thực, embedding, vector database và retrieval
+pipeline nằm ngoài phạm vi proof-of-concept. Thực nghiệm giới hạn ở quyết định
+guard, không đo latency, tải, chất lượng output hoặc tác hại thực tế.
+
+\section*{Hướng phát triển}
 
 \begin{itemize}
-    \item Chưa có mã nguồn ứng dụng nào được hiện thực -- toàn bộ nội dung trên là thiết kế, chưa được kiểm chứng bằng thực nghiệm.
-    \item Chưa có bất kỳ số liệu ASR, FPR, FNR, hay độ trễ nào được đo -- mọi số liệu trong các báo cáo sau phải đến từ một lần chạy thật.
-    \item Một số quyết định thiết kế (ví dụ lựa chọn framework RAG, vector store, nhà cung cấp LLM, ranh giới Sanitize/Log-only) vẫn còn để ngỏ, chờ ADR ở giai đoạn tiếp theo.
-    \item Các trích dẫn học thuật mới dừng ở mức xác minh tồn tại, chưa được nhóm đọc toàn văn.
+    \item Xây dựng holdout set độc lập, mở rộng corpus và multi-turn attacks.
+    \item Nghiên cứu semantic classifier hoặc LLM-as-judge với phê duyệt chi phí,
+    kiểm soát dữ liệu và phương pháp đánh giá rõ ràng.
+    \item Tích hợp provider thực với secret management và không lưu prompt/context
+    nhạy cảm ngoài phạm vi cho phép.
+    \item Xây dựng RAG pipeline thực với embedding, vector store, provenance và
+    đánh giá chất lượng retrieval.
+    \item Đo latency, load, logging completeness và so sánh trên môi trường tái lập.
 \end{itemize}
 
 \section*{Kiến nghị}
 
-Nhóm kiến nghị tiếp tục triển khai đúng theo lộ trình Phase 3--9 đã trình bày ở Chương 4, ưu tiên hoàn thiện khung Gateway và Input Guard trước để có thể chạy thử nghiệm sớm với bộ dữ liệu tổng hợp đã thiết kế, làm cơ sở cho các báo cáo định kỳ tiếp theo có số liệu thực nghiệm cụ thể thay vì chỉ có kế hoạch.
+Trước khi thử nghiệm ngoài phạm vi phòng lab, cần có review độc lập đối với rule,
+dataset và threat model; bổ sung dữ liệu holdout; kiểm tra privacy; và thực hiện
+đánh giá với provider/retrieval thực trong môi trường được phê duyệt. Không nên
+sử dụng kết quả 40/40 làm căn cứ duy nhất cho quyết định triển khai.

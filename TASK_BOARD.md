@@ -116,7 +116,7 @@ This is the same work recorded against the two Phase 2 rows above ("Synthetic re
 
 **Verification method (same constraint as Phase 4):** dependencies are still **not installed** in this repository, so this session again validated changes via (1) `py_compile` on every changed file, (2) direct logic testing of `app.core.decisions.most_severe()` (zero external dependencies, runs with stdlib only) confirming the full severity order pairwise, and (3) a full non-ASCII character scan confirming every `reason=` string is now pure ASCII while docstrings/comments (not logged) were left untouched. Actually running `pytest`/`uvicorn` still requires a team member to `pip install -r requirements.txt` first.
 
-## Phase 5 — RAG Guard + Demo RAG Pipeline — **Status: In Review (RAG Guard + dataset ingestion done; vector store/LLM adapter still pending)**
+## Phase 5 — RAG Guard + Demo RAG Pipeline — **Status: In Review (RAG Guard, dataset ingestion, and mock provider adapter done; vector store deferred)**
 
 | Task | Owner | Status |
 |---|---|---|
@@ -128,7 +128,7 @@ This is the same work recorded against the two Phase 2 rows above ("Synthetic re
 | Gateway integration | Nguyen Van An | Done — `app/services/gateway.py` `run_chat()` now accepts optional `context_chunks`; runs the RAG Guard after the Input Guard; BLOCK/HUMAN_REVIEW stop the pipeline before the mock LLM call (same contract as the Input Guard); SANITIZE continues with the sanitized chunks; `final_decision` uses `most_severe()` across all three guards |
 | Dataset loader + RAG Guard + endpoint + gateway unit tests | Both | Done — `tests/test_dataset_loader.py` (7 tests), `tests/test_rag_guard.py` (9 tests), `tests/test_rag_context_endpoint.py` (4 tests), 4 new cases added to `tests/test_gateway_routes.py` |
 | Inspection / smoke-test scripts | Both | Done — `scripts/inspect_dataset.py` + `scripts/inspect_dataset.ps1` (doc/chunk counts, sample IDs), `scripts/test_rag_guard.ps1` (clean + poisoned smoke test against a running server) |
-| LLM Provider Adapter (mock-first; real provider call requires `AGENT_RULES.md` rule 4 approval) | Nguyen Van An | Not Started — see `docs/diagrams/architecture.md` §4, module target phase "Phase 3/5"; replaces `app/services/gateway.py`'s fixed `MOCK_RESPONSE` once implemented; this is the concrete next task (see note below) |
+| LLM Provider Adapter (mock-first; real provider call requires `AGENT_RULES.md` rule 4 approval) | Nguyen Van An | Done - typed provider contract, deterministic offline `MockLLMProvider`, fail-closed factory, gateway integration, response metadata, and redacted audit metadata; no external API or SDK |
 
 **Verification method (Phase 5 session, 2026-07-11):** unlike Phase 3/4/4.1, this session found FastAPI, Pydantic, pytest, and uvicorn **already installed** in the shared Python environment used to run commands (not a project-local `.venv`). All logic was verified for real: `app/services/dataset_loader.py` and `app/guards/rag_guard.py` were run directly against every file in `datasets/clean/` and `datasets/poisoned/`, confirming the RAG Guard reproduces every poisoned document's own `expected_guard_decision` (or a documented, justified alternate — see `app/guards/rag_guard.py` module docstring for the one deliberate deviation, the fake-secret-leak case); `pytest -q tests/test_dataset_loader.py tests/test_rag_guard.py` (16 tests, no HTTP layer involved) passed for real; a real `uvicorn` server was started locally and `/v1/guard/rag-context` and `/v1/gateway/chat` were exercised end-to-end with `curl`, confirming the block/sanitize/allow behavior and audit-log redaction match the test assertions exactly. The remaining `TestClient`-based tests (`tests/test_rag_context_endpoint.py`, the 4 new `tests/test_gateway_routes.py` cases) could not be executed via `pytest` in this environment because the installed `starlette` package fails to import its `TestClient` (see Notes section below for a security concern about this, unrelated to Phase 5 code correctness) — their behavior was instead confirmed manually via the live-server `curl` checks above, which exercise the identical code path.
 
@@ -142,33 +142,116 @@ This is the same work recorded against the two Phase 2 rows above ("Synthetic re
 | Output policy enforcement | Le Dinh Nghia | Done (basic) — decision/redaction logic exists; no dynamic/configurable policy engine, still a fixed rule list |
 | Output Guard unit tests | Both | Done — `tests/test_output_guard.py` |
 
-## Phase 7 — Evaluation Harness
+## Phase 7 — Evaluation Harness — **Status: Done**
 
 | Task | Owner | Status |
 |---|---|---|
-| Automated red-team runner against gateway | Both | Not Started — methodology pre-specified in `docs/evaluation/evaluation-plan.md` §4; can now target the real `/v1/guard/input`, `/v1/guard/output`, `/v1/gateway/chat` endpoints once dependencies are installed |
-| Metrics collection + reporting scripts | Le Dinh Nghia | Not Started — metric formulas pre-specified in `docs/evaluation/metrics-definition.md` |
-| Baseline (no-guard) vs guarded comparison run | Nguyen Van An | Not Started — comparison structure pre-specified in `docs/evaluation/evaluation-plan.md` §3 |
+| Automated red-team runner against gateway | Both | Done - offline direct-guard runner validates and evaluates all 40 frozen prompt cases without provider, network, or dataset mutation |
+| Metrics collection + reporting scripts | Le Dinh Nghia | Done - JSON/Markdown reports include exact decision pass rate, decision distribution, controlled FP/FN rates, category failures, and attack-success proxy |
+| Baseline (no-guard) vs guarded comparison run | Nguyen Van An | Done - deterministic always-allow baseline compared with unchanged guarded mode; JSON/Markdown artifacts include per-case decisions and scoped interpretation |
+
+**Phase 7 evidence (2026-07-11):** `python scripts/run_evaluation.py` generated
+`reports/evaluation/latest-evaluation.json` and `.md` from the unchanged 40-case
+suite: 35 exact decision matches and 5 failures. This is controlled synthetic
+benchmark evidence only. After Phase 7.1 calibration, the unchanged suite was
+regenerated at 40 exact matches and 0 failures. The project-local `.venv` full
+suite passed 79 tests; its Starlette dependency emitted one `httpx2` deprecation
+warning, but no package was installed.
+
+**Next phase:** Phase 8 Report Evidence Packaging.
+
+### Phase 7.1 - Evaluation Failure Triage and Guard Calibration - **Status: Done**
+
+- Triaged all five initial false negatives without changing expected labels or removing cases.
+- Added five narrow Input Guard rules plus exact, nearby-variant, and benign-counterexample tests; RAG Guard was unchanged because `RT-INJ-RAGCTX-003` is prompt-side manipulation.
+- Regenerated the unchanged 40-case benchmark: 40 passed, 0 failed, 0 false positives, and 0 false negatives.
+- Full project-local `.venv` pytest verification: 79 passed, with one non-blocking Starlette `httpx2` deprecation warning; `httpx2` was not installed.
+- Evidence: `reports/evaluation/failure-triage.md`, `latest-evaluation.json`, and `latest-evaluation.md`. Results remain controlled synthetic benchmark measurements only.
+
+### Phase 7.2 - Baseline vs Guarded Evaluation Comparison - **Status: Done**
+
+- Added a no-guard mode that deterministically returns `allow`, empty rules/reasons, and zero risk for every case; guarded mode is unchanged.
+- Generated `reports/evaluation/baseline-vs-guarded.json` and `.md`: baseline 5/40 exact matches with 35 false negatives and proxy 1.0000; guarded 40/40 with 0 false negatives and proxy 0.0000.
+- Added tests for always-allow baseline behavior, both comparison summaries, guarded 40/40 stability, higher baseline false negatives, and SHA-256 immutability of every file under `redteam/` and `datasets/`.
+- Full project-local `.venv` suite: 82 passed with one non-blocking Starlette `httpx2` deprecation warning; no package was installed.
+- Scope remains a controlled synthetic decision benchmark. The baseline is not an LLM response-quality baseline and the metrics are not real-world rates.
 
 **Note (Phase 4 session, 2026-07-11 — "next tasks" mapping):** the instruction to add "Phase 5: RAG context guard and dataset ingestion", "Phase 6: LLM provider adapter", "Phase 7: evaluation runner" as next tasks is recorded as follows, since this board's existing Phase 6 already means Output Guard (now done): RAG context guard + dataset ingestion → **Phase 5** rows above; LLM provider adapter → new row added under **Phase 5** above (not Phase 6, to avoid colliding with the existing Output Guard section); evaluation runner → **Phase 7** rows above (unchanged).
 
-**Note (Phase 5 session, 2026-07-11 — "next tasks" mapping):** the same collision applies to the Phase 5 request's own "next phase: Phase 6: LLM Provider Adapter... Phase 7: Evaluation Runner" instruction. Per the same resolution as above: the LLM Provider Adapter work item stays as a row under **Phase 5** (added this session, not started), and the evaluation runner stays under the existing **Phase 7 — Evaluation Harness** section (unchanged, not started). Concretely, the next implementation session should pick up the LLM Provider Adapter row under Phase 5.
+**Note (Phase 5 session, updated after Phase 6 on 2026-07-11):** because the original roadmap already labels Output Guard as Phase 6, the LLM Provider Adapter remains tracked in the Phase 5 table and also has a Phase 6 completion note below. The adapter is now done; the next implementation work is the existing **Phase 7 — Evaluation Harness**.
 
-## Phase 8 — Report Consolidation
-
-| Task | Owner | Status |
-|---|---|---|
-| Consolidate results into LaTeX report | Both | Not Started |
-| Finalize diagrams/figures | Both | Not Started |
-| Internal review pass | Both | Not Started |
-
-## Phase 9 — Final Polish & Submission
+## Phase 8 — Report Consolidation — **Status: In Review**
 
 | Task | Owner | Status |
 |---|---|---|
-| Demo rehearsal | Both | Not Started |
-| Final report proofread | Both | Not Started |
-| Submission packaging | Both | Not Started |
+| Evidence index and reproducibility package | Both | Done - `reports/evidence/` contains evidence index, timed demo, Vietnamese report-ready summary, reproduction checklist, and screenshot guide |
+| Consolidate results into LaTeX report | Both | Done - Phase 10 integrated reviewed evidence into the official chapter structure |
+| Finalize diagrams/figures | Both | In Review - stable filenames, captions, labels, and compile-safe fallbacks exist; capture remains manual |
+| Internal review pass | Both | In Progress - static claim/citation/structure review complete; compiled PDF review remains |
+
+**Phase 8 packaging evidence (2026-07-11):** all implemented claims are mapped
+to source files, reproduction commands, and limitations in
+`reports/evidence/evidence-index.md`. Demo and screenshot capture still require
+manual team rehearsal/review; no core behavior, benchmark label, dataset, or
+LaTeX template content changed. Reproduction commands were checked with 82
+passing tests (system-temp basetemp) and a passing local gateway smoke test.
+
+## Phase 9 — Final Polish & Submission — **Status: In Review**
+
+| Task | Owner | Status |
+|---|---|---|
+| Report integration plan | Both | Done - maps introduction through future work to evidence and target LaTeX chapters; official title verified unchanged |
+| Demo rehearsal checklist | Both | Done - commands, expected outputs, speaking points, common questions, and fallback flow documented |
+| Screenshots | Both | Not Started - capture and caption the items in `reports/evidence/screenshot-guide.md` |
+| Final PDF compile | Both | In Progress - content integrated and compile notes prepared; first TeX/Overleaf build remains manual |
+| Supervisor review | Both | Not Started - provide final PDF and evidence package for feedback/sign-off |
+| Demo rehearsal | Both | In Progress - written checklist ready; timed team rehearsal not yet recorded |
+| Final report proofread | Both | In Progress - stale status wording cleaned; full compiled-PDF Vietnamese proofread pending |
+| Submission packaging | Both | In Progress - package checklist exists; final PDF, figures, tag and approvals pending |
+
+**Phase 9 review note (updated after Phase 11, 2026-07-11):** the official thesis
+title is unchanged. Early periodic-report statements identified by the plan
+have been replaced with reviewed current evidence and scope wording. No app,
+test, benchmark, evaluation, or core behavior changed.
+
+## Phase 10 — Final LaTeX Report Integration — **Status: In Review**
+
+| Task | Owner | Status |
+|---|---|---|
+| Integrate final chapter content | Both | Done - introduction, background, architecture/threat model, implementation/dataset, evaluation/results, conclusion and appendix updated from evidence |
+| Preserve official title/template structure | Both | Done - `titlethesis` verified byte-for-byte unchanged; main include order preserved |
+| Update group-work plan | Both | Done - An mapped to gateway/guards/evaluation/report integration; Nghĩa mapped to dataset/red-team/documentation/demo evidence review; team review noted |
+| Static LaTeX/citation audit | Both | Done - brace scan clean and all five used citation keys exist in `refs.bib` |
+| Add screenshots/figures | Both | In Review - three compile-safe slots have final filenames/captions/labels; image capture remains manual |
+| Compile final PDF and fix warnings | Both | Blocked on manual TeX environment - no `latexmk`, `pdflatex`, `xelatex`, or `bibtex` available in current environment |
+| Vietnamese proofread and supervisor review | Both | Not Started |
+| Final submission package | Both | Not Started |
+
+**Phase 10 evidence:** `reports/evidence/final-report-review-checklist.md` records
+compile, figure, citation, claim-safety and PDF review gates. No app, test,
+script, benchmark, guard, evaluation artifact or generated result changed.
+
+## Phase 11 — Final Compile, Figures, Cleanup and Submission Package — **Status: In Review**
+
+| Task | Owner | Status |
+|---|---|---|
+| Clean stale final-report wording | Both | Done - early-period statements replaced by current evidence and explicit PoC scope language |
+| Prepare figure integration | Both | Done - three filenames, target folder, captions, labels, sources and required content documented with compile-safe fallbacks |
+| Static compile-readiness scan | Both | Done - source structure, labels/citations, figure presence, wording and claim safety checked; no local TeX toolchain available |
+| Submission package checklist | Both | Done - `reports/evidence/submission-package-checklist.md` |
+| LaTeX compile guidance | Both | Done - `reports/evidence/latex-compile-notes.md` documents pdfLaTeX and BibTeX workflow |
+| Capture screenshots | Both | Pending manual action |
+| Add signed approved proposal sheet if available | Both | Pending manual action - temporary page is clearly marked and does not claim approval |
+| Upload to Overleaf and compile PDF | Both | Pending manual action |
+| Fix LaTeX warnings and proofread Vietnamese | Both | Pending manual action |
+| Supervisor review | Both | Pending manual action |
+| Final submission package | Both | Pending manual action |
+
+**Phase 11 evidence:** source is prepared for an initial Overleaf build. Final
+submission readiness is not claimed until figures, signed sheet requirements,
+compile warnings, PDF inspection, proofreading, and supervisor review are done.
+No application, test, script, dataset, red-team, guard, or evaluation artifact
+was changed.
 
 ## Notes
 
@@ -180,7 +263,19 @@ This is the same work recorded against the two Phase 2 rows above ("Synthetic re
 | False-positive and cross-guard tests | Both | Done - benign enterprise suite plus poisoned-context continuation, malicious-input short-circuit, metadata preservation, sanitization, and severity-order coverage |
 | Phase 5.1 verification | Both | Done - 23 direct RAG Guard/dataset tests passed; 2 gateway service integration checks passed. HTTP `TestClient` collection remains blocked by the documented shared-environment issue; no packages were installed |
 
-**Next implementation phase:** Phase 6 LLM Provider Adapter (mock-first). Any real provider call still requires explicit approval under `AGENT_RULES.md`; vector retrieval remains out of scope.
+### Phase 6 - LLM Provider Adapter - **Status: Done**
+
+The fixed gateway response was replaced by the typed synchronous provider
+adapter in `app/services/llm_provider.py`. The default and only implementation
+is the deterministic offline mock provider. Provider skip paths, sanitized
+inputs, Output Guard handoff, response metadata, and audit redaction have direct
+service-level test coverage. Verification: 32 provider/gateway/RAG/dataset tests
+passed, and a live local API smoke test passed for health metadata, provider
+metadata, Output Guard execution, and the blocked-input provider skip path. The
+full `TestClient` suite remains blocked by the documented shared-environment
+Starlette issue; no package was installed.
+
+**Next phase after Phase 8 review:** Phase 9 Final Polish and Submission. Any real provider call still requires explicit approval under `AGENT_RULES.md`; vector retrieval remains out of scope.
 
 - This board is updated as phases progress; do not mark a task `Done` without corresponding documentation/evidence per `AGENT_RULES.md` rule 9.
 - Phase boundaries are gates — do not start Phase N+1 implementation while Phase N is still `In Progress` without explicit approval.

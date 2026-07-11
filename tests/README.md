@@ -2,7 +2,7 @@
 
 pytest coverage for the gateway, dataset loader, and three rule-based guards.
 
-**Status: Phase 5.1.** Coverage includes bypass variants, targeted RAG
+**Status: Phase 6.** Coverage includes the offline provider contract, bypass variants, targeted RAG
 sanitization, benign false positives, gateway ordering, severity aggregation,
 and audit redaction.
 
@@ -12,11 +12,15 @@ and audit redaction.
 |---|---|
 | `test_health.py` | `GET /health`. |
 | `test_input_guard.py` | Input Guard behavior. |
+| `test_input_guard_calibration.py` | Phase 7.1 failed cases, nearby attack variants, and benign counterexamples. |
 | `test_output_guard.py` | Output decisions and redaction. |
 | `test_dataset_loader.py` | Markdown parsing, extraction, and chunking. |
 | `test_rag_guard.py` | Corpus behavior, normalization, bypass variants, compound severity, and benign false positives. |
 | `test_rag_context_endpoint.py` | RAG endpoint, sanitization, metadata, and audit behavior. |
 | `test_gateway_routes.py` | Guard ordering, RAG continuation, short-circuiting, severity, and audit logging. |
+| `test_llm_provider.py` | Deterministic mock behavior and factory fail-closed behavior. |
+| `test_gateway_provider.py` | Provider placement, skip paths, sanitized inputs, Output Guard handoff, response metadata, and safe audit metadata. |
+| `test_evaluation_runner.py` | JSONL validation, all 40 prompts, controlled FP/FN definitions, baseline/guarded modes, corpus immutability, provider isolation, and report generation. |
 
 ## Running
 

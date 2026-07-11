@@ -2,7 +2,7 @@
 
 **Xây dựng Hệ thống Bảo mật LLM Chống Tấn công Prompt Injection và Data Poisoning trong Môi trường Doanh nghiệp**
 
-> Status: **Phase 0 — Scaffold only.** No application code has been implemented yet. This is a university internship proof-of-concept (PoC), not a production system.
+> Status: **Phase 10 - Final LaTeX report integration (In Review).** The lab-scale gateway, guards, offline mock provider, controlled evaluation harness, and final report content are integrated. This is a university internship proof-of-concept (PoC), not a production system.
 
 ## Project Summary
 
@@ -21,30 +21,26 @@ This is an **academic internship MVP**. It is explicitly **not** production-read
 
 ## Repository Structure
 
-```
-├── app/                 # Application code (Phase 1+, not yet implemented)
-├── redteam/             # Synthetic attack prompts / red-team test cases
-├── datasets/            # Synthetic datasets only — no real PII/secrets
-├── tests/                # pytest test suite
-├── scripts/             # Utility / automation scripts
-├── docker/              # Docker Compose setup (later phase)
-├── docs/
-│   ├── report/           # Periodic report drafts (Markdown, source of truth)
-│   ├── research/         # Literature review, OWASP mapping, tool comparison
-│   ├── diagrams/         # Mermaid architecture / threat-model / data-flow diagrams
-│   ├── weekly-notes/      # Weekly progress notes
-│   └── decisions/         # Architecture Decision Records (ADRs)
-├── report-latex/         # LaTeX academic report (compiled deliverable)
-├── PROJECT_PLAN.md
-├── AGENT_RULES.md
-├── TASK_BOARD.md
-├── requirements.txt
-└── .env.example
+```text
+|-- app/                    # Implemented gateway, guards, mock provider, evaluation
+|-- redteam/                # Frozen synthetic attack prompt benchmark
+|-- datasets/               # Frozen synthetic clean/poisoned documents
+|-- tests/                  # pytest unit and integration suite
+|-- scripts/                # Local run, smoke, inspection, and evaluation helpers
+|-- reports/
+|   |-- evaluation/         # Generated guarded and comparison artifacts
+|   `-- evidence/           # Phase 8 report/demo evidence package
+|-- docs/                   # Research, diagrams, dataset docs, reports, weekly notes
+|-- report-latex-template/  # School template reference; content not rewritten yet
+|-- PROJECT_PLAN.md
+|-- AGENT_RULES.md
+|-- TASK_BOARD.md
+`-- requirements.txt
 ```
 
 ## Current Phase
 
-See [TASK_BOARD.md](TASK_BOARD.md) for the full phase breakdown (Phase 0–9). We are currently in **Phase 0: scaffold, planning, and research setup**.
+See [TASK_BOARD.md](TASK_BOARD.md) for the authoritative phase breakdown. Core implementation, controlled evaluation, evidence packaging and LaTeX content integration are complete; **Phase 10 remains in review pending figures, PDF compilation and manual review**.
 
 ## Guiding Principles
 
@@ -103,7 +99,7 @@ Invoke-RestMethod -Uri "http://127.0.0.1:8000/v1/gateway/chat" -Method Post -Bod
 Or run `scripts/smoke_test_gateway.ps1` to exercise all of the above automatically (server must already be running).
 
 - **Audit log location:** `logs/audit.jsonl` by default (`LOG_PATH` env var to change it). One JSON object per line, UTF-8 encoded; secret-like patterns are redacted before being written, and rule-authored reason strings use plain ASCII (no em dashes) so the file renders correctly in any PowerShell console codepage.
-- **Still intentionally mocked, not a bug:** `/v1/gateway/chat` never calls a real LLM (fixed mock response only) and there is no real RAG retrieval anywhere in this repository yet - see `app/README.md`.
+- **Still intentionally mocked, not a bug:** `/v1/gateway/chat` uses the local deterministic provider adapter; it never calls an external LLM, and no real RAG retrieval exists yet - see `app/README.md`.
 
 ### Phase 5 RAG Context Guard
 
@@ -154,11 +150,158 @@ This remains a small rule-based guard. It can miss semantic, heavily obfuscated,
 or encoded attacks; a semantic classifier or LLM judge is future work. Vector
 retrieval, embeddings, and real LLM integration are still not implemented.
 
+### Phase 6 LLM Provider Adapter
+
+`app/services/llm_provider.py` defines the provider request/response contract,
+base interface, factory, and deterministic `MockLLMProvider`. The gateway now
+runs `Input Guard -> optional RAG Guard -> LLM Provider -> Output Guard -> Audit
+Logger`. Guarded prompt/context sanitization is applied before the provider is
+called, and blocking or human-review decisions skip the provider entirely.
+
+The default is local and offline:
+
+```powershell
+$env:LLM_PROVIDER = "mock"
+$env:LLM_MODEL_NAME = "mock-rag-guard-v1"
+$env:LLM_PROVIDER_TIMEOUT_SECONDS = "30"
+```
+
+No `.env` file, API key, provider SDK, network access, or paid call is required.
+Real provider integration remains future work and requires explicit approval,
+secret-handling design, and provider-specific tests before it can be enabled.
+
+### Phase 7 Evaluation Runner
+
+The offline runner loads and validates all 40 cases in
+`redteam/prompts.jsonl`, evaluates them directly against the existing guards,
+compares exact decisions, and writes reproducible JSON and Markdown reports.
+It does not invoke the mock provider, an external LLM, retrieval, or a vector
+database.
+
+Run it with either command:
+
+```powershell
+python scripts/run_evaluation.py
+.\scripts\run_evaluation.ps1
+```
+
+Generated artifacts:
+
+- `reports/evaluation/latest-evaluation.json` contains the summary and full
+  per-case rule/reason/risk details.
+- `reports/evaluation/latest-evaluation.md` contains a readable summary and
+  all expected-versus-actual decisions.
+
+The initial reproducible run produced 35 exact decision matches from 40 cases,
+with five decision-based false negatives and zero false positives under the
+Phase 7 definitions. These values describe only this small controlled synthetic
+benchmark. They are not real-world detection rates, statistical guarantees, or
+end-to-end harmful-output ASR.
+
+### Phase 7.1 Evaluation failure triage
+
+The initial Phase 7 run exposed five false negatives. Phase 7.1 added five
+targeted Input Guard rules for instruction-disregard actions, start-anchored
+"forget prior message" imperatives, detailed-attack training pretexts, bulk
+confidential-context extraction, and prompt-side replacement of official RAG
+sources. Nearby variants and benign counterexamples were added for each area.
+
+The unchanged 40-case suite was regenerated after calibration and now records
+40 exact matches, zero false positives, and zero false negatives. See
+`reports/evaluation/failure-triage.md` for case-by-case causes and limitations.
+This improvement is scoped only to this controlled synthetic benchmark and does
+not demonstrate complete or real-world prompt-injection protection.
+
+Full verification in the project-local `.venv` passed 79 tests. Starlette
+emitted one deprecation warning mentioning `httpx2`; the project does not depend
+on or install that package.
+
+### Phase 7.2 Baseline vs Guarded Comparison
+
+Phase 7.2 adds an always-allow no-guard decision baseline while leaving guarded
+evaluation unchanged. Run the comparison with either command:
+
+```powershell
+python scripts/run_evaluation.py --comparison
+.\scripts\run_evaluation.ps1 -Comparison
+```
+
+The generated `baseline-vs-guarded.json` and `.md` reports show:
+
+- No-guard baseline: 5/40 exact matches, 35 false negatives, attack-success
+  proxy `1.0000`.
+- Guarded: 40/40 exact matches, 0 false negatives, attack-success proxy
+  `0.0000`.
+
+This is a controlled synthetic decision benchmark, not a real-world detection
+rate. The baseline does not run or score an LLM, so it is not a real LLM quality
+baseline. Full project-local verification after Phase 7.2 passed 82 tests.
+
+### Phase 8 Evidence Packaging
+
+Report and demo evidence is indexed under `reports/evidence/`:
+
+- [Evidence index](reports/evidence/evidence-index.md): claim-to-file mapping,
+  reproduction steps, and cautions.
+- [Demo script](reports/evidence/demo-script.md): timed 5-7 minute local demo
+  with exact PowerShell commands.
+- [Report-ready summary](reports/evidence/report-ready-summary.md): Vietnamese
+  academic summary for adaptation into the internship report.
+- [Reproduction checklist](reports/evidence/reproduction-checklist.md): clean
+  setup, pytest, smoke test, evaluation, and comparison commands.
+- [Screenshot guide](reports/evidence/screenshot-guide.md): manual capture list
+  and caption cautions.
+
+These files package existing evidence; they do not add security features or
+change the frozen benchmark. LaTeX report integration and manual screenshot
+capture remain team review tasks.
+
+### Phase 9 Report and Demo Finalization
+
+- [Report integration plan](reports/evidence/report-integration-plan.md) maps
+  every final report section to source evidence and target LaTeX chapters.
+- [Demo rehearsal checklist](reports/evidence/demo-rehearsal-checklist.md)
+  provides preflight checks, timing, expected output, speaking points, common
+  questions, and an offline fallback plan.
+
+The official title in `report-latex-template/thesis.sty` was verified unchanged:
+“Nghiên cứu và triển khai cơ chế Guardrails bảo vệ hệ thống RAG trước tấn công
+Prompt Injection và rò rỉ dữ liệu”. The integration plan was subsequently
+applied in Phase 10; manual figures, compilation, and review remain.
+
+### Phase 10 Final LaTeX Report Integration
+
+The official chapter files now describe the implemented gateway, dataset,
+guards, mock provider, controlled evaluation, failure triage, baseline comparison,
+limitations and future work. See the
+[final report review checklist](reports/evidence/final-report-review-checklist.md)
+for compile, figure, citation, claim-safety and final PDF gates.
+
+No TeX toolchain was available in the integration environment, so PDF compile
+success is not claimed. Three compile-safe figure slots remain for architecture,
+guarded evaluation and baseline comparison screenshots.
+
+### Phase 11 Final Compile And Submission Preparation
+
+Phase 11 cleans stale report wording, assigns stable filenames/captions/labels
+to the three evidence figures, and adds final packaging guidance:
+
+- [Submission package checklist](reports/evidence/submission-package-checklist.md)
+- [LaTeX compile notes](reports/evidence/latex-compile-notes.md)
+- [Updated screenshot guide](reports/evidence/screenshot-guide.md#final-report-figure-files)
+
+The figure slots use `\IfFileExists`, so the draft remains compilable when an
+image is absent and displays an explicit TODO box. The signed approved-proposal
+sheet is still pending and the temporary page explicitly states that it is not
+a substitute. The package is ready for an initial Overleaf pdfLaTeX build, not
+for final submission until figures, compile review, proofreading, and supervisor
+approval are complete.
+
 **What is intentionally not implemented yet (not a bug):**
 - No real vector database, no embeddings, no similarity search — `dataset_loader.py` uses simple deterministic fixed-size character-window chunking only.
-- No real LLM call anywhere in this repository.
+- No real external LLM call anywhere in this repository; only the local deterministic mock provider is available.
 - `context_chunks` must be supplied directly by the caller (as if retrieval had already happened elsewhere) — there is no retrieval step.
-- A real vector database and a real LLM provider adapter are later phases (Phase 5's "LLM Provider Adapter" row and Phase 7's evaluation runner — see `TASK_BOARD.md`).
+- Real-provider implementations and a real vector database are future work; Phase 7 adds the evaluation runner.
 
 Everything before Phase 4 was documentation/data only — Phase 0–3.1 produced scaffolding, research, architecture/threat-model docs, and the synthetic benchmark (`datasets/`, `redteam/`). See [PROJECT_PLAN.md](PROJECT_PLAN.md) for the full roadmap.
 

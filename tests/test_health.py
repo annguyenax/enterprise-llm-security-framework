@@ -13,4 +13,4 @@ def test_health_returns_ok():
     body = response.json()
     assert body["status"] == "ok"
     assert body["service"] == "llm-security-gateway"
-    assert body["phase"] == "phase-4-skeleton"
+    assert body["phase"] == "phase-6-mock-provider"

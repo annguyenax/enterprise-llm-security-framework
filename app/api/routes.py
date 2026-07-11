@@ -1,4 +1,4 @@
-"""API routes for the LLM Security Gateway skeleton (Phase 4-5)."""
+"""API routes for the LLM Security Gateway through Phase 6."""
 from __future__ import annotations
 
 import uuid
@@ -18,7 +18,7 @@ router = APIRouter()
 
 @router.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
-    return HealthResponse(status="ok", service="llm-security-gateway", phase="phase-4-skeleton")
+    return HealthResponse(status="ok", service="llm-security-gateway", phase="phase-6-mock-provider")
 
 
 @router.post("/v1/guard/input", response_model=GuardDecisionResponse)
