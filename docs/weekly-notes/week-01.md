@@ -205,3 +205,53 @@ Phase 0 kickoff. Focus was entirely on scaffolding: repository structure, planni
 - Added `submission-package-checklist.md` and `latex-compile-notes.md`. Phase 11
   is In Review pending screenshots, signed sheet if required, Overleaf compile,
   warning fixes, Vietnamese proofread, supervisor review, and final packaging.
+
+## Phase 12A - Modernization Scope Lock and V2 Architecture (same week, 2026-07-11)
+
+- Three independent external reviews of the Phase 0-11 system were read
+  (`docs/modernization-ai-reviews/`: Codex code-architecture, Gemini
+  academic-methodology, Grok red-team/security-scope), alongside this
+  project's own earlier `claude-repo-feasibility-review.md`. All four
+  converge on the same core finding: the biggest gap is that retrieval is
+  not real (callers supply `context_chunks` directly) and the v1 40/40
+  result was reached by iteratively tuning rules against the same 40 cases
+  (a calibration process, honestly recorded in Phase 7.1, but not evidence
+  of generalization).
+- Produced 5 new planning documents, no application code:
+  `docs/modernization-final-plan.md` (scope lock and full reconciliation of
+  the three reviews, including where they conflicted),
+  `docs/modernization-v2-architecture.md` (target v2 component/module/API
+  design plus Phase 12B-12H boundary definitions, each with objective/
+  allowed files/prohibited files/acceptance criteria/tests/rollback/report
+  impact/stop condition), `docs/modernization-v2-threat-model.md` (STRIDE
+  extension covering the new retrieval/ingestion/provenance/DLP surface,
+  including two new attack families with no v1 equivalent: FTS5
+  query-syntax injection and multi-chunk coordinated injection),
+  `docs/decisions/ADR-002-retrieval-engine.md` (SQLite FTS5/BM25 chosen
+  over vector/hybrid/mock-only, resolving the vector-store decision
+  `ADR-001-mvp-scope.md` originally deferred), and
+  `docs/decisions/ADR-003-v2-benchmark.md` (v2 benchmark dev/validation/
+  holdout split rules, freezing rules, and relationship to the untouched
+  v1 corpus).
+- **Key resolved conflict:** Grok's review proposed hard numeric acceptance
+  thresholds (ASR < 20%, FPR < 5%, latency < 50ms) as phase gates. Rejected
+  as binding criteria per `AGENT_RULES.md` rule 3 (no fabricated/
+  pre-committed benchmark numbers) - adopting a target before any v2 data
+  exists risks reproducing the same tune-to-the-benchmark pattern already
+  seen in v1, one level up. The numbers are kept only as labeled external
+  reference points in the threat model document, not as gates.
+- Approved final direction (in priority order): SQLite FTS5/BM25 retrieval,
+  persistent ingestion, server-controlled provenance/trust, end-to-end RAG
+  query service, centralized DLP, new v2 benchmark with holdout, and
+  ablation/retrieval-security/leakage/latency metrics as the core scope;
+  vector/hybrid retrieval, a local LLM/semantic guard, and a dashboard are
+  explicitly optional and later (Phases 12F/12G/12H).
+- No file under `app/`, `tests/`, `scripts/`, `datasets/`, `redteam/`,
+  `reports/evaluation/`, or `report-latex-template/` was modified. Verified
+  with `git diff --check` and a changed-path review against the prohibited
+  list. Short pointer notes added to `README.md` and a new Phase 12A
+  section added to `TASK_BOARD.md`.
+- **Phase 12B (Retrieval Foundation) does not start automatically** - per
+  `AGENT_RULES.md` rule 12 (stop at phase boundaries), this session stopped
+  after the planning documents were produced and is awaiting explicit
+  approval before any `app/` code is written.
