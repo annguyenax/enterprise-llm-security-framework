@@ -67,6 +67,15 @@ Every **poisoned** document's front-matter includes `document_id` (using the `RT
 3. **False Positive check (Phase 7):** The same runner will separately query for content covered by the 5 clean documents and confirm none of them are ever flagged — feeding directly into the False Positive Rate metric (`docs/evaluation/metrics-definition.md` §4).
 4. **Reporting (Phase 7):** Per-document results (expected vs. actual decision) will be aggregated into the evaluation report described in `docs/evaluation/evaluation-plan.md` — no results exist yet; this dataset only makes that future run possible.
 
+## Trustworthiness, Methodology & Manual Review (Phase 3.1)
+
+- **Methodology:** why real enterprise data is not used, why controlled synthetic data is acceptable, and what this dataset can/cannot prove — see `docs/dataset/dataset-methodology.md`.
+- **Source mapping:** a full 50-row table mapping every document/prompt to its risk basis, target guard, expected decision, and review status — see `docs/dataset/source-mapping.md`.
+- **Validation report:** automated structural/safety checks (JSONL validity, duplicate IDs, canonical taxonomy values, no real PII/secrets/company names) — see `docs/dataset/dataset-validation-report.md`. All checks currently pass.
+- **Manual review process:** a human-reviewer checklist and sign-off tracking table — see `docs/dataset/manual-review-checklist.md`. **As of the most recent review, no team member has yet completed a full manual read-through** — this is tracked honestly, not assumed done.
+- **AI-assisted generation is not treated as ground truth.** Parts of this corpus were drafted with AI assistance across earlier sessions; the taxonomy (`redteam/expected-behaviors.yaml`, `redteam/attack-categories.md`) is the actual ground truth artifact, and every case's expected decision was assigned by applying that taxonomy, then automatically validated, then (still pending) manually reviewed. See `docs/dataset/dataset-methodology.md` §3 for the full explanation, including 4 taxonomy-inconsistency issues found and fixed during validation.
+- **This benchmark is for controlled guardrail evaluation, not for estimating real-world attack prevalence.** It measures whether a specific guard implementation matches documented expected decisions on this fixed, versioned corpus — it says nothing about how common these attacks are in real enterprises, and cannot demonstrate generalization to unseen attack phrasing. See `docs/dataset/dataset-methodology.md` §6–8 for the full scope of claims this dataset can and cannot support.
+
 ## Related Documents
 
 - `docs/evaluation/red-team-test-design.md` — original design rationale for this benchmark (5 clean + 5 poisoned categories), written before these files existed.

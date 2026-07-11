@@ -59,12 +59,22 @@ Phase 0 kickoff. Focus was entirely on scaffolding: repository structure, planni
 - **No code was written this session** — no FastAPI app, no guard/detection logic, no ingestion script, no LLM API calls, no packages installed. This is a pure data/test-fixture creation session; the benchmark only becomes useful once Phase 3 (Gateway Skeleton), Phase 4–6 (guards), and Phase 7 (evaluation runner) are actually implemented.
 - Updated `TASK_BOARD.md`: the two remaining "In Progress" Phase 2 rows (synthetic prompt set, synthetic poisoned-document set) are now marked Done; added an explicit "next concrete implementation tasks" note pointing at the existing Phase 3/4/7 rows (FastAPI scaffold, JSONL logging, Input Guard, evaluation runner).
 
+## Phase 3.1 — Dataset Trustworthiness Review and Freeze (same week, 2026-07-11)
+
+- Ran an automated validation pass over the entire Phase 3 benchmark (50 items: 5 clean docs, 5 poisoned docs, 40 prompts) using a short standard-library-only Python script (no packages installed, no LLM calls): JSONL parses cleanly, no duplicate IDs across documents or prompts, no missing required fields, all `expected_decision`/`target_guard` values checked against the canonical taxonomy, no realistic secret formats or real PII/company names detected anywhere in `datasets/` or `redteam/`. Full results in `docs/dataset/dataset-validation-report.md`.
+- Found and fixed **4 taxonomy-inconsistency issues**: 3 poisoned documents used non-canonical `expected_guard_decision` values (`sanitize_or_block`, `sanitize_or_log_only`, `sanitize_context_isolation`) not present in `redteam/expected-behaviors.yaml`'s 5-state taxonomy, and 1 poisoned document used a non-canonical `target_guard` value (`rag_guard_with_output_guard_backstop`). Fixed by normalizing each to its canonical value and preserving the original nuance in new `acceptable_alternate_decision`/`sanitize_technique` fields — no attack content or prose was rewritten, only front-matter metadata.
+- Created `docs/dataset/` with 4 new documents: `dataset-methodology.md` (why synthetic data, AI-assisted-vs-ground-truth distinction, OWASP/threat-model mapping, what the dataset can/cannot prove, limitations, reproducibility rules), `source-mapping.md` (all 50 items mapped to risk basis/target guard/expected decision/review status, auto-extracted from source files to avoid transcription errors), `manual-review-checklist.md` (11-item checklist plus a reviewer sign-off tracking table), and `dataset-validation-report.md` (the automated results above, plus 4 flagged ambiguous cases needing human judgment).
+- Updated `datasets/README.md` and `redteam/README.md` with links to the new methodology/mapping/checklist docs, and explicit statements that AI-assisted generation is not treated as ground truth, and that this benchmark supports controlled guardrail evaluation only — not real-world attack-prevalence claims.
+- **Honesty note:** no team member has yet completed a full manual read-through of all 50 items against the checklist — this is tracked as `pending` in `docs/dataset/source-mapping.md` and `docs/dataset/manual-review-checklist.md` §2, not silently assumed done.
+- No code was written, no packages were installed, no LLM API was called this session — validation used only Python's standard library.
+
 ## In Progress / Not Started
 
 - LlamaIndex vs. LangChain, ChromaDB vs. alternative, and API-based LLM provider comparisons — not covered by the Gemini research pass yet, still Not Started.
 - Direct team read-through of the three academic papers logged in `related-work.md` — needed before any citation is added to `report-latex/references.bib`.
 - Standalone public red-team dataset review — still Not Started.
-- Gateway Skeleton (Phase 3 in `TASK_BOARD.md`'s sense — FastAPI app, config, JSONL logging) — still Not Started; this is the next phase that will actually consume the new `datasets/`/`redteam/` benchmark.
+- Full manual read-through of the 50-item benchmark against `docs/dataset/manual-review-checklist.md` — still Not Started (0 of 50 items signed off by a named reviewer).
+- Gateway Skeleton (Phase 3 in `TASK_BOARD.md`'s original sense / "Phase 4: FastAPI Security Gateway Skeleton" in session shorthand — FastAPI app, config, JSONL logging) — still Not Started; this is the next phase that will actually consume the now-frozen `datasets/`/`redteam/` benchmark.
 
 ## Blockers / Open Questions
 
@@ -72,7 +82,7 @@ Phase 0 kickoff. Focus was entirely on scaffolding: repository structure, planni
 - Choice of API-based LLM provider not yet finalized — pending team decision and budget/approval discussion per `AGENT_RULES.md` rule 4.
 - AI-assisted research (Gemini) requires a mandatory verification pass before being trusted — adds time but caught two real citation errors this week, so the process is being kept for future research sessions.
 - Latency and false-positive/false-negative NFR targets are intentionally left qualitative until Phase 7 produces real measurements — this is correct per `AGENT_RULES.md` rule 3, but means the report cannot yet state concrete performance numbers.
-- The Sanitize vs. Log only boundary for borderline poisoned-document cases (e.g., RT-POISON-004) needs team discussion before guard logic is implemented in Phase 4–6.
+- The Sanitize vs. Log only boundary for borderline poisoned-document cases (e.g., RT-POISON-004) needs team discussion before guard logic is implemented in Phase 4–6. Now tracked formally as one of 4 ambiguous cases flagged for priority manual review in `docs/dataset/dataset-validation-report.md` §11.
 
 ## Next Week Plan
 

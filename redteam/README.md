@@ -64,6 +64,15 @@ Defined in full in `expected-behaviors.yaml`; summary:
 
 **No such run has happened yet.** Every field in `prompts.jsonl` is a design-time expectation, not a measured result.
 
+## Trustworthiness, Methodology & Manual Review (Phase 3.1)
+
+- **Methodology:** why controlled synthetic prompts are used instead of real attack logs, and what this suite can/cannot prove — see `docs/dataset/dataset-methodology.md`.
+- **Source mapping:** every one of the 40 prompts mapped to its risk basis, target guard, expected decision, and review status — see `docs/dataset/source-mapping.md`.
+- **Validation report:** automated checks confirming 40/40 valid JSON, no duplicate IDs, all required fields present, all `expected_decision`/`target_guard` values canonical — see `docs/dataset/dataset-validation-report.md`.
+- **Manual review process:** see `docs/dataset/manual-review-checklist.md`. **No team member has yet completed a full manual read-through of all 40 prompts** — tracked honestly as `pending`, not assumed done.
+- **AI-assisted generation is not treated as ground truth.** The prompt wording was drafted with AI assistance; the category taxonomy and expected-decision assignment follow `redteam/expected-behaviors.yaml` and `redteam/attack-categories.md`, which were designed against this project's own threat model, not accepted from an AI session at face value.
+- **This suite is for controlled guardrail evaluation, not for estimating real-world attack prevalence.** 40 prompts cannot demonstrate robustness against the full space of possible attack phrasings, and no adaptive/multi-turn attacker is modeled — see `docs/dataset/dataset-methodology.md` §6–8.
+
 ## Related Documents
 
 - `docs/evaluation/red-team-test-design.md` — original design rationale for this suite (7 prompt categories were originally designed there; `tool_action_misuse` was included as the optional 8th category with a full 5 prompts).

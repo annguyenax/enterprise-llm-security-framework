@@ -50,10 +50,34 @@ Owners: **Nguyen Van An**, **Le Dinh Nghia**, or **Both**. Status values: `Not S
 
 **Note (Controlled Synthetic Enterprise Benchmark, 2026-07-11):** A follow-on data-only session turned the Phase 2.5 design into actual files: `datasets/clean/` (5 docs), `datasets/poisoned/` (5 docs), `redteam/prompts.jsonl` (40 prompts), `redteam/expected-behaviors.yaml`, `redteam/attack-categories.md`. This closes out the last two "In Progress" rows above. **No code was written** — no FastAPI app, no guard logic, no ingestion script, no LLM API calls; this data only becomes useful once Phase 3–7 below are implemented. Full inventory: `datasets/README.md`, `redteam/README.md`.
 
-**Next concrete implementation tasks** (unblocked by this session, not yet started):
-1. Implement FastAPI gateway skeleton — tracked below (Phase 3, "FastAPI app scaffold").
-2. Implement Input Guard — tracked below (Phase 4), will be tested against `redteam/prompts.jsonl`.
-3. Implement JSONL structured logging — tracked below (Phase 3, "JSONL structured logging"), format anticipated by FR7/NFR3 in `docs/diagrams/architecture.md`.
+## Phase 3 — Controlled Synthetic Enterprise Benchmark (data) — **Status: Done**
+
+| Task | Owner | Status |
+|---|---|---|
+| 5 clean enterprise documents (`datasets/clean/*.md`) | Le Dinh Nghia | Done |
+| 5 poisoned documents (`datasets/poisoned/*.md`) | Le Dinh Nghia | Done |
+| 40 red-team prompts (`redteam/prompts.jsonl`) | Nguyen Van An | Done |
+| Guard decision taxonomy (`redteam/expected-behaviors.yaml`) | Nguyen Van An | Done |
+| Attack category reference (`redteam/attack-categories.md`) | Both | Done |
+
+This is the same work recorded against the two Phase 2 rows above ("Synthetic red-team prompt set", "Synthetic poisoned-document set") — listed again here as its own phase for clarity, matching the "Phase 3: Controlled Synthetic Enterprise Benchmark" session label. **Data/test artifacts only — no application code.**
+
+## Phase 3.1 — Dataset Trustworthiness Review and Freeze — **Status: Done (automated review); manual read-through in review**
+
+| Task | Owner | Status |
+|---|---|---|
+| Automated validation (JSONL parse, duplicate IDs, required fields, canonical taxonomy values, no real PII/secrets/company names) | Both | Done — see `docs/dataset/dataset-validation-report.md`; all checks pass |
+| Fix taxonomy-inconsistent fields found during validation | Both | Done — 4 fields across 3 poisoned documents corrected (non-canonical `expected_guard_decision`/`target_guard` values normalized); documented in `docs/dataset/dataset-validation-report.md` §2 |
+| Dataset methodology write-up | Both | Done — `docs/dataset/dataset-methodology.md` (why synthetic data, AI-assisted-vs-ground-truth, what the dataset can/cannot prove, limitations) |
+| Source mapping (dataset/prompt → risk basis → guard → expected decision) | Both | Done — `docs/dataset/source-mapping.md`, 50/50 items mapped |
+| Manual review checklist + sign-off tracking | Both | **In Review** — checklist created (`docs/dataset/manual-review-checklist.md`); **no team member has yet completed a full manual read-through** of all 50 items, tracked honestly as `pending` |
+
+**Corpus is frozen as of this review** (2026-07-11) pending the manual read-through. Any future content change to `datasets/`/`redteam/` should be treated as a new corpus version per `docs/dataset/dataset-methodology.md` §9.
+
+**Next concrete implementation tasks** (unblocked by Phase 3/3.1, not yet started):
+1. **Phase 4: FastAPI Security Gateway Skeleton** — tracked below under the existing "Phase 3 — Gateway Skeleton" table (FastAPI app scaffold, config, JSONL logging, test harness). See disambiguation note below.
+2. Implement Input Guard — tracked below (Phase 4 — Input Guard), will be tested against `redteam/prompts.jsonl`.
+3. Implement JSONL structured logging — tracked below (Phase 3 — Gateway Skeleton, "JSONL structured logging"), format anticipated by FR7/NFR3 in `docs/diagrams/architecture.md`.
 4. Implement the evaluation runner — tracked below (Phase 7, "Automated red-team runner against gateway"), will consume `datasets/` and `redteam/` per `docs/evaluation/evaluation-plan.md` §4.
 
 ## Phase 3 — Gateway Skeleton
@@ -65,7 +89,10 @@ Owners: **Nguyen Van An**, **Le Dinh Nghia**, or **Both**. Status values: `Not S
 | JSONL structured logging | Le Dinh Nghia | Not Started |
 | Base test harness (pytest) | Le Dinh Nghia | Not Started |
 
-**Note:** "Phase 3" in the sense of *this* task board (Gateway Skeleton — code) is distinct from the "Phase 3: Controlled Synthetic Enterprise Benchmark" label used in the 2026-07-11 data-creation session referenced above (which materialized `datasets/`/`redteam/`, not application code). That data-creation work is recorded against the Phase 2 rows above since it materializes what Phase 2/2.5 designed. This Phase 3 (Gateway Skeleton) remains **Not Started**.
+**Note (phase-numbering disambiguation):** This project has accumulated three different things people have called "Phase 3":
+1. This board's *original* Phase 3 (this section) — **Gateway Skeleton** (code: FastAPI, config, logging, test harness). Still **Not Started**.
+2. The 2026-07-11 data session's "**Phase 3: Controlled Synthetic Enterprise Benchmark**" — recorded above as its own "Phase 3 — Controlled Synthetic Enterprise Benchmark (data)" section. **Done.**
+3. Session shorthand "**Phase 4: FastAPI Security Gateway Skeleton**" used after the Phase 3.1 dataset review — this refers to the *same work* as item 1 above (this section), not a new phase. Do not create a second, separate FastAPI task list — use this section.
 
 ## Phase 4 — Input Guard
 
