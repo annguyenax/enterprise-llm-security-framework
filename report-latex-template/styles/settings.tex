@@ -81,21 +81,30 @@
 %----------------------------------------------------------------------------------------
 \usepackage{tocloft}
 
-% Định dạng tiêu đề của các trang danh sách
+% Chuẩn hóa tên các trang danh mục theo đúng thuật ngữ chính thức, ghi đè sau khi
+% babel[vietnamese] đã khởi tạo giá trị mặc định của nó (dùng \AtBeginDocument để
+% không bị babel ghi đè lại lúc \begin{document}).
+\AtBeginDocument{%
+  \renewcommand{\contentsname}{Mục lục}
+  \renewcommand{\listfigurename}{Danh mục các hình}
+  \renewcommand{\listtablename}{Danh mục các bảng}
+}
+
+% Định dạng tiêu đề của các trang danh sách: in đậm, IN HOA, cỡ 14
 \makeatletter
 \renewcommand{\@cftmaketoctitle}{%
   \clearpage
-  {\centering\bfseries\fontsize{14pt}{20pt}\selectfont \contentsname\par}
+  {\centering\bfseries\fontsize{14pt}{20pt}\selectfont \MakeUppercase{\contentsname}\par}
   \nobreak\vskip 14pt
 }
 \renewcommand{\@cftmakeloftitle}{%
   \clearpage
-  {\centering\bfseries\fontsize{14pt}{20pt}\selectfont \listfigurename\par}
+  {\centering\bfseries\fontsize{14pt}{20pt}\selectfont \MakeUppercase{\listfigurename}\par}
   \nobreak\vskip 14pt
 }
 \renewcommand{\@cftmakelottitle}{%
   \clearpage
-  {\centering\bfseries\fontsize{14pt}{20pt}\selectfont \listtablename\par}
+  {\centering\bfseries\fontsize{14pt}{20pt}\selectfont \MakeUppercase{\listtablename}\par}
   \nobreak\vskip 14pt
 }
 \makeatother

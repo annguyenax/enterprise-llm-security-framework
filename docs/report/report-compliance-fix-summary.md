@@ -53,3 +53,17 @@ pdflatex main.tex
 - **10/11 mục ưu tiên** trong chỉ thị của phiên này đã được xử lý trực tiếp bằng thay đổi file (mục 1–9 ở bảng trên, cộng rà soát văn phong ở mục 11 không cần sửa file).
 - Mục còn lại liên quan tới **định dạng cơ bản (margin/font/spacing)** không cần sửa vì đã đúng từ phiên Report Template Compliance trước đó (đã xác nhận lại qua audit, không có Fail nào ở nhóm này).
 - **2 xung đột nguồn** (C01, C02) được xử lý bằng cách **giữ nguyên theo "BỐ CỤC"** kèm ghi chú minh bạch trong code, đúng theo chỉ thị ưu tiên — không tự ý "đoán" câu trả lời đúng.
+
+## Cập nhật lần 2 — Final Strict Compliance Review
+
+Một phiên rà soát cuối cùng đã bổ sung các sửa đổi sau (chi tiết đầy đủ tại `docs/report/final-strict-compliance-review.md`):
+
+- Metadata: `\faculty` → "Khoa Công nghệ thông tin 2"; `\teamname` → "Nhóm\_A06" (thêm `\teamnameprose` = "Nhóm A06" dùng trong văn xuôi); tên đề tài trên bìa đổi sang "Nghiên cứu và triển khai cơ chế Guardrails bảo vệ hệ thống RAG trước tấn công Prompt Injection và rò rỉ dữ liệu".
+- Bìa: thêm nhãn "Đề tài:" in đậm trước tên đề tài; đổi toàn bộ nhãn thông tin (Người hướng dẫn, Sinh viên, MSSV, Lớp, Ngành) sang IN HOA đậm, tách MSSV thành dòng riêng; tăng cỡ chữ loại báo cáo trên bìa đệm từ 30pt lên 36pt để khớp bìa ngoài.
+- Tiêu đề trang Mục lục/Danh mục bảng/Danh mục hình: ép in hoa tường minh bằng `\MakeUppercase`, đồng thời chuẩn hóa đúng thuật ngữ tiếng Việt ("Mục lục", "Danh mục các bảng", "Danh mục các hình") qua `\AtBeginDocument`, không phụ thuộc chuỗi mặc định của babel.
+- Dọn toàn bộ comment nội bộ nhắc tới "Report Compliance Fix Phase"/"phiên làm việc"/cross-reference chi tiết tới `report-compliance-audit.md mục Cxx` trong `report-latex-template/`, thay bằng comment kỹ thuật ngắn gọn.
+- Xác nhận lại (không cần sửa): tiêu đề Lời cảm ơn/Danh mục ký hiệu/Kế hoạch nhóm đã tự động in hoa đậm qua cơ chế `titlesec` chung, không cần hack riêng từng trang.
+
+**Vấn đề mới phát sinh cần rà soát thủ công:** tên đề tài mới trên bìa báo cáo ("Nghiên cứu và triển khai cơ chế Guardrails...") **khác với tên đề tài dùng ở README.md, PROJECT_PLAN.md và toàn bộ tài liệu `docs/` khác của dự án** ("Xây dựng Hệ thống Bảo mật LLM..."). Đây là thay đổi theo đúng chỉ thị của phiên rà soát cuối, nhưng tạo ra một điểm không nhất quán tên đề tài ở cấp toàn dự án — cần nhóm xác nhận đây có phải là quyết định đổi tên chính thức hay không trước khi nộp.
+
+**CẬP NHẬT (Report Title Lock):** Đã xác nhận — "Nghiên cứu và triển khai cơ chế Guardrails bảo vệ hệ thống RAG trước tấn công Prompt Injection và rò rỉ dữ liệu" là **tên đề tài đăng ký chính thức**. `\titlethesis` trong `thesis.sty` đã khớp chính xác tên này (đã kiểm tra lại, không cần sửa thêm). Đây vẫn là tên KHÁC với tên dùng ở README.md/PROJECT_PLAN.md/`docs/` khác — các file đó nằm ngoài phạm vi cho phép sửa của mọi phiên làm việc về báo cáo LaTeX, nên **sự không nhất quán ở cấp toàn dự án vẫn còn tồn tại**, chỉ là không còn là điều "chưa xác nhận" nữa (đã xác nhận là có chủ đích). Nếu muốn đồng bộ toàn dự án, cần một phiên riêng được phép sửa các file đó.

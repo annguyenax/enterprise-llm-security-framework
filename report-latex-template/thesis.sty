@@ -4,20 +4,15 @@
 %----------------------------------------------------------------------------------------
 %	CÁC BIẾN THÔNG TIN
 %----------------------------------------------------------------------------------------
-\newcommand{\faculty}{Khoa An toàn thông tin}
-\newcommand{\titlethesis}{Xây dựng Hệ thống Bảo mật LLM Chống Tấn công Prompt Injection và Data Poisoning trong Môi trường Doanh nghiệp}
+\newcommand{\faculty}{Khoa Công nghệ thông tin 2}
+\newcommand{\titlethesis}{Nghiên cứu và triển khai cơ chế Guardrails bảo vệ hệ thống RAG trước tấn công Prompt Injection và rò rỉ dữ liệu}
 \newcommand{\studentname}{Nguyễn Văn An}
 \newcommand{\studentnametwo}{Lê Đình Nghĩa}
 \newcommand{\mssv}{N22DCAT001}
 \newcommand{\mssvtwo}{N22DCAT038}
 
-% Đã chốt chính tả tên GVHD là "Nguyễn Hoàng Thành" theo chỉ thị của phiên Report
-% Compliance Fix Phase (ghi đè lựa chọn "Nguyễn Hoàng Thanh" dùng tạm trước đó).
-% LƯU Ý: một số file .md khác trong docs/ (bao-cao-dinh-ky-01.md, TASK_BOARD.md,
-% README.md, AGENT_RULES.md, PROJECT_PLAN.md...) vẫn còn ghi "Nguyễn Hoàng Thanh" --
-% các file đó nằm ngoài phạm vi cho phép chỉnh sửa của phiên này (chỉ được sửa
-% report-latex-template/ và docs/report/*), nên vẫn còn KHÔNG NHẤT QUÁN ở cấp toàn
-% dự án. Xem docs/report/report-compliance-fix-summary.md mục "Xung đột còn tồn tại".
+% Chính tả chuẩn của GVHD: "Nguyễn Hoàng Thành". Một số file .md khác ngoài
+% report-latex-template/ vẫn còn ghi "Thanh" (chưa đồng bộ toàn dự án).
 \newcommand{\supervisor}{ThS. Nguyễn Hoàng Thành}
 \newcommand{\major}{An toàn thông tin}
 \newcommand{\yearsubmit}{2026}
@@ -25,7 +20,10 @@
 \newcommand{\reporttype}{BÁO CÁO ĐỊNH KỲ\\THỰC TẬP TỐT NGHIỆP ĐẠI HỌC}
 \newcommand{\datn}{Báo cáo TTTN Đại học}
 \newcommand{\classid}{D22CQAT01-N}
-\newcommand{\teamname}{Nhóm\_LLM-Security}
+% Tên nhóm chính thức: A06. Dùng \teamname (có gạch dưới) cho Footer; dùng
+% "Nhóm A06" (không gạch dưới) khi nhắc tới nhóm trong văn xuôi.
+\newcommand{\teamname}{Nhóm\_A06}
+\newcommand{\teamnameprose}{Nhóm A06}
 
 
 %----------------------------------------------------------------------------------------
@@ -34,7 +32,10 @@
 \newcommand{\coverpage}{
   \begin{titlepage}
     \thispagestyle{empty}
-    % --- Vẽ khung ---
+    % TODO: khung viền trang trí bên dưới có thể cần bỏ nếu Khoa/Bộ môn yêu cầu
+    % bìa màu xanh nước biển trơn, không họa tiết trang trí. Giữ lại vì văn bản
+    % gốc không cấm khung viền đơn giản cho trang bìa (chỉ cấm hoa văn/hình vẽ
+    % trang trí ở đầu mỗi trang nội dung/chương/mục).
     \begin{tikzpicture}[remember picture, overlay]
       \draw[line width=0.75pt]
         ($ (current page.north west) + (3.0cm,-2.0cm) $)
@@ -46,31 +47,30 @@
         ($ (current page.south east) + (-1.65cm,1.65cm) $);
     \end{tikzpicture}
     \begin{center}
-      % Dòng 1-3 theo đúng mẫu chính thức: dòng 3 là địa điểm cơ sở, KHÔNG phải
-      % tên Khoa (xem docs/report/report-compliance-audit.md mục C03).
+      % Dòng 3 là địa điểm cơ sở (không phải tên Khoa) theo mẫu bìa chính thức.
       {\fontsize{14pt}{16pt}\selectfont BỘ KHOA HỌC VÀ CÔNG NGHỆ}\\[0.3cm]
       {\fontsize{15pt}{17pt}\bfseries HỌC VIỆN CÔNG NGHỆ BƯU CHÍNH VIỄN THÔNG}\\[0.3cm]
       {\fontsize{14pt}{16pt}\bfseries CƠ SỞ TẠI THÀNH PHỐ HỒ CHÍ MINH}\\
-      \textbf{-----------------------------------------}\\[1.5cm]
-      \includegraphics[scale=0.3]{assets/Logo_PTIT_University.png}\\[1.5cm]
-      %-- Tên loại báo cáo: size 36 theo mẫu chính thức (xem audit mục C05)
-      {\fontsize{36pt}{40pt}\selectfont \bfseries \reporttype}\\[1.5cm]
-      %-- Tên đề tài: size 16-30 tùy độ dài, chọn 20pt cho vừa 2 dòng
+      \textbf{-----------------------------------------}\\[1.3cm]
+      \includegraphics[scale=0.3]{assets/Logo_PTIT_University.png}\\[1.3cm]
+      {\fontsize{36pt}{40pt}\selectfont \bfseries \reporttype}\\[1.3cm]
+      {\fontsize{16pt}{20pt}\selectfont\bfseries Đề tài:}\\[0.3cm]
       {\fontsize{20pt}{30pt}\selectfont \bfseries
-        \parbox{14cm}{\centering \titlethesis}}\\[2cm]
+        \parbox{14cm}{\centering \titlethesis}}\\[1.8cm]
 
-      % Thứ tự thông tin đúng theo mẫu chính thức: Người hướng dẫn -> Sinh viên 1
-      % (MSSV) -> Lớp -> Sinh viên 2 (MSSV) -> Lớp -> Ngành (xem audit mục C04).
+      % Thứ tự và nhãn đúng mẫu chính thức: nhãn IN HOA đậm, giá trị chữ thường.
       \begin{minipage}{0.8\textwidth}
         \raggedright % = flushleft
         {\fontsize{14pt}{16pt}\selectfont
         \begin{tabular}{@{}l l@{}}
-          \textbf{Người hướng dẫn:} & \supervisor \\[0.3cm]
-          \textbf{Sinh viên 1:} & \studentname \quad MSSV: \mssv \\
-          \textbf{Lớp:} & \classid \\[0.3cm]
-          \textbf{Sinh viên 2:} & \studentnametwo \quad MSSV: \mssvtwo \\
-          \textbf{Lớp:} & \classid \\[0.3cm]
-          \textbf{Ngành:} & \major \\
+          \textbf{NGƯỜI HƯỚNG DẪN:} & \supervisor \\[0.25cm]
+          \textbf{SINH VIÊN 1:} & \studentname \\
+          \textbf{MSSV:} & \mssv \\
+          \textbf{LỚP:} & \classid \\[0.25cm]
+          \textbf{SINH VIÊN 2:} & \studentnametwo \\
+          \textbf{MSSV:} & \mssvtwo \\
+          \textbf{LỚP:} & \classid \\[0.25cm]
+          \textbf{NGÀNH:} & \major \\
         \end{tabular}}
       \end{minipage}
       \vfill
@@ -80,36 +80,33 @@
 }
 
 %----------------------------------------------------------------------------------------
-%	LỆNH TẠO TRANG BÌA ĐỆM (đơn giản hơn bìa ngoài, không có khung trang trí)
+%	LỆNH TẠO TRANG BÌA ĐỆM
 %----------------------------------------------------------------------------------------
 \newcommand{\innercoverpage}{
   \begin{titlepage}
     \thispagestyle{empty}
     \begin{center}
-      % Dòng 3 = địa điểm cơ sở theo mẫu chính thức (đồng bộ với \coverpage).
       {\fontsize{14pt}{16pt}\selectfont BỘ KHOA HỌC VÀ CÔNG NGHỆ}\\[0.3cm]
       {\fontsize{15pt}{17pt}\bfseries HỌC VIỆN CÔNG NGHỆ BƯU CHÍNH VIỄN THÔNG}\\[0.3cm]
       {\fontsize{14pt}{16pt}\bfseries CƠ SỞ TẠI THÀNH PHỐ HỒ CHÍ MINH}\\[1.2cm]
 
-      %-- Bìa đệm dùng cỡ chữ nhỏ hơn bìa ngoài một chút để phân biệt 2 lớp bìa,
-      %-- nhưng vẫn theo tinh thần "size 36" của mẫu chính thức cho tên loại báo cáo.
-      {\fontsize{30pt}{34pt}\selectfont \bfseries \reporttype}\\[1.2cm]
-
+      {\fontsize{36pt}{40pt}\selectfont \bfseries \reporttype}\\[1.2cm]
+      {\fontsize{16pt}{20pt}\selectfont\bfseries Đề tài:}\\[0.3cm]
       {\fontsize{18pt}{26pt}\selectfont \bfseries
-        \parbox{14cm}{\centering \titlethesis}}\\[2cm]
+        \parbox{14cm}{\centering \titlethesis}}\\[1.6cm]
 
-      % Cùng thứ tự thông tin với bìa ngoài: Người hướng dẫn -> SV1(MSSV) -> Lớp
-      % -> SV2(MSSV) -> Lớp -> Ngành.
       \begin{minipage}{0.75\textwidth}
         \raggedright
         {\fontsize{13pt}{15pt}\selectfont
         \begin{tabular}{@{}l l@{}}
-          \textbf{Người hướng dẫn:} & \supervisor \\[0.25cm]
-          \textbf{Sinh viên 1:} & \studentname \quad MSSV: \mssv \\
-          \textbf{Lớp:} & \classid \\[0.25cm]
-          \textbf{Sinh viên 2:} & \studentnametwo \quad MSSV: \mssvtwo \\
-          \textbf{Lớp:} & \classid \\[0.25cm]
-          \textbf{Ngành:} & \major \\
+          \textbf{NGƯỜI HƯỚNG DẪN:} & \supervisor \\[0.2cm]
+          \textbf{SINH VIÊN 1:} & \studentname \\
+          \textbf{MSSV:} & \mssv \\
+          \textbf{LỚP:} & \classid \\[0.2cm]
+          \textbf{SINH VIÊN 2:} & \studentnametwo \\
+          \textbf{MSSV:} & \mssvtwo \\
+          \textbf{LỚP:} & \classid \\[0.2cm]
+          \textbf{NGÀNH:} & \major \\
         \end{tabular}}
       \end{minipage}
       \vfill
@@ -132,9 +129,7 @@
   \clearpage
   \chapter*{Lời cảm ơn}
   \addcontentsline{toc}{chapter}{Lời cảm ơn}
-  % \chapter* (không đánh số) không tự gọi \markboth như \chapter thường, nên
-  % Header phải sẽ giữ tiêu đề chương trước đó nếu không set thủ công (xem
-  % docs/report/report-compliance-audit.md mục C12).
+  % \chapter* không tự gọi \markboth (khác với \chapter thường) nên set thủ công.
   \markboth{LỜI CẢM ƠN}{}
   \quotation
 }{\par}
