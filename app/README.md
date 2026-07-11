@@ -2,10 +2,13 @@
 
 Application code for the LLM Security Gateway / Guardrail Proxy.
 
-**Status: Phase 6 - offline LLM Provider Adapter.** Rule-based Input,
-RAG Context, and Output guards, deterministic dataset loading, JSONL audit
-logging, and a mock chat pipeline are implemented. No external LLM call or vector
-retrieval exists yet.
+**Status: Phase 12B (In Review) - SQLite FTS5/BM25 retrieval foundation.**
+Rule-based Input, RAG Context, and Output guards, deterministic dataset
+loading, JSONL audit logging, a mock chat pipeline, and a persistent local
+document ingestion/retrieval foundation are implemented. No external LLM
+call exists. **Retrieval is not yet wired into the guarded gateway** -
+`POST /v1/rag/query` does not exist until Phase 12C; `POST /v1/gateway/chat`
+is unchanged and still uses caller-supplied `context_chunks` only.
 
 ## Endpoints
 
@@ -15,7 +18,9 @@ retrieval exists yet.
 | POST | `/v1/guard/input` | Evaluate a raw prompt. |
 | POST | `/v1/guard/output` | Evaluate a candidate output. |
 | POST | `/v1/guard/rag-context` | Evaluate caller-supplied context chunks. |
-| POST | `/v1/gateway/chat` | Input -> RAG -> LLM Provider -> Output -> audit log. |
+| POST | `/v1/gateway/chat` | Input -> RAG -> LLM Provider -> Output -> audit log (caller-supplied context only). |
+| POST | `/v1/documents/ingest` | **Phase 12B.** Persistent document ingestion with server-controlled provenance/trust. |
+| POST | `/v1/retrieve` | **Phase 12B.** Lexical (SQLite FTS5/BM25) retrieval only - no guard pipeline runs. |
 
 ## Guard Design
 
@@ -46,19 +51,70 @@ Configuration defaults are `LLM_PROVIDER=mock`,
 `LLM_MODEL_NAME=mock-rag-guard-v1`, and
 `LLM_PROVIDER_TIMEOUT_SECONDS=30`.
 
+## Retrieval Foundation (Phase 12B)
+
+`retrieval/` and `services/ingestion.py`/`services/chunking.py` implement a
+persistent, deterministic, offline lexical retrieval foundation using only
+Python's standard-library `sqlite3` module (no new dependency):
+
+- `retrieval/models.py` - typed, defensively-immutable records
+  (`DocumentRecord`, `ChunkRecord`, `RetrievalHit`, etc.). Metadata is
+  copied into a `MappingProxyType` at construction so callers cannot mutate
+  a record after the fact.
+- `retrieval/base.py` - the storage-agnostic `Retriever` protocol.
+- `retrieval/sqlite_bm25.py` - the only implementation: a persistent SQLite
+  file with an FTS5 virtual table, `bm25()`-ranked search, short-lived
+  per-operation connections (never a shared global connection), and an
+  explicit FTS5 capability check that fails loudly with **no fallback of
+  any kind** (no `LIKE` search, no degraded scoring) if FTS5 is
+  unavailable - see `docs/decisions/ADR-002-retrieval-engine.md`.
+- `services/chunking.py` - deterministic, paragraph-aware chunking (v2),
+  distinct from `services/dataset_loader.py`'s v1 fixed-window chunker,
+  which is unchanged and still used only by the v1 benchmark loader.
+- `services/ingestion.py` - validation, chunking orchestration, and atomic
+  persistence via `Retriever.upsert_documents()`.
+- `core/source_policy.py` - the **only** place `trust_level`/
+  `classification`/`source_type` are assigned, always server-side from a
+  `source_key` allowlist. A caller can never set these directly (the
+  ingestion request schema has no such fields, `extra="forbid"` rejects
+  any attempt to add them) and any attempt to smuggle them through the
+  free-form `metadata` dict is silently stripped before storage. Unknown
+  `source_key` values are rejected, not silently downgraded to a low-trust
+  policy - see `core/source_policy.py`'s module docstring for the
+  documented rationale.
+
+Query text is never concatenated raw into an FTS5 `MATCH` expression: user
+queries are tokenized into plain lexical terms and each term is
+individually double-quoted before being joined (implicit AND) into the
+final match expression, so FTS5 operators (`NEAR`, `AND`/`OR`/`NOT`,
+column-filter syntax, wildcards) typed by a caller are treated as literal
+search terms, never as operators. SQL parameterization alone does not
+protect against this - FTS5 `MATCH` has its own query language.
+
+The runtime retrieval/ingestion path never reads or stores the v1
+benchmark's `is_poisoned` field - see `docs/modernization-v2-threat-model.md`
+§3.
+
 ## Not Implemented
 
 - No real external LLM provider call; only `MockLLMProvider` is implemented.
-- No embeddings, similarity search, vector database, or real retrieval. Callers
-  supply `context_chunks` directly.
+- No embeddings, similarity search, or vector database (lexical/BM25 only
+  as of Phase 12B - see `docs/decisions/ADR-002-retrieval-engine.md`).
+- No `POST /v1/rag/query` yet - retrieval is not wired into any guard or
+  the LLM provider. That is Phase 12C.
 - No semantic classifier or LLM judge. Rule-based detection can miss semantic,
   deeply obfuscated, or encoded attacks and may still produce false positives.
+- Not production-ready: no production claim, no real-world detection-rate
+  claim.
 
 ## Audit Logging
 
 Guard decisions are appended as UTF-8 JSON Lines to `logs/audit.jsonl` by
 default. Secret-like content is redacted before logging. Raw context chunks are
-not written to the decision summary.
+not written to the decision summary. Phase 12B ingestion writes one audit
+event per batch call recording only safe fields (document ID, source key,
+assigned source type/classification/trust level, a content-hash prefix, and
+the result status per item) - never full document text.
 
 ## Not Production-Ready
 

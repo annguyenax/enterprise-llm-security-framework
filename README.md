@@ -329,6 +329,91 @@ Phase 12B (the first phase that touches `app/`) requires a separate,
 explicit go-ahead — it does not start automatically from this plan or from
 audit approval.
 
+### Phase 12B Retrieval Foundation (In Review)
+
+Phase 12B implements the SQLite FTS5/BM25 retrieval foundation approved in
+Phase 12A: persistent local document ingestion, server-controlled
+provenance/trust, and lexical retrieval — using only Python's
+standard-library `sqlite3` (no new dependency). **Retrieval is not yet
+wired into the guarded gateway** — `POST /v1/rag/query` does not exist
+until Phase 12C, and `POST /v1/gateway/chat` is byte-identical to its
+Phase 0-11 behavior (regression-tested).
+
+**Database location:** `data/retrieval.db` by default (`RETRIEVAL_DB_PATH`
+env var to change it; already covered by `.gitignore`'s existing `data/`
+and `*.db` entries — no runtime database is ever committed).
+
+**Ingest documents** (server assigns trust/classification from a
+`source_key` allowlist — see `app/core/source_policy.py` — a caller can
+never set `trust_level`/`classification` directly, and any attempt via the
+free-form `metadata` field is silently stripped):
+
+```powershell
+$body = @{
+    documents = @(
+        @{ external_id = "policy-001"; source_key = "api_upload"; title = "Security Policy"; text = "..." }
+    )
+} | ConvertTo-Json -Depth 5
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/v1/documents/ingest" -Method Post -Body $body -ContentType "application/json"
+```
+
+**Retrieve** (lexical/BM25 only, no guard pipeline):
+
+```powershell
+$body = @{ query = "warranty policy"; top_k = 5 } | ConvertTo-Json
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/v1/retrieve" -Method Post -Body $body -ContentType "application/json"
+```
+
+**Smoke test** (ingest, retrieve, update, verify stale content gone):
+
+```powershell
+$env:RETRIEVAL_DB_PATH = "$env:TEMP\smoke-retrieval.db"
+uvicorn app.main:app --reload
+# in a second shell:
+powershell -ExecutionPolicy Bypass -File scripts/smoke_test_retrieval.ps1
+```
+
+**Safe FTS5 query construction:** user query text is never concatenated
+raw into an FTS5 `MATCH` expression. Queries are tokenized into plain
+lexical terms, each individually double-quoted, and joined with implicit
+AND — so FTS5 operators (`NEAR`, `AND`/`OR`/`NOT`, column filters,
+wildcards) typed by a caller are treated as literal search terms, not
+executed as query syntax. SQL parameterization alone does not protect
+against this (FTS5 `MATCH` has its own query language) — see
+`docs/decisions/ADR-002-retrieval-engine.md`.
+
+**Ingestion/upsert semantics:** canonical `document_id` is derived
+server-side from `source_key` + `external_id` (SHA-256-based, deterministic
+— never caller-supplied). Re-ingesting identical content is a no-op
+(`unchanged`); changed content atomically replaces all stale chunks and FTS
+index rows within one transaction (`updated`); a batch-level database
+failure rolls back the entire batch (`IngestionBatchError`) — no partial
+write is ever left behind. Duplicate `external_id` values within the same
+batch are rejected per-item, not the whole batch.
+
+**FTS5 capability policy:** an explicit capability check runs before
+retrieval is used. If FTS5 is unavailable in the local Python/SQLite build,
+the system raises a clear `FTS5UnavailableError` and serves **zero**
+retrieval-dependent requests — there is no fallback to `LIKE` search or any
+degraded scoring mode, at startup or at any later point. Any alternative
+retriever requires a future ADR.
+
+**Known limitations (not bugs):**
+- Lexical/keyword retrieval only — no semantic similarity, no embeddings,
+  no vector database (deferred to optional Phase 12F, its own future ADR).
+- No `POST /v1/rag/query` yet — retrieval is not connected to any guard or
+  the LLM provider. That is Phase 12C.
+- No real LLM call anywhere in this repository.
+- Not production-ready: no production claim, no real-world detection-rate
+  claim, evaluated only on synthetic content created during manual testing
+  (Phase 12B has no benchmark of its own — that is Phase 12D/12E).
+
+**Phase 12B is marked In Review, not Done**, pending a full local `pytest`
+run and a repository-wide security review in the target environment (this
+session verified 151/151 tests passing and a live smoke test in a
+project-local `.venv`, but per `AGENT_RULES.md` rule 9/10 the phase is not
+declared `Done` until that verification is independently repeated).
+
 Everything before Phase 4 was documentation/data only — Phase 0–3.1 produced scaffolding, research, architecture/threat-model docs, and the synthetic benchmark (`datasets/`, `redteam/`). See [PROJECT_PLAN.md](PROJECT_PLAN.md) for the full roadmap.
 
 ## License

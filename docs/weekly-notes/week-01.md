@@ -294,3 +294,76 @@ Phase 0 kickoff. Focus was entirely on scaffolding: repository structure, planni
   is not itself the go-ahead to implement - per `AGENT_RULES.md` rule 12,
   Phase 12B still requires a separate, explicit instruction before any
   `app/` code is written.
+
+## Phase 12B - SQLite FTS5/BM25 Retrieval Foundation (same week, 2026-07-11)
+
+- Implemented the retrieval foundation approved in Phase 12A, using only
+  Python's standard-library `sqlite3` (no new dependency, matching
+  `ADR-002-retrieval-engine.md`): `app/retrieval/models.py` (defensively
+  immutable records, metadata copied into `MappingProxyType`),
+  `app/retrieval/base.py` (`Retriever` protocol), `app/retrieval/sqlite_bm25.py`
+  (persistent schema, `bm25()`-ranked search, short-lived per-operation
+  connections only, explicit FTS5 capability check with **no fallback of
+  any kind**), `app/services/chunking.py` (deterministic paragraph-aware
+  chunking, distinct from and not replacing v1's `dataset_loader.py`
+  chunker), `app/core/source_policy.py` (server-controlled trust/
+  classification, unknown `source_key` rejected by documented choice), and
+  `app/services/ingestion.py` (atomic upsert orchestration, reserved
+  metadata-key stripping, one safe audit event per batch).
+- Added `POST /v1/documents/ingest` and `POST /v1/retrieve` to
+  `app/api/routes.py`. `POST /v1/gateway/chat` and every other Phase 0-11
+  endpoint are unchanged - confirmed via regression tests and a live
+  `curl` check producing byte-identical responses.
+- Query safety: user query text is tokenized into plain lexical terms,
+  each individually double-quoted before being joined into the FTS5
+  `MATCH` expression, so operators (`NEAR`, `AND`/`OR`/`NOT`, column
+  filters, wildcards) typed by a caller are treated as literal search
+  terms rather than executed as FTS5 query syntax - verified with a
+  parametrized adversarial test covering quotes, parentheses, wildcards,
+  a SQL-injection-shaped string, control characters, and a 5000-character
+  query.
+- Trust/provenance: verified end-to-end (not just by code review) that a
+  caller-supplied `trust_level: "trusted_internal"` inside a document's
+  free-form `metadata` is silently stripped and has no effect - the
+  document is stored with the real server-assigned policy value instead.
+  A top-level `trust_level` field (outside `metadata`) is rejected outright
+  by the request schema (`extra="forbid"`, HTTP 422).
+- Ingestion semantics verified live: re-ingesting identical content is a
+  no-op (`unchanged`); changed content atomically replaces all stale
+  chunks and FTS index rows in one transaction (`updated`, confirmed the
+  pre-update content is no longer retrievable while the new content is);
+  duplicate `external_id` within a batch is rejected per-item.
+- **Test suite grew from 82 to 151 tests** (69 new):
+  `tests/test_chunking.py` (14), `tests/test_sqlite_bm25.py` (31, including
+  a simulated FTS5-unavailable capability failure using a fake connection
+  object, since `sqlite3.Connection` is an immutable C type that cannot be
+  patched directly with `unittest.mock`), `tests/test_ingestion.py` (14),
+  `tests/test_retrieval_routes.py` (10). All 151 passed in a clean
+  project-local `.venv` (not the shared/global environment with the
+  documented `httpx2` issue).
+- Added `scripts/smoke_test_retrieval.ps1` (ingest, retrieve, update,
+  verify stale content gone) and ran it against a live local server on a
+  scratch `RETRIEVAL_DB_PATH` - passed.
+- **Backward-compatibility fix:** adding 9 new fields to `Settings`
+  (`app/core/config.py`) initially broke an existing test that constructs
+  `Settings(...)` directly without them. Fixed by giving every new field a
+  default value rather than modifying the pre-existing test -
+  `load_settings()` still passes every field explicitly from the
+  environment, so runtime behavior is unchanged.
+- No file under `app/guards/`, `app/services/gateway.py`,
+  `app/services/evaluation_runner.py`, `app/services/llm_provider.py`,
+  `datasets/`, `redteam/`, `reports/evaluation/`, `report-latex-template/`,
+  or `requirements.txt` was modified; no new dependency installed
+  (`sqlite3` is standard library). Runtime database files (`data/*.db`)
+  were already covered by `.gitignore` before this phase - no `.gitignore`
+  change was needed.
+- **Explicitly not implemented (by design):** no `POST /v1/rag/query` -
+  retrieval is not wired into any guard or the LLM provider yet, that is
+  Phase 12C; no vector/embedding retrieval (optional Phase 12F); no real
+  LLM call anywhere.
+- **Marked In Review, not Done** per `AGENT_RULES.md` rule 9/10 - this
+  session's verification is thorough (151/151 tests, live smoke test) but
+  the phase awaits an independent repeat of that verification and a
+  repository-wide security review before being declared Done. Phase 12C
+  does not start automatically and requires a separate, explicit
+  go-ahead.

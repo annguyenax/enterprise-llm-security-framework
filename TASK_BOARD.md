@@ -323,6 +323,59 @@ resolution: `docs/modernization-ai-reviews/phase-12a-audit-resolution.md`.
 still requires a separate, explicit go-ahead referencing this plan -
 audit approval is not itself that go-ahead.
 
+## Phase 12B — SQLite FTS5/BM25 Retrieval Foundation — **Status: In Review**
+
+| Task | Owner | Status |
+|---|---|---|
+| Retrieval models + storage-agnostic protocol | Nguyen Van An | Done - `app/retrieval/models.py` (defensively-immutable records, metadata copied into `MappingProxyType`), `app/retrieval/base.py` (`Retriever` ABC) |
+| SQLite FTS5/BM25 store | Nguyen Van An | Done - `app/retrieval/sqlite_bm25.py`: persistent schema, explicit FTS5 capability check with no fallback of any kind, short-lived per-operation connections only, parameterized SQL, safe FTS5 query construction (every term individually quoted so operators become literal terms), deterministic `bm25()`-ascending + `chunk_id`-ascending ranking |
+| Deterministic paragraph-aware chunking (v2) | Le Dinh Nghia | Done - `app/services/chunking.py`; distinct from and does not modify v1's `app/services/dataset_loader.py` chunker |
+| Server-controlled source policy | Le Dinh Nghia | Done - `app/core/source_policy.py`: unknown `source_key` values are rejected (documented choice, not silently downgraded); caller can never set `trust_level`/`classification`/`source_type` |
+| Atomic ingestion service | Both | Done - `app/services/ingestion.py`: validation, reserved-metadata-key stripping, SHA-256 content hashing, deterministic server-derived IDs, one audit log event per batch with safe fields only |
+| API endpoints | Nguyen Van An | Done - `POST /v1/documents/ingest`, `POST /v1/retrieve` added to `app/api/routes.py`; `POST /v1/gateway/chat` and all Phase 0-11 endpoints unchanged (regression-tested) |
+| Tests | Both | Done - `tests/test_chunking.py` (14), `tests/test_sqlite_bm25.py` (31), `tests/test_ingestion.py` (14), `tests/test_retrieval_routes.py` (10) = 69 new tests; full suite 151/151 passing in a clean project-local `.venv` |
+| Smoke test | Both | Done - `scripts/smoke_test_retrieval.ps1`: ingest, retrieve, update, verify stale content gone, verified against a live local server |
+| Documentation | Both | Done - `README.md`, `app/README.md`, `tests/README.md`, `scripts/README.md` updated |
+
+**Verification (Phase 12B session, 2026-07-11):** ran in a project-local
+`.venv` with genuine dependencies (not the shared/global environment with
+the documented `httpx2` issue). `python -m py_compile` clean on every new/
+changed file. `pytest -q` (all files, `--basetemp` under the system temp
+dir): **151 passed** (82 pre-existing + 69 new), zero failures, zero
+behavior changes to any existing test. A live `uvicorn` server was started
+against a scratch `RETRIEVAL_DB_PATH` and exercised end-to-end via `curl`
+and `scripts/smoke_test_retrieval.ps1` (both passed): ingest, retrieve,
+spoofed-`trust_level` rejection (422 at the schema boundary), update, and
+stale-content-gone/new-content-found were all confirmed against the real
+HTTP API, not just unit tests. `/health` and `/v1/gateway/chat` were
+confirmed byte-identical to their pre-Phase-12B behavior.
+
+**Backward-compatibility note:** adding 9 new fields to
+`app/core/config.py`'s `Settings` dataclass initially broke
+`tests/test_gateway_provider.py::test_audit_log_includes_safe_provider_metadata`,
+which constructs `Settings(...)` directly without the new fields. Fixed by
+giving every new field a default value (so `Settings()` construction
+without them still works) rather than modifying the pre-existing test -
+`load_settings()` itself still passes every field explicitly from the
+environment, so runtime behavior is unaffected.
+
+**Scope discipline:** no file under `app/guards/`, `app/services/gateway.py`,
+`app/services/evaluation_runner.py`, `app/services/llm_provider.py`,
+`datasets/`, `redteam/`, `reports/evaluation/`, `report-latex-template/`, or
+`requirements.txt` was modified - verified via `git diff --check` and a
+changed-path review. No new dependency was installed; `sqlite3` is
+standard library.
+
+**Marked In Review, not Done** (per `AGENT_RULES.md` rule 9/10): this
+session's own verification (above) is thorough, but the phase is not
+declared `Done` until a team member independently repeats `pytest -q` and
+the smoke test in their own environment, and a repository-wide security
+review pass is recorded.
+
+**Next phase:** Phase 12C — RAG Query Service, Provenance, and Centralized
+DLP. Per `AGENT_RULES.md` rule 12, Phase 12C does not start automatically
+and requires a separate, explicit go-ahead.
+
 ## Notes
 
 ### Phase 5.1 - RAG Guard Red-team Hardening - **Status: Done**
