@@ -21,11 +21,13 @@ Owners: **Nguyen Van An**, **Le Dinh Nghia**, or **Both**. Status values: `Not S
 
 | Task | Owner | Status |
 |---|---|---|
-| OWASP LLM Top 10 mapping to project threats | Nguyen Van An | Not Started |
-| Related work / literature review | Le Dinh Nghia | Not Started |
-| Tool comparison (guardrail libs, RAG frameworks, vector DBs) | Both | Not Started |
-| Dataset review (existing public red-team datasets) | Le Dinh Nghia | Not Started |
-| LLMSVS-style security checklist adaptation | Nguyen Van An | Not Started |
+| OWASP LLM Top 10 mapping to project threats | Nguyen Van An | In Progress — draft mapping done, source existence verified via web search 2026-07-11, exact revision year still needs team confirmation |
+| Related work / literature review | Le Dinh Nghia | In Progress — 3 papers logged (PoisonedRAG, PIDP-Attack, MDPI review), existence + metadata verified, full-text read by team still pending |
+| Tool comparison (guardrail libs, RAG frameworks, vector DBs) | Both | In Progress — 5 guardrail/red-team tools documented (NeMo Guardrails, Lakera Guard, deepteam, garak, PyRIT); LlamaIndex/LangChain/ChromaDB/vector-store comparison and LLM provider comparison still Not Started |
+| Dataset review (existing public red-team datasets) | Le Dinh Nghia | Not Started — no standalone public dataset reviewed yet; only candidate tool-bundled probe sets noted (garak, PyRIT, deepteam) |
+| LLMSVS-style security checklist adaptation | Nguyen Van An | In Progress — real OWASP LLMSVS standard identified and verified (v0.1, Feb 2024) as a loose anchor; project checklist itself still project-defined, not mapped to specific LLMSVS control IDs |
+
+**Note:** Phase 1 research documentation was AI-assisted (Gemini research pass, see `docs/research/raw/gemini-phase-1-research.md`), cross-verified by Claude via live web search on 2026-07-11. This counts as a first documentation pass, not a completed/team-reviewed literature review — see `docs/research/related-work.md` for what still needs a team member's direct read before any citation goes into `report-latex/references.bib`.
 
 ## Phase 2 — Threat Modeling & Test Data Design
 

@@ -10,17 +10,24 @@
 
 **Thời hạn nộp báo cáo:** 12–13/07/2026
 
-**Giai đoạn hiện tại:** Phase 0 — Khởi tạo scaffold dự án, chưa triển khai code ứng dụng.
+**Giai đoạn hiện tại:** Phase 0 hoàn tất (scaffold). Phase 1 (nghiên cứu) đã bắt đầu — hiện chỉ ở mức tài liệu nghiên cứu (research documentation), chưa triển khai code ứng dụng.
 
 ---
 
 ## 1. Quá trình tìm hiểu
 
+### Giai đoạn Phase 0 (nền tảng)
+
 - Tìm hiểu tổng quan các dạng tấn công đặc thù đối với hệ thống LLM/RAG trong doanh nghiệp: prompt injection, indirect prompt injection (thông qua tài liệu được truy hồi), jailbreak, rò rỉ thông tin nhạy cảm (sensitive information leakage), và data/document poisoning trong RAG.
-- Tham khảo khung phân loại rủi ro OWASP Top 10 for LLM Applications để làm cơ sở ánh xạ (mapping) các mối đe dọa cụ thể của đề tài (xem `docs/research/owasp-llm-top10-mapping.md` — sẽ hoàn thiện chi tiết ở Phase 1).
 - Khảo sát sơ bộ hướng tiếp cận kỹ thuật: dùng LLM Security Gateway / Guardrail Proxy đặt trước một RAG demo, thay vì huấn luyện/fine-tune mô hình — phù hợp với quy mô đồ án thực tập (lab-scale).
 - Xác định các ràng buộc kỹ thuật ban đầu: sử dụng LLM qua API (không huấn luyện local trong MVP), dữ liệu hoàn toàn tổng hợp (synthetic), không dùng PII/secrets thật.
-- Lưu ý: các nội dung nghiên cứu chi tiết (related work, tool comparison, dataset review) được lên kế hoạch triển khai ở Phase 1; báo cáo này ghi nhận phạm vi và hướng đi đã thống nhất tính đến thời điểm nộp báo cáo 01.
+
+### Giai đoạn Phase 1 (nghiên cứu sâu — đang triển khai)
+
+- Nhóm sử dụng Gemini để tổng hợp một bản nghiên cứu sơ bộ (`docs/research/raw/gemini-phase-1-research.md`) về bối cảnh bảo mật LLM doanh nghiệp: OWASP Top 10 for LLM Applications, OWASP LLMSVS, các công cụ guardrail/red-team (NeMo Guardrails, Lakera Guard, deepteam, garak, Microsoft PyRIT), và 3 nguồn học thuật (PoisonedRAG, PIDP-Attack, một bài tổng quan trên tạp chí MDPI *Information*).
+- Toàn bộ trích dẫn từ bản nghiên cứu AI này đã được **xác minh chéo qua tìm kiếm web thực tế** (không chỉ tin vào AI) trước khi đưa vào tài liệu chính thức, theo đúng AGENT_RULES.md mục 2 (không bịa trích dẫn). Quá trình xác minh phát hiện và sửa 2 lỗi nhỏ trong bản gốc của Gemini: sai tên tác giả đầu của PoisonedRAG (Zou, Y. → đúng là Zou, W.), và sai năm xuất bản của bài MDPI (2025 → đúng là 2026).
+- Kết quả đã được cập nhật vào `docs/research/related-work.md`, `owasp-llm-top10-mapping.md`, `llmsvs-checklist.md`, `tool-comparison.md`, `dataset-review.md`. Đây vẫn là **nghiên cứu thứ cấp có AI hỗ trợ**, các thành viên trong nhóm chưa đọc trực tiếp toàn văn các bài báo — cần xác minh thủ công trước khi trích dẫn chính thức trong báo cáo LaTeX.
+- Chưa tìm được bộ dataset red-team công khai cụ thể nào để review trực tiếp; chỉ ghi nhận garak/PyRIT/deepteam có kèm theo bộ probe/dataset riêng, cần mở và đánh giá ở phiên làm việc sau.
 
 ## 2. Đề cương chi tiết các công việc thực hiện
 
@@ -71,3 +78,5 @@ Kế hoạch thực hiện bám theo `TASK_BOARD.md`, cập nhật trạng thái
 - Ràng buộc không dùng dữ liệu thật (PII/secrets/tài liệu nội bộ) đòi hỏi nhóm phải tự thiết kế bộ dữ liệu tổng hợp đủ đa dạng để kiểm thử có ý nghĩa — công việc này cần đầu tư thời gian ở Phase 2.
 - Giới hạn về việc gọi API trả phí: nhóm cần lên kế hoạch sử dụng ngân sách API hợp lý và xin phê duyệt trước khi thực hiện các lượt gọi API tốn phí trong giai đoạn đánh giá (Phase 7).
 - Thời gian giữa các giai đoạn khá sát với deadline báo cáo định kỳ; cần đảm bảo mỗi phase đều có tài liệu/evidence đầy đủ trước khi chuyển giai đoạn.
+- Sử dụng AI (Gemini, Claude) để hỗ trợ tổng hợp tài liệu nghiên cứu giúp tiết kiệm thời gian, nhưng phát sinh thêm bước xác minh trích dẫn (fact-checking) bắt buộc trước khi đưa vào báo cáo chính thức — đã phát hiện 2 lỗi trích dẫn nhỏ (tên tác giả, năm xuất bản) trong lần rà soát đầu tiên, cho thấy quy trình xác minh này là cần thiết và nên duy trì cho các phase nghiên cứu tiếp theo.
+- Các trích dẫn học thuật (đặc biệt là PIDP-Attack, công bố tháng 3/2026) đều là preprint chưa qua bình duyệt (chưa peer-reviewed) — cần thận trọng khi trích dẫn số liệu do chính tác giả tự công bố.
