@@ -72,15 +72,33 @@ cần được nhóm xác nhận trước bản nộp cuối:
 
 Không sử dụng số liệu chi tiết từ các nguồn này nếu chưa hoàn tất review.
 
-\chapter{Danh sách hình cần bổ sung thủ công}
-\label{ap:figure-todos}
+\chapter{Danh sách hình cần hoàn thiện thủ công}
+\label{ap:pending-figures}
 \markboth{PHỤ LỤC \Alph{chapter}. DANH SÁCH HÌNH CẦN BỔ SUNG}{}
 
-\begin{itemize}
-    \item \textbf{TODO: add architecture diagram screenshot.}
-    \item \textbf{TODO: add evaluation result screenshot.}
-    \item \textbf{TODO: add baseline comparison screenshot.}
-\end{itemize}
+\begin{table}[H]
+\centering
+\small
+\caption{Đặc tả ba hình evidence cần bổ sung trước bản nộp}
+\label{tab:pending-figure-specification}
+\begin{tabularx}{\textwidth}{p{3.6cm}p{3.2cm}X}
+\toprule
+Tệp trong \texttt{figure/} & Nhãn & Nguồn và nội dung bắt buộc \\
+\midrule
+\texttt{architecture-overview.png} & \texttt{fig:architecture-overview} &
+\texttt{docs/diagrams/architecture.md}; phân biệt pipeline đã hiện thực và các
+thành phần nằm ngoài phạm vi proof-of-concept. \\
+\texttt{evaluation-result-40-cases.png} & \texttt{fig:evaluation-result} &
+Đầu ra \texttt{python scripts/run\_evaluation.py}; hiển thị 40/40, 0 false
+positive và 0 false negative trên controlled synthetic benchmark. \\
+\texttt{baseline-vs-guarded-comparison.png} & \texttt{fig:baseline-vs-guarded} &
+\texttt{reports/evaluation/baseline-vs-guarded.md}; hiển thị cả baseline và
+guarded, đồng thời không diễn giải baseline như chất lượng LLM. \\
+\bottomrule
+\end{tabularx}
+\end{table}
 
-Nhóm phải xuất hình từ chính repository/artifact, ghi ngày và lệnh tái lập trong
-caption. Không sử dụng ảnh minh họa giả để thay evidence.
+Caption cuối cùng đã được khai báo tại vị trí chèn hình trong Chương 2 và
+Chương 4. Khi tệp không hiện diện, template hiển thị khung TODO thay vì làm hỏng
+quá trình biên dịch. Nhóm phải xuất hình từ chính repository/artifact và không
+sử dụng ảnh minh họa giả để thay evidence.

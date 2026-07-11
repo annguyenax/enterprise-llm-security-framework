@@ -2,8 +2,8 @@
 
 > **Phạm vi diễn giải:** Toàn bộ kết quả định lượng dưới đây chỉ áp dụng cho bộ
 > benchmark tổng hợp có kiểm soát của dự án. Hệ thống là proof-of-concept dựa
-> trên rule, không phải sản phẩm sẵn sàng triển khai; chưa tích hợp LLM thực,
-> vector database, embedding hoặc pipeline retrieval hoàn chỉnh. Kết quả 40/40
+> trên rule, không phải sản phẩm sẵn sàng triển khai; LLM thực, vector database,
+> embedding và pipeline retrieval hoàn chỉnh nằm ngoài phạm vi. Kết quả 40/40
 > không được diễn giải thành tỷ lệ phát hiện trong môi trường thực tế.
 
 ## Mục tiêu hệ thống
@@ -78,16 +78,16 @@ và do đó không phải baseline đánh giá chất lượng mô hình ngôn n
 ## Hạn chế
 
 Các guard dựa trên biểu thức chính quy và từ khóa nên có thể bỏ sót biến thể ngữ
-nghĩa, mã hóa, hội thoại nhiều lượt hoặc kỹ thuật chưa xuất hiện trong corpus.
-Bộ dữ liệu nhỏ và tổng hợp nên không đại diện cho phân bố tấn công thực tế.
-Hệ thống chưa đo chất lượng câu trả lời của LLM, chất lượng retrieval, độ trễ
+nghĩa, mã hóa, hội thoại nhiều lượt hoặc kỹ thuật ngoài corpus hiện tại. Bộ dữ
+liệu nhỏ và tổng hợp nên không đại diện cho phân bố tấn công thực tế. Phạm vi
+đánh giá không đo chất lượng câu trả lời của LLM, chất lượng retrieval, độ trễ
 trong pipeline thực hoặc tác động bảo mật trên dữ liệu doanh nghiệp. Kết quả
 40/40 có thể chịu ảnh hưởng của quá trình hiệu chỉnh theo benchmark hiện hữu.
 
 ## Hướng phát triển
 
 Các hướng tiếp theo gồm hoàn thiện đánh giá thủ công corpus, mở rộng tập kiểm
-thử độc lập chưa dùng để hiệu chỉnh, nghiên cứu bộ phân loại ngữ nghĩa, tích hợp
+thử độc lập không dùng để hiệu chỉnh, nghiên cứu bộ phân loại ngữ nghĩa, tích hợp
 provider thực với quản lý khóa và phê duyệt chi phí, thử nghiệm embedding/vector
 store, đánh giá retrieval, đo độ trễ và thực hiện kiểm thử trên dữ liệu tổng hợp
 đa dạng hơn. Mọi tích hợp dịch vụ bên ngoài cần tuân thủ nguyên tắc không sử

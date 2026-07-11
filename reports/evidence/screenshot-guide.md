@@ -17,3 +17,15 @@ private IDE content.
 
 Recommended captions should include the phase, command, date of capture, and the
 phrase “controlled synthetic benchmark” for evaluation screenshots.
+
+## Final Report Figure Files
+
+Place the three report figures in `report-latex-template/figure/` using these
+exact names. The LaTeX template detects them automatically and otherwise shows
+an explicit TODO box.
+
+| Filename | Final caption | LaTeX label | Source evidence | Screenshot/export content |
+|---|---|---|---|---|
+| `architecture-overview.png` | Kiến trúc proof-of-concept và các điểm kiểm soát guardrail | `fig:architecture-overview` | `docs/diagrams/architecture.md` | Implemented guard pipeline, with vector store and external LLM clearly identified as outside PoC scope. |
+| `evaluation-result-40-cases.png` | Kết quả guarded trên controlled synthetic benchmark gồm 40 prompt | `fig:evaluation-result` | `python scripts/run_evaluation.py` and `reports/evaluation/latest-evaluation.md` | Total 40, passed 40, failed 0, FP 0, FN 0. |
+| `baseline-vs-guarded-comparison.png` | So sánh always-allow baseline và guarded trên benchmark tổng hợp | `fig:baseline-vs-guarded` | `reports/evaluation/baseline-vs-guarded.md` | Both summary columns and the note that baseline is always-allow decisions, not LLM quality. |

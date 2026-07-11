@@ -60,11 +60,17 @@ detection rate, không chứng minh tổng quát hóa và không phải chứng 
 
 \begin{figure}[H]
 \centering
+\IfFileExists{figure/evaluation-result-40-cases.png}{%
+\includegraphics[width=0.94\textwidth]{figure/evaluation-result-40-cases.png}%
+}{%
 \fbox{\parbox{0.88\textwidth}{\centering
 \textbf{TODO: add evaluation result screenshot}\\
-Chụp đầu ra \texttt{python scripts/run\_evaluation.py} thể hiện 40/40, 0 FP và 0 FN.}}
-\caption{Vị trí dự kiến chèn ảnh kết quả đánh giá guarded}
-\label{fig:evaluation-todo}
+Tên tệp: \texttt{figure/evaluation-result-40-cases.png}.\\
+Chụp đầu ra \texttt{python scripts/run\_evaluation.py} thể hiện 40/40, 0 FP và
+0 FN trên controlled synthetic benchmark.}}%
+}
+\caption{Kết quả guarded trên controlled synthetic benchmark gồm 40 prompt}
+\label{fig:evaluation-result}
 \end{figure}
 
 \section{So sánh baseline và guarded}
@@ -98,11 +104,17 @@ sánh không phản ánh chất lượng LLM hoặc hiệu quả ngoài phân b�
 
 \begin{figure}[H]
 \centering
+\IfFileExists{figure/baseline-vs-guarded-comparison.png}{%
+\includegraphics[width=0.94\textwidth]{figure/baseline-vs-guarded-comparison.png}%
+}{%
 \fbox{\parbox{0.88\textwidth}{\centering
 \textbf{TODO: add baseline comparison screenshot}\\
-Chụp bảng từ \texttt{reports/evaluation/baseline-vs-guarded.md}.}}
-\caption{Vị trí dự kiến chèn ảnh so sánh baseline và guarded}
-\label{fig:baseline-todo}
+Tên tệp: \texttt{figure/baseline-vs-guarded-comparison.png}.\\
+Chụp bảng từ \texttt{reports/evaluation/baseline-vs-guarded.md}; thể hiện rõ
+baseline là quyết định always-allow, không phải baseline chất lượng LLM.}}%
+}
+\caption{So sánh always-allow baseline và guarded trên benchmark tổng hợp}
+\label{fig:baseline-vs-guarded}
 \end{figure}
 
 \section{Khả năng tái lập}
@@ -129,7 +141,7 @@ SHA-256 bảo đảm evaluation không sửa file trong \texttt{datasets/} hoặ
     \item Không có LLM thực, vector database, embedding hoặc retrieval thực.
     \item Không đo latency, load/DoS, chất lượng câu trả lời hoặc real-world
     attack outcome.
-    \item Chưa đánh giá multi-turn attack hoặc một holdout set độc lập.
+    \item Multi-turn attack và holdout set độc lập nằm ngoài phạm vi đánh giá.
 \end{itemize}
 
 \section{Kết luận chương}

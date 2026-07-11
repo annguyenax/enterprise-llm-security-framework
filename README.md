@@ -266,9 +266,8 @@ capture remain team review tasks.
 
 The official title in `report-latex-template/thesis.sty` was verified unchanged:
 “Nghiên cứu và triển khai cơ chế Guardrails bảo vệ hệ thống RAG trước tấn công
-Prompt Injection và rò rỉ dữ liệu”. LaTeX chapter content still contains stale
-early-phase status statements and must be integrated/reviewed before final PDF
-compilation.
+Prompt Injection và rò rỉ dữ liệu”. The integration plan was subsequently
+applied in Phase 10; manual figures, compilation, and review remain.
 
 ### Phase 10 Final LaTeX Report Integration
 
@@ -279,8 +278,24 @@ limitations and future work. See the
 for compile, figure, citation, claim-safety and final PDF gates.
 
 No TeX toolchain was available in the integration environment, so PDF compile
-success is not claimed. Three explicit figure TODOs remain for architecture,
+success is not claimed. Three compile-safe figure slots remain for architecture,
 guarded evaluation and baseline comparison screenshots.
+
+### Phase 11 Final Compile And Submission Preparation
+
+Phase 11 cleans stale report wording, assigns stable filenames/captions/labels
+to the three evidence figures, and adds final packaging guidance:
+
+- [Submission package checklist](reports/evidence/submission-package-checklist.md)
+- [LaTeX compile notes](reports/evidence/latex-compile-notes.md)
+- [Updated screenshot guide](reports/evidence/screenshot-guide.md#final-report-figure-files)
+
+The figure slots use `\IfFileExists`, so the draft remains compilable when an
+image is absent and displays an explicit TODO box. The signed approved-proposal
+sheet is still pending and the temporary page explicitly states that it is not
+a substitute. The package is ready for an initial Overleaf pdfLaTeX build, not
+for final submission until figures, compile review, proofreading, and supervisor
+approval are complete.
 
 **What is intentionally not implemented yet (not a bug):**
 - No real vector database, no embeddings, no similarity search — `dataset_loader.py` uses simple deterministic fixed-size character-window chunking only.

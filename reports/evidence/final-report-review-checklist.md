@@ -3,6 +3,13 @@
 Status: LaTeX content integrated; static checks completed; PDF compilation not
 yet verified because no TeX toolchain is installed in the current environment.
 
+Phase 11 preflight result: unescaped braces and non-comment environment counts
+are balanced; all static references resolve; no duplicate label exists; all
+five citation keys exist in `refs.bib`; and no Unicode replacement character or
+emoji was found. The three expected PNG files are absent. Visual overflow,
+font rendering, page breaks, and compiler warnings cannot be confirmed without
+a PDF build.
+
 ## LaTeX Compile Checklist
 
 - [x] Official title verified unchanged in `report-latex-template/thesis.sty`.
@@ -27,6 +34,8 @@ pdflatex main.tex
 
 - [ ] Resolve every LaTeX error and undefined reference.
 - [ ] Review overfull/underfull box warnings and page breaks.
+- [ ] Inspect `pages/group-work-plan.tex` longtable and the appendix figure
+  specification table for overflow at normal PDF zoom.
 - [ ] Confirm table of contents, list of tables and list of figures update.
 - [ ] Confirm Vietnamese characters and fonts render correctly.
 
@@ -35,9 +44,9 @@ not found, so compile success is not claimed in this integration phase.
 
 ## Figure Checklist
 
-- [ ] Replace `TODO: add architecture diagram screenshot` in Chapter 2.
-- [ ] Replace `TODO: add evaluation result screenshot` in Chapter 4.
-- [ ] Replace `TODO: add baseline comparison screenshot` in Chapter 4.
+- [ ] Add `figure/architecture-overview.png`; Chapter 2 detects it automatically.
+- [ ] Add `figure/evaluation-result-40-cases.png`; Chapter 4 detects it automatically.
+- [ ] Add `figure/baseline-vs-guarded-comparison.png`; Chapter 4 detects it automatically.
 - [ ] Use only screenshots/exports captured from the repository and generated
 artifacts; do not create substitute evidence.
 - [ ] Add figure source, command/date, caption and cross-reference.
@@ -74,7 +83,7 @@ an explicit `TODO citation` marker rather than fabricated metadata.
 - [ ] Group-work allocation matches actual team records.
 - [ ] Page numbering and required front-matter order satisfy the school template.
 - [ ] Tables and figures are numbered, referenced and readable.
-- [ ] No visible TODO remains except one explicitly approved by supervisor.
+- [ ] No visible TODO figure fallback remains in the final PDF.
 - [ ] No stale phrases such as “chưa có mã nguồn/số liệu” remain unless clearly
 marked as historical context.
 - [ ] Vietnamese grammar, terminology and punctuation are proofread.

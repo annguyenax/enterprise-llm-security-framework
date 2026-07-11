@@ -185,9 +185,9 @@ warning, but no package was installed.
 | Task | Owner | Status |
 |---|---|---|
 | Evidence index and reproducibility package | Both | Done - `reports/evidence/` contains evidence index, timed demo, Vietnamese report-ready summary, reproduction checklist, and screenshot guide |
-| Consolidate results into LaTeX report | Both | In Progress - report-ready Vietnamese summary and evidence links exist; `report-latex-template/` content has not been rewritten |
-| Finalize diagrams/figures | Both | Not Started |
-| Internal review pass | Both | Not Started |
+| Consolidate results into LaTeX report | Both | Done - Phase 10 integrated reviewed evidence into the official chapter structure |
+| Finalize diagrams/figures | Both | In Review - stable filenames, captions, labels, and compile-safe fallbacks exist; capture remains manual |
+| Internal review pass | Both | In Progress - static claim/citation/structure review complete; compiled PDF review remains |
 
 **Phase 8 packaging evidence (2026-07-11):** all implemented claims are mapped
 to source files, reproduction commands, and limitations in
@@ -203,17 +203,16 @@ passing tests (system-temp basetemp) and a passing local gateway smoke test.
 | Report integration plan | Both | Done - maps introduction through future work to evidence and target LaTeX chapters; official title verified unchanged |
 | Demo rehearsal checklist | Both | Done - commands, expected outputs, speaking points, common questions, and fallback flow documented |
 | Screenshots | Both | Not Started - capture and caption the items in `reports/evidence/screenshot-guide.md` |
-| Final PDF compile | Both | Not Started - integrate reviewed content, compile template, resolve references/warnings |
+| Final PDF compile | Both | In Progress - content integrated and compile notes prepared; first TeX/Overleaf build remains manual |
 | Supervisor review | Both | Not Started - provide final PDF and evidence package for feedback/sign-off |
 | Demo rehearsal | Both | In Progress - written checklist ready; timed team rehearsal not yet recorded |
-| Final report proofread | Both | In Progress - report-ready summary audited; LaTeX chapter integration and Vietnamese proofread pending |
-| Submission packaging | Both | Not Started |
+| Final report proofread | Both | In Progress - stale status wording cleaned; full compiled-PDF Vietnamese proofread pending |
+| Submission packaging | Both | In Progress - package checklist exists; final PDF, figures, tag and approvals pending |
 
-**Phase 9 review note (2026-07-11):** the official thesis title is unchanged.
-The LaTeX template retains early periodic-report statements such as “no source
-code/results yet”; these are identified in `report-integration-plan.md` and must
-be replaced with reviewed current evidence before final compilation. No app,
-test, benchmark, evaluation, or core behavior changed in this phase.
+**Phase 9 review note (updated after Phase 11, 2026-07-11):** the official thesis
+title is unchanged. Early periodic-report statements identified by the plan
+have been replaced with reviewed current evidence and scope wording. No app,
+test, benchmark, evaluation, or core behavior changed.
 
 ## Phase 10 — Final LaTeX Report Integration — **Status: In Review**
 
@@ -223,7 +222,7 @@ test, benchmark, evaluation, or core behavior changed in this phase.
 | Preserve official title/template structure | Both | Done - `titlethesis` verified byte-for-byte unchanged; main include order preserved |
 | Update group-work plan | Both | Done - An mapped to gateway/guards/evaluation/report integration; Nghĩa mapped to dataset/red-team/documentation/demo evidence review; team review noted |
 | Static LaTeX/citation audit | Both | Done - brace scan clean and all five used citation keys exist in `refs.bib` |
-| Add screenshots/figures | Both | Not Started - three explicit TODO placeholders remain |
+| Add screenshots/figures | Both | In Review - three compile-safe slots have final filenames/captions/labels; image capture remains manual |
 | Compile final PDF and fix warnings | Both | Blocked on manual TeX environment - no `latexmk`, `pdflatex`, `xelatex`, or `bibtex` available in current environment |
 | Vietnamese proofread and supervisor review | Both | Not Started |
 | Final submission package | Both | Not Started |
@@ -231,6 +230,28 @@ test, benchmark, evaluation, or core behavior changed in this phase.
 **Phase 10 evidence:** `reports/evidence/final-report-review-checklist.md` records
 compile, figure, citation, claim-safety and PDF review gates. No app, test,
 script, benchmark, guard, evaluation artifact or generated result changed.
+
+## Phase 11 — Final Compile, Figures, Cleanup and Submission Package — **Status: In Review**
+
+| Task | Owner | Status |
+|---|---|---|
+| Clean stale final-report wording | Both | Done - early-period statements replaced by current evidence and explicit PoC scope language |
+| Prepare figure integration | Both | Done - three filenames, target folder, captions, labels, sources and required content documented with compile-safe fallbacks |
+| Static compile-readiness scan | Both | Done - source structure, labels/citations, figure presence, wording and claim safety checked; no local TeX toolchain available |
+| Submission package checklist | Both | Done - `reports/evidence/submission-package-checklist.md` |
+| LaTeX compile guidance | Both | Done - `reports/evidence/latex-compile-notes.md` documents pdfLaTeX and BibTeX workflow |
+| Capture screenshots | Both | Pending manual action |
+| Add signed approved proposal sheet if available | Both | Pending manual action - temporary page is clearly marked and does not claim approval |
+| Upload to Overleaf and compile PDF | Both | Pending manual action |
+| Fix LaTeX warnings and proofread Vietnamese | Both | Pending manual action |
+| Supervisor review | Both | Pending manual action |
+| Final submission package | Both | Pending manual action |
+
+**Phase 11 evidence:** source is prepared for an initial Overleaf build. Final
+submission readiness is not claimed until figures, signed sheet requirements,
+compile warnings, PDF inspection, proofreading, and supervisor review are done.
+No application, test, script, dataset, red-team, guard, or evaluation artifact
+was changed.
 
 ## Notes
 

@@ -181,3 +181,27 @@ Phase 0 kickoff. Focus was entirely on scaffolding: repository structure, planni
 - Review garak/PyRIT/deepteam's bundled probe sets for licensing and content type, logging proper entries in `dataset-review.md`.
 - Materialize `docs/evaluation/red-team-test-design.md` into actual files under `datasets/` and `redteam/`, using the ID convention in that document's §6 — this is data-file creation, not code, but should be scoped/approved as its own step before Phase 3 code begins.
 - Confirm Phase 0/1/2/2.5 documentation deliverables satisfy periodic report 01 requirements.
+
+## Phase 10 - Final LaTeX Report Integration (same week, 2026-07-11)
+
+- Integrated the evidence-backed introduction, background, architecture, threat
+  model, implementation, dataset, guarded evaluation, failure triage, baseline
+  comparison, limitations, future work, and appendix into the official template.
+- Preserved the official title and template include order. No application,
+  benchmark, test, script, guard, or generated evaluation result changed.
+- Static structure, citation-key, reference, and claim-safety checks passed. A
+  local PDF build was not possible because no TeX toolchain was available.
+
+## Phase 11 - Final Compile and Submission Preparation (same week, 2026-07-11)
+
+- Replaced stale early-period wording with final evidence and explicit scope
+  language. The report consistently describes a rule-based proof-of-concept and
+  controlled synthetic benchmark, not production readiness or a real-world rate.
+- Prepared three compile-safe figure slots with fixed filenames, captions,
+  labels, evidence sources, and screenshot requirements. The image files remain
+  manual capture tasks and no screenshot was invented.
+- Kept the approved-proposal sheet transparently pending; the temporary page now
+  states that it is not a substitute for a signed form.
+- Added `submission-package-checklist.md` and `latex-compile-notes.md`. Phase 11
+  is In Review pending screenshots, signed sheet if required, Overleaf compile,
+  warning fixes, Vietnamese proofread, supervisor review, and final packaging.

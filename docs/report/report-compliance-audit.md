@@ -168,7 +168,7 @@ Bảng mẫu có đúng **5 cột**:
 |---|---|---|---|
 | Bìa ngoài | `thesis.sty` dòng 31–75 | `\coverpage` | Partial (nội dung đúng nhưng sai vị trí dòng 3 và thứ tự thông tin — xem mục 3) |
 | Bìa đệm | `thesis.sty` dòng 80–108 | `\innercoverpage` | Partial (cùng lỗi thứ tự/nội dung như bìa ngoài) |
-| Phiếu đề cương | `pages/approved-proposal-placeholder.tex` | — | Pass (đã là placeholder rõ ràng, đúng tinh thần yêu cầu tối thiểu) |
+| Phiếu đề cương | `pages/approved-proposal-pending.tex` | — | Pending (trang review ghi rõ không thay thế phiếu đã ký) |
 | Mục lục | `main.tex` dòng 25–29 | `\tableofcontents` | Partial (cơ chế đúng, nhưng cỡ chữ 12 riêng cho mục lục theo mục 1.4 **chưa được cấu hình rõ ràng**) |
 | Lời cảm ơn | `pages/acknowledgments.tex`, `thesis.sty` dòng 120–125 | `acknowledgments` (dùng `\chapter*`) | Partial (nội dung ổn, nhưng `\chapter*` không cập nhật `\leftmark` — xem mục 5.9) |
 | Danh mục ký hiệu | `pages/abbreviations.tex` | `\chapter*` + `longtable` | **Fail** (không xếp theo thứ tự chữ cái A,B,C — xem mục 3) |
@@ -297,7 +297,7 @@ Bảng mẫu có đúng **5 cột**:
 
 Xếp theo mức độ rủi ro giảm dần:
 
-1. **Thiếu Phiếu giao đề cương TTTN đã ký duyệt thật** — hiện chỉ là placeholder (`pages/approved-proposal-placeholder.tex`).
+1. **Phiếu giao đề cương TTTN đã ký duyệt đang chờ bổ sung** — bản review dùng trang pending (`pages/approved-proposal-pending.tex`) và không tuyên bố thay thế phiếu chính thức.
 2. **Sai vị trí Tài liệu tham khảo/Phụ lục** — văn bản gốc mâu thuẫn nội bộ (C01), thứ tự hiện tại có thể sai theo 2/3 tín hiệu nguồn.
 3. **Sai chính tả tên GVHD** — "Nguyễn Hoàng Thanh" vs "Nguyễn Hoàng Thành" chưa chốt (C16).
 4. **Sai đánh số trang / chưa xác nhận build thật** — cơ chế đúng về lý thuyết nhưng chưa có bằng chứng build PDF thực tế (môi trường chưa có `pdflatex`).

@@ -26,8 +26,8 @@ FR6 & Chạy đánh giá ngoại tuyến trên benchmark tổng hợp và tạo 
 Hệ thống phải chạy cục bộ, không yêu cầu GPU, không gọi API trả phí, không sử
 dụng PII/secret thật và không cài dependency nặng ngoài phạm vi. Quyết định của
 guard phải giải thích được. Evaluation phải xác định rõ nguồn benchmark và tái
-lập được. Không đặt SLA hoặc tỷ lệ phát hiện thực tế vì proof-of-concept chưa có
-dữ liệu để hỗ trợ các tuyên bố đó.
+lập được. Phạm vi thử nghiệm được giới hạn trong benchmark tổng hợp, vì vậy báo
+cáo không đặt SLA hoặc tuyên bố tỷ lệ phát hiện trong môi trường thực tế.
 
 \section{Kiến trúc đã triển khai}
 
@@ -46,19 +46,24 @@ human review dừng trước provider.
 
 \begin{figure}[H]
 \centering
+\IfFileExists{figure/architecture-overview.png}{%
+\includegraphics[width=0.94\textwidth]{figure/architecture-overview.png}%
+}{%
 \fbox{\parbox{0.88\textwidth}{\centering
 \textbf{TODO: add architecture diagram screenshot}\\
-Xuất sơ đồ kiến trúc đã triển khai từ \texttt{docs/diagrams/architecture.md};
-đánh dấu vector store và external LLM là thành phần mục tiêu chưa triển khai.}}
-\caption{Vị trí dự kiến chèn sơ đồ kiến trúc hệ thống}
-\label{fig:architecture-todo}
+Tên tệp: \texttt{figure/architecture-overview.png}.\\
+Nguồn: \texttt{docs/diagrams/architecture.md}. Ảnh cần phân biệt thành phần đã
+hiện thực với vector store và external LLM nằm ngoài phạm vi proof-of-concept.}}%
+}
+\caption{Kiến trúc proof-of-concept và các điểm kiểm soát guardrail}
+\label{fig:architecture-overview}
 \end{figure}
 
 \section{Phân biệt kiến trúc mục tiêu và implementation}
 
 Tài liệu thiết kế ban đầu mô tả một hệ thống RAG có vector store và LLM provider
-bên ngoài. Trong implementation hiện tại, hai thành phần này chưa tồn tại. Bộ
-nạp tài liệu chỉ đọc và chia đoạn corpus tổng hợp; không tạo embedding hoặc thực
+bên ngoài. Hai thành phần này nằm ngoài phạm vi implementation hiện tại. Bộ nạp
+tài liệu chỉ đọc và chia đoạn corpus tổng hợp; không tạo embedding hoặc thực
 hiện tìm kiếm tương đồng. API nhận trực tiếp \texttt{context\_chunks}. Provider
 adapter có interface đầy đủ nhưng chỉ có MockLLMProvider xác định và ngoại tuyến.
 
@@ -80,7 +85,7 @@ Spoofing & Giả mạo nguồn/context & Giữ \texttt{doc\_id}, metadata và so
 Tampering & Prompt injection, tài liệu chứa chỉ dẫn ẩn & Input Guard, RAG Guard và rule normalization. \\
 Repudiation & Không truy vết được quyết định & JSONL audit log với request ID, rule và mức rủi ro. \\
 Information Disclosure & Lộ secret, system prompt, tài liệu mật & Input/Output rules và redaction độc lập trong logger. \\
-Denial of Service & Prompt/context quá lớn & Chưa đánh giá tải; được ghi nhận là hạn chế. \\
+Denial of Service & Prompt/context quá lớn & Đánh giá tải nằm ngoài phạm vi; được ghi nhận là hạn chế. \\
 Elevation of Privilege & Giả mạo vai trò hoặc mức ưu tiên & Rule role override và instruction hierarchy. \\
 \bottomrule
 \end{tabularx}
