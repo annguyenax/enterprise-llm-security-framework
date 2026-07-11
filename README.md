@@ -2,7 +2,7 @@
 
 **Xây dựng Hệ thống Bảo mật LLM Chống Tấn công Prompt Injection và Data Poisoning trong Môi trường Doanh nghiệp**
 
-> Status: **Phase 0 — Scaffold only.** No application code has been implemented yet. This is a university internship proof-of-concept (PoC), not a production system.
+> Status: **Phase 8 - Evidence packaging and report preparation.** The lab-scale gateway, guards, offline mock provider, and controlled evaluation harness are implemented. This is a university internship proof-of-concept (PoC), not a production system.
 
 ## Project Summary
 
@@ -21,30 +21,26 @@ This is an **academic internship MVP**. It is explicitly **not** production-read
 
 ## Repository Structure
 
-```
-├── app/                 # Application code (Phase 1+, not yet implemented)
-├── redteam/             # Synthetic attack prompts / red-team test cases
-├── datasets/            # Synthetic datasets only — no real PII/secrets
-├── tests/                # pytest test suite
-├── scripts/             # Utility / automation scripts
-├── docker/              # Docker Compose setup (later phase)
-├── docs/
-│   ├── report/           # Periodic report drafts (Markdown, source of truth)
-│   ├── research/         # Literature review, OWASP mapping, tool comparison
-│   ├── diagrams/         # Mermaid architecture / threat-model / data-flow diagrams
-│   ├── weekly-notes/      # Weekly progress notes
-│   └── decisions/         # Architecture Decision Records (ADRs)
-├── report-latex/         # LaTeX academic report (compiled deliverable)
-├── PROJECT_PLAN.md
-├── AGENT_RULES.md
-├── TASK_BOARD.md
-├── requirements.txt
-└── .env.example
+```text
+|-- app/                    # Implemented gateway, guards, mock provider, evaluation
+|-- redteam/                # Frozen synthetic attack prompt benchmark
+|-- datasets/               # Frozen synthetic clean/poisoned documents
+|-- tests/                  # pytest unit and integration suite
+|-- scripts/                # Local run, smoke, inspection, and evaluation helpers
+|-- reports/
+|   |-- evaluation/         # Generated guarded and comparison artifacts
+|   `-- evidence/           # Phase 8 report/demo evidence package
+|-- docs/                   # Research, diagrams, dataset docs, reports, weekly notes
+|-- report-latex-template/  # School template reference; content not rewritten yet
+|-- PROJECT_PLAN.md
+|-- AGENT_RULES.md
+|-- TASK_BOARD.md
+`-- requirements.txt
 ```
 
 ## Current Phase
 
-See [TASK_BOARD.md](TASK_BOARD.md) for the full phase breakdown (Phase 0–9). We are currently in **Phase 0: scaffold, planning, and research setup**.
+See [TASK_BOARD.md](TASK_BOARD.md) for the authoritative phase breakdown. Core implementation and controlled evaluation through Phase 7.2 are complete; **Phase 8 evidence packaging/report preparation is in review**.
 
 ## Guiding Principles
 
@@ -240,6 +236,25 @@ The generated `baseline-vs-guarded.json` and `.md` reports show:
 This is a controlled synthetic decision benchmark, not a real-world detection
 rate. The baseline does not run or score an LLM, so it is not a real LLM quality
 baseline. Full project-local verification after Phase 7.2 passed 82 tests.
+
+### Phase 8 Evidence Packaging
+
+Report and demo evidence is indexed under `reports/evidence/`:
+
+- [Evidence index](reports/evidence/evidence-index.md): claim-to-file mapping,
+  reproduction steps, and cautions.
+- [Demo script](reports/evidence/demo-script.md): timed 5-7 minute local demo
+  with exact PowerShell commands.
+- [Report-ready summary](reports/evidence/report-ready-summary.md): Vietnamese
+  academic summary for adaptation into the internship report.
+- [Reproduction checklist](reports/evidence/reproduction-checklist.md): clean
+  setup, pytest, smoke test, evaluation, and comparison commands.
+- [Screenshot guide](reports/evidence/screenshot-guide.md): manual capture list
+  and caption cautions.
+
+These files package existing evidence; they do not add security features or
+change the frozen benchmark. LaTeX report integration and manual screenshot
+capture remain team review tasks.
 
 **What is intentionally not implemented yet (not a bug):**
 - No real vector database, no embeddings, no similarity search — `dataset_loader.py` uses simple deterministic fixed-size character-window chunking only.

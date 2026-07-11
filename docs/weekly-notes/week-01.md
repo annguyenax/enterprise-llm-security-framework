@@ -158,6 +158,14 @@ Phase 0 kickoff. Focus was entirely on scaffolding: repository structure, planni
 - Tests cover baseline behavior, guarded stability, comparison artifacts, relative false negatives, and SHA-256 immutability of frozen benchmark files. Full `.venv` suite passed 82 tests with one non-blocking Starlette warning; no package was installed.
 - Phase 7 implementation tasks are complete. Phase 8 Report Evidence Packaging can start.
 
+## Phase 8 - Report Evidence Packaging and Demo Preparation (same week, 2026-07-11)
+
+- Created `reports/evidence/evidence-index.md`, mapping project claims to architecture, threat model, dataset, guards, mock provider, evaluation, comparison, tests, commands, and limitations.
+- Added a timed 5-7 minute PowerShell demo script, clean reproduction checklist, manual screenshot guide, and Vietnamese academic report-ready summary. All evaluation language remains scoped to the controlled synthetic benchmark.
+- Corrected stale root README phase metadata and linked the evidence package. No guard, gateway, evaluation behavior, dataset, red-team label, or LaTeX template content changed.
+- Verified the packaged commands: full pytest with a system-temp basetemp passed 82 tests, and the local gateway smoke script printed `SMOKE TEST PASSED`. A workspace-local basetemp was documented as unsuitable in managed Windows shells because pytest cleanup encountered ACL denial.
+- Phase 8 is In Review: evidence packaging is complete, while team screenshot capture, demo rehearsal, diagram finalization, LaTeX integration, and internal report review remain manual tasks.
+
 ## Next Week Plan
 
 - Team members personally read the three logged academic papers and confirm/replace the placeholder "Summary" fields in `related-work.md` with their own understanding.

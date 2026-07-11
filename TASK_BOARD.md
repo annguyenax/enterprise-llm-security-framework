@@ -180,13 +180,21 @@ warning, but no package was installed.
 
 **Note (Phase 5 session, updated after Phase 6 on 2026-07-11):** because the original roadmap already labels Output Guard as Phase 6, the LLM Provider Adapter remains tracked in the Phase 5 table and also has a Phase 6 completion note below. The adapter is now done; the next implementation work is the existing **Phase 7 — Evaluation Harness**.
 
-## Phase 8 — Report Consolidation
+## Phase 8 — Report Consolidation — **Status: In Review**
 
 | Task | Owner | Status |
 |---|---|---|
-| Consolidate results into LaTeX report | Both | Not Started |
+| Evidence index and reproducibility package | Both | Done - `reports/evidence/` contains evidence index, timed demo, Vietnamese report-ready summary, reproduction checklist, and screenshot guide |
+| Consolidate results into LaTeX report | Both | In Progress - report-ready Vietnamese summary and evidence links exist; `report-latex-template/` content has not been rewritten |
 | Finalize diagrams/figures | Both | Not Started |
 | Internal review pass | Both | Not Started |
+
+**Phase 8 packaging evidence (2026-07-11):** all implemented claims are mapped
+to source files, reproduction commands, and limitations in
+`reports/evidence/evidence-index.md`. Demo and screenshot capture still require
+manual team rehearsal/review; no core behavior, benchmark label, dataset, or
+LaTeX template content changed. Reproduction commands were checked with 82
+passing tests (system-temp basetemp) and a passing local gateway smoke test.
 
 ## Phase 9 — Final Polish & Submission
 
@@ -218,7 +226,7 @@ metadata, Output Guard execution, and the blocked-input provider skip path. The
 full `TestClient` suite remains blocked by the documented shared-environment
 Starlette issue; no package was installed.
 
-**Next implementation phase:** Phase 8 Report Evidence Packaging, after Phase 7 review. Any real provider call still requires explicit approval under `AGENT_RULES.md`; vector retrieval remains out of scope.
+**Next phase after Phase 8 review:** Phase 9 Final Polish and Submission. Any real provider call still requires explicit approval under `AGENT_RULES.md`; vector retrieval remains out of scope.
 
 - This board is updated as phases progress; do not mark a task `Done` without corresponding documentation/evidence per `AGENT_RULES.md` rule 9.
 - Phase boundaries are gates — do not start Phase N+1 implementation while Phase N is still `In Progress` without explicit approval.
