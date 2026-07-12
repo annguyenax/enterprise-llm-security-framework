@@ -547,3 +547,240 @@ Phase 0 kickoff. Focus was entirely on scaffolding: repository structure, planni
   independent re-audit of this specific diff is required before the
   phase can be closed. Phase 12C still requires a separate, explicit
   go-ahead and is additionally gated on that re-audit returning PASS.
+
+## Phase 12C — End-to-End RAG Security Pipeline (2026-07-12)
+
+The project owner gave an explicit go-ahead to begin Phase 12C
+implementation before Phase 12B's own final independent re-audit PASS was
+obtained (recorded transparently in `TASK_BOARD.md`; Phase 12B's `In
+Review` status is unaffected).
+
+- Implemented `POST /v1/rag/query`: Input Guard -> server-side retrieval
+  (existing Phase 12B `SqliteBM25Retriever`) -> Provenance/Trust Guard
+  (new) -> RAG Context Guard (per chunk, then a bounded aggregate pass)
+  -> Mock LLM Provider (existing, unchanged) -> centralized DLP (new) ->
+  Output Guard (existing, unchanged) -> structured audit -> safe
+  response. `POST /v1/gateway/chat` was not modified in any way and
+  remains fully regression-tested as caller-supplied-context-only.
+- New modules: `app/core/pipeline.py` (typed `RagPipelineResult`/
+  `ProvenanceSummary`/`StageResult` — `GuardProfile` ablation config
+  explicitly deferred to Phase 12E, documented not silently omitted),
+  `app/guards/provenance_guard.py`, `app/guards/dlp_guard.py`,
+  `app/services/rag_query.py`.
+- **Provenance/Trust Guard:** three fixed allow-lists (`trust_level`,
+  `classification`, `source_type`) matching exactly the values
+  `app/core/source_policy.py`'s real (non-fallback) policies produce —
+  fails closed on anything else, including the `untrusted_unknown`/
+  `unverified` fallback pair. Reads only a `RetrievalHit`'s
+  server-assigned fields; a caller cannot influence it since the request
+  schema has no such fields at all. Acceptance is eligibility only —
+  trust does not bypass the RAG Context Guard's content scan that
+  follows.
+- **Multi-chunk coordination:** the Phase 12A audit resolution required
+  Phase 12C to explicitly decide (implement or document-defer) a
+  cross-chunk mitigation, not silently omit the decision. Implemented a
+  bounded, deterministic aggregate inspection — the final accepted
+  chunks' bounded excerpts (default cap 4000 chars total) are joined and
+  re-run through the same, unmodified `evaluate_rag_context()` as one
+  synthetic chunk, catching a split-across-chunks instruction that no
+  single chunk's own inspection would trip. Verified with a dedicated
+  test constructing exactly that scenario
+  (`test_multi_chunk_coordination_is_caught_by_the_aggregate_check`).
+  This reduces, not eliminates, the risk; documented as a residual
+  limitation, not a solved problem.
+- **Centralized DLP:** deterministic regex detectors (canary secret,
+  OpenAI/AWS/GitHub key shapes, PEM private-key blocks, bearer tokens,
+  `key: value`/`key=value` secret assignments), bounded input size, never
+  logs raw detected values. `app/guards/output_guard.py` and
+  `app/services/audit_logger.py` were changed to import their
+  previously-duplicated secret patterns from this module instead of
+  redefining them — a small, mechanical, behavior-preserving refactor
+  verified with parity regression tests
+  (`test_output_guard_redaction_unchanged_after_consolidation`,
+  `test_audit_logger_redaction_unchanged_after_consolidation`) run
+  against the existing fixture set. `app/guards/rag_guard.py` was
+  deliberately left untouched (not named in
+  `docs/modernization-v2-architecture.md` §5's consolidation target;
+  touching it was not necessary for a safe integration).
+- **Fail-closed stop paths:** input blocked, retrieval failed (mapped to
+  the same 400/503 `POST /v1/retrieve` already uses), no hits (safe
+  allow/no-answer, not an error), all hits rejected by provenance,
+  all/aggregate-blocked by the RAG Context Guard, provider failure, DLP
+  failure, output blocked, and an unexpected-internal-failure safety net.
+  Every guard-stage exception is caught inside the pipeline and mapped to
+  a fail-closed `block`, not an unhandled 500 — verified by monkeypatched
+  exception tests for each stage.
+- **Response safety:** no full retrieved chunk text returned by default —
+  only a safe per-hit provenance summary (document/chunk ID, title,
+  source_type, classification, trust_level, rank, score, accepted/
+  rejected status, reason code). The raw query itself is never logged in
+  the audit event, only a SHA-256 hash prefix and length (stricter than
+  other endpoints' existing redacted-preview convention, since a natural
+  RAG query may embed sensitive content that pattern-based redaction
+  would not catch).
+- 79 new regression tests added across `tests/test_provenance_guard.py`
+  (11), `tests/test_dlp_guard.py` (13), `tests/test_rag_pipeline.py` (32,
+  service-level via a stub retriever double plus two real-SQLite
+  end-to-end cases), and `tests/test_rag_query_routes.py` (23,
+  HTTP-level, including strict-schema rejection of every prohibited
+  field and regression checks that `/health`, `/v1/gateway/chat`, and
+  `/v1/retrieve` are unaffected). Full suite grew to **267/267 passing**
+  (up from 188), run with an explicit writable `--basetemp`.
+- Live smoke test `scripts/smoke_test_rag_pipeline.ps1` run against a
+  real `uvicorn` server on a scratch `RETRIEVAL_DB_PATH` — **PASSED**:
+  benign query (allow, DLP stage ran), mixed query (poisoned doc
+  excluded), all-poisoned query (`all_context_blocked`, provider not
+  called), direct-injection query (`input_blocked` before retrieval), and
+  the `/v1/gateway/chat` regression check. One scenario is documented as
+  not live-testable rather than faked: the deterministic Mock LLM
+  Provider never echoes retrieved content into its response, so live
+  secret-redaction-in-response cannot be demonstrated against a real
+  server — that exact case is covered instead by
+  `tests/test_dlp_guard.py`/`tests/test_rag_pipeline.py` using a scripted
+  offline provider double.
+- No file under `app/guards/input_guard.py`, `app/services/gateway.py`,
+  `app/services/evaluation_runner.py`, `app/services/llm_provider.py`,
+  `datasets/`, `redteam/`, `reports/evaluation/`,
+  `report-latex-template/`, or `requirements.txt` was modified; no new
+  dependency installed; no runtime database tracked; no network call
+  anywhere in the new code.
+- Documentation updated: `README.md` (new Phase 12C section),
+  `app/README.md` (new "End-to-End RAG Pipeline" section, updated
+  endpoint table and "Not Implemented"/"Audit Logging" sections),
+  `tests/README.md` (new test-module rows, updated counts),
+  `scripts/README.md` (new smoke-test entry), `TASK_BOARD.md` (new Phase
+  12C section), this file.
+- **Phase 12C is marked In Review, not Done.** Per this task's explicit
+  instruction, it is not declared complete until a maintainer
+  independently repeats verification and an independent security audit
+  passes — the same process already applied to Phase 12A and 12B. Phase
+  12D (benchmark v2 generation) was explicitly not started this session.
+## Phase 12C multidisciplinary audit resolution (2026-07-12)
+
+- Adjudicated the Gemini, Grok, and Code X Phase 12C audits using executable
+  repository evidence. All three verdicts were `REVISE`; Gemini explicitly
+  could not inspect the diff, so its recommendations were treated as
+  conditional academic requirements rather than code facts.
+- Resolved Code X's two Critical findings: DLP no longer returns an
+  uninspected output suffix, and audit logging now consumes the complete
+  centralized redaction API, including bearer and secret-assignment patterns.
+- Resolved the five blocking Major findings: provider requests contain only
+  the sanitized effective query; provider context is exactly the bounded
+  aggregate-inspected context; controlled failures have safe reason codes and
+  audit handling; Phase 12C settings fail fast on invalid values; DLP findings
+  produce `sanitize` and structured category/count telemetry.
+- Added overlap-safe DLP counting, safe audit-sink fallback, corrected FastAPI
+  metadata, and Grok-inspired multilingual/zero-width, high-trust malicious,
+  mixed-trust, legitimate-authority, and academic-discussion tests.
+- Gemini ablation toggles remain Phase 12E evaluation-only work. The public
+  endpoint has no field, header, or serving setting that can disable guards.
+  Per-request stage telemetry is ready for Phase 12E aggregation; no p50/p95
+  or benchmark result was generated in Phase 12C.
+- Validation: focused Phase 12C suite 123 passed; full suite 311 passed;
+  compile checks and live isolated RAG smoke test passed. Phase 12D was not
+  started.
+- ~~Final recommendation at the time: APPROVE PHASE 12C.~~ **Superseded**
+  — a further independent Code X re-audit of this exact state (below)
+  found terminal audit coverage was still incomplete for two paths.
+
+## Phase 12C Code X Final Re-audit (2026-07-12)
+
+An independent Code X final re-audit of the multidisciplinary-resolution
+state returned verdict **REVISE**: 0 remaining Critical, 1 remaining
+blocking Major ("terminal audit coverage is still incomplete"), everything
+else previously resolved reconfirmed unaffected.
+
+- **Root cause:** two paths in `app/api/routes.py::rag_query` reached the
+  service but bypassed the pipeline's own internal audit commit: (1) the
+  configured `top_k > settings.rag_max_top_k` rejection returned HTTP 400
+  before `run_rag_query`'s `log_event` call ever ran, producing zero audit
+  trail; (2) `run_rag_query` committed its terminal audit event *before*
+  `app/api/routes.py` attempted to build `RagQueryResponse(...)` from the
+  result, so a response-construction failure left an earlier, contradictory
+  "success" (`allowed`) event on record for a request the caller actually
+  received as a 500.
+- **Fix:** split audit commitment out of the pipeline function.
+  `app/services/rag_query.py::run_rag_query_uncommitted(...)` now contains
+  the full pipeline body and returns `(RagPipelineResult,
+  RagQueryAuditContext)` without logging; `commit_rag_query_audit(result,
+  audit_ctx)` is the extracted, explicit commit step, called exactly once
+  for whichever outcome is actually visible to the caller.
+  `run_rag_query`'s public signature/behavior is unchanged (a two-line
+  wrapper: uncommitted call, immediate commit, return) so every existing
+  direct/service caller needed zero changes. `audit_top_k_rejected(...)`
+  emits exactly one safe `block`/`top_k_rejected` event for the first gap;
+  the route now defers its commit until after `RagQueryResponse(...)`
+  construction succeeds (or commits
+  `mark_response_construction_failed(pipeline_result)` if it does not) for
+  the second gap. This is an explicit internal Python contract (two named
+  functions plus a small internal dataclass), not a public flag.
+- 8 new regression tests added: `test_audit_top_k_rejected_emits_exactly_one_safe_block_event`,
+  `test_run_rag_query_uncommitted_does_not_audit_until_committed`,
+  `test_mark_response_construction_failed_produces_corrected_block_event`,
+  `test_exact_empty_sanitized_query_is_rejected_and_audited_once` (service
+  level); `test_top_k_rejection_returns_400_without_calling_retriever_or_provider`,
+  `test_top_k_rejection_returns_safe_response_even_if_audit_sink_fails`,
+  `test_response_construction_failure_emits_exactly_one_corrected_audit_event`,
+  `test_response_construction_failure_audit_sink_failure_still_returns_safe_500`
+  (HTTP level).
+- Validation: focused Phase 12C suite grew to **131 passed** (up from
+  123); full suite grew to **319 passed** (up from 311); `python -m
+  py_compile` clean; live smoke test
+  (`scripts/smoke_test_rag_pipeline.ps1`) against a real `uvicorn` server
+  on a scratch database/log path passed, plus a manual live check
+  confirming a `top_k=30` request now produces exactly one
+  `stop_reason=top_k_rejected` audit event with no raw query. No
+  prohibited path, dependency, or tracked database changed.
+- ~~Final recommendation: READY FOR ONE FINAL CODE X RE-AUDIT.~~
+  **Superseded** — a further independent Code X re-audit of this exact
+  diff (below) found one more blocking gap in the same terminal-audit-
+  coverage area.
+
+## Phase 12C Code X Final Terminal-Audit Re-audit — Nested Response Construction (2026-07-12)
+
+A further independent Code X re-audit of the terminal-audit-coverage fix
+returned verdict **REVISE**: 0 remaining Critical, 1 remaining blocking
+Major ("nested `ProvenanceItemResponse` construction occurs outside the
+protected response-construction and terminal-audit block").
+
+- **Root cause:** `app/api/routes.py::rag_query` built the `provenance =
+  [ProvenanceItemResponse(...) for ...]` list **before** the `try` block
+  protecting `RagQueryResponse(...)` construction (the previous pass's
+  fix had wrapped the outer call, and incidentally the inline
+  `StageResultResponse` list nested inside it, but not this separate,
+  earlier list comprehension). A failure constructing a
+  `ProvenanceItemResponse` — reachable only after the full pipeline,
+  including the provider, had already run — propagated as a raw,
+  unprotected exception: no safe `request_id`-bearing HTTP 500, and zero
+  terminal audit events.
+- **Fix:** moved the `provenance = [...]` construction (and made the
+  `stage_items = [...]` list explicit) inside the same `try` block as
+  `RagQueryResponse(...)`, so every nested and outer response object is
+  built in one protected block, and the success/`SANITIZE` terminal
+  audit commits only after the entire response tree is confirmed valid.
+  No change to `app/services/rag_query.py` was needed — its
+  audit-deferral contract (`run_rag_query_uncommitted`/
+  `commit_rag_query_audit`/`mark_response_construction_failed`) already
+  supported this; only the route's own code needed restructuring.
+- 4 new regression tests added (all in `tests/test_rag_query_routes.py`):
+  `test_nested_provenance_item_response_failure_maps_to_safe_500_with_audit`,
+  `test_nested_provenance_item_response_failure_with_audit_sink_failure_still_returns_safe_500`,
+  `test_successful_nested_response_construction_emits_exactly_one_normal_event`,
+  `test_nested_stage_result_response_failure_maps_to_safe_500_with_audit`
+  (forcing a different nested model to fail, confirming it follows the
+  same path, not a special case).
+- Validation: focused Phase 12C suite grew to **135 passed** (up from
+  131); full suite grew to **323 passed** (up from 319); `python -m
+  py_compile` clean; live smoke test
+  (`scripts/smoke_test_rag_pipeline.ps1`) against a real `uvicorn` server
+  on a scratch database/log path passed. No prohibited path, dependency,
+  or tracked database changed.
+- **Documentation correction:** the prior pass's claim that "every
+  response-construction path was already protected" was inaccurate;
+  corrected in place. The schema-level 422 boundary (FastAPI/Pydantic
+  validation failures before `rag_query`'s function body runs, therefore
+  outside the one-terminal-audit-event contract) is now explicitly
+  documented rather than left implicit.
+- **Final recommendation: READY FOR ONE FINAL CODE X RE-AUDIT.** Not
+  APPROVE, not DONE. Phase 12C remains In Review until an independent
+  re-audit of this specific diff returns PASS. Phase 12D was not started.

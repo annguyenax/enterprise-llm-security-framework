@@ -70,3 +70,28 @@ class DocumentIngestRequest(BaseModel):
 class RetrieveRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=2000)
     top_k: int = Field(default=5, ge=1, le=50)
+
+
+class RagQueryRequest(BaseModel):
+    """Request for `POST /v1/rag/query` (Phase 12C). `extra="forbid"`
+    rejects the whole request if a caller attempts to send
+    `context_chunks`, `trust_level`, `classification`, `source_type`,
+    `is_poisoned`, `expected_decision`, a guard decision, or a canonical
+    document/chunk ID -- none of those exist on this schema, so there is
+    nothing for `extra="forbid"` to need to name explicitly. Context is
+    always retrieved server-side by `app/services/rag_query.py`; a caller
+    supplies only the natural-language query and an optional bound on how
+    many chunks to retrieve.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(..., min_length=1, max_length=2000)
+    top_k: int | None = Field(
+        default=None,
+        ge=1,
+        le=50,
+        description="Optional cap on retrieved chunks. Defaults to "
+        "settings.rag_default_top_k; always bounded by "
+        "settings.rag_max_top_k regardless of what is requested here.",
+    )

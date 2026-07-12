@@ -1,9 +1,9 @@
-"""FastAPI application entrypoint — LLM Security Gateway (Phase 4 skeleton).
+"""FastAPI application entrypoint — LLM Security Gateway academic PoC.
 
 Lab-scale proof-of-concept for a university internship project. NOT
 production-ready (see AGENT_RULES.md rule 8 and docs/decisions/ADR-001-mvp-scope.md).
-No real LLM is called; no real RAG retrieval exists yet — see
-app/services/gateway.py for the mock pipeline this phase implements.
+SQLite FTS5/BM25 retrieval and the guarded `/v1/rag/query` path are
+implemented. No external LLM is called; the provider remains a local mock.
 
 Run locally with:
     uvicorn app.main:app --reload
@@ -28,13 +28,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(
-    title="LLM Security Gateway (Phase 4 Skeleton)",
+    title="LLM Security Gateway",
     description=(
         "Lab-scale proof-of-concept guardrail gateway for a university internship project. "
-        "Not production-ready. Uses simple rule-based heuristics only; no real LLM or RAG "
-        "retrieval is called in this phase."
+        "Not production-ready. Uses SQLite FTS5/BM25 retrieval, rule-based guards, "
+        "and a deterministic local mock provider; no external LLM is called."
     ),
-    version="0.4.0",
+    version="0.12.0",
     lifespan=lifespan,
 )
 

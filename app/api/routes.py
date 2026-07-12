@@ -1,10 +1,12 @@
-"""API routes for the LLM Security Gateway through Phase 12B.
+"""API routes for the LLM Security Gateway through Phase 12C.
 
-Phase 12B adds POST /v1/documents/ingest and POST /v1/retrieve (lexical
+Phase 12B added POST /v1/documents/ingest and POST /v1/retrieve (lexical
 retrieval foundation only -- see docs/modernization-v2-architecture.md §6).
-These are NOT wired into the guarded gateway pipeline yet: POST
-/v1/rag/query does not exist until Phase 12C, and POST /v1/gateway/chat's
-behavior is unchanged from Phase 6.
+Phase 12C adds POST /v1/rag/query (Input Guard -> retrieval -> Provenance/
+Trust Guard -> RAG Context Guard -> Mock Provider -> DLP -> Output Guard,
+see app/services/rag_query.py). POST /v1/gateway/chat remains completely
+unchanged -- it still uses only caller-supplied context_chunks and never
+calls the retriever or the new pipeline.
 """
 from __future__ import annotations
 
@@ -30,6 +32,7 @@ from app.schemas.requests import (
     DocumentIngestRequest,
     InputGuardRequest,
     OutputGuardRequest,
+    RagQueryRequest,
     RAGGuardRequest,
     RetrieveRequest,
 )
@@ -39,14 +42,23 @@ from app.schemas.responses import (
     GuardDecisionResponse,
     HealthResponse,
     IngestionItemResponse,
+    ProvenanceItemResponse,
+    RagQueryResponse,
     RAGGuardResponse,
     RetrievalHitResponse,
     RetrieveResponse,
+    StageResultResponse,
 )
 from app.services.audit_logger import log_event
 from app.services.chunking import ChunkingConfig
 from app.services.gateway import run_chat
 from app.services.ingestion import IngestionService, IngestionServiceConfig, IngestionValidationError
+from app.services.rag_query import (
+    audit_top_k_rejected,
+    commit_rag_query_audit,
+    mark_response_construction_failed,
+    run_rag_query_uncommitted,
+)
 
 router = APIRouter()
 
@@ -269,3 +281,121 @@ def retrieve(request: RetrieveRequest) -> RetrieveResponse:
             for hit in result.hits
         ],
     )
+
+
+@router.post("/v1/rag/query", response_model=RagQueryResponse)
+def rag_query(request: RagQueryRequest) -> RagQueryResponse:
+    """Phase 12C: the full guarded end-to-end RAG pipeline -- Input Guard
+    -> server-side retrieval -> Provenance/Trust Guard -> RAG Context
+    Guard -> Mock Provider -> centralized DLP -> Output Guard. See
+    `app/services/rag_query.py` module docstring for the exact stage
+    order and every fail-closed stop path. This endpoint retrieves
+    context itself; the request schema (`RagQueryRequest`,
+    `extra="forbid"`) has no field for `context_chunks`, `trust_level`,
+    `classification`, `source_type`, `is_poisoned`, `expected_decision`,
+    a guard decision, or a canonical document/chunk ID -- a caller cannot
+    supply or override any of them.
+    """
+    request_id = str(uuid.uuid4())
+    top_k = request.top_k or settings.rag_default_top_k
+    if top_k > settings.rag_max_top_k:
+        # Fixed per the Code X final re-audit ("terminal audit coverage
+        # is still incomplete"): this configured-policy rejection used to
+        # return before run_rag_query (and therefore its internal audit
+        # commit) ever ran, producing zero audit trail for a request that
+        # did reach this service. audit_top_k_rejected emits exactly one
+        # safe terminal event -- query hash/length only, never the raw
+        # query -- before the same 400 response as before.
+        audit_top_k_rejected(
+            request_id=request_id, query=request.query, configured_max_top_k=settings.rag_max_top_k,
+        )
+        raise HTTPException(
+            status_code=400,
+            detail=f"top_k exceeds the configured maximum of {settings.rag_max_top_k}.",
+        )
+
+    try:
+        pipeline_result, audit_ctx = run_rag_query_uncommitted(
+            query=request.query, top_k=top_k, retriever=_retriever, request_id=request_id,
+        )
+    except EmptySearchQueryError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FTS5UnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 -- deliberate safety net, matches Minor #2 convention
+        raise HTTPException(
+            status_code=500,
+            detail=f"Unexpected server error (request_id={request_id}).",
+        ) from exc
+
+    # Fixed per the Code X final terminal-audit re-audit ("nested
+    # ProvenanceItemResponse construction occurs outside the protected
+    # response-construction and terminal-audit block"): EVERY nested
+    # response-model construction -- ProvenanceItemResponse,
+    # StageResultResponse, and the outer RagQueryResponse itself -- must
+    # happen inside this one try block. The previous code built the
+    # `provenance` list *before* the try, so a validation failure there
+    # (after the pipeline, including the provider, had already run) would
+    # propagate as an unprotected exception: no safe request_id-bearing
+    # HTTP 500, and zero terminal audit events, since it happened before
+    # either the success-commit or the except-block's corrected commit.
+    # The audit event is committed AFTER the *entire* response tree is
+    # confirmed successfully built, not before -- run_rag_query_
+    # uncommitted deliberately does not audit on the caller's behalf (see
+    # its docstring), so there is no earlier "success" event to
+    # contradict if anything in this block raises. On any failure here,
+    # a corrected block/response_construction_failed event is committed
+    # instead of the pipeline's own (now-inaccurate) computed outcome.
+    try:
+        provenance = (
+            [
+                ProvenanceItemResponse(
+                    document_id=item.document_id,
+                    chunk_id=item.chunk_id,
+                    title=item.title,
+                    source_type=item.source_type,
+                    classification=item.classification,
+                    trust_level=item.trust_level,
+                    rank=item.rank,
+                    retrieval_score=item.retrieval_score,
+                    status=item.status,
+                    reason_code=item.reason_code,
+                )
+                for item in pipeline_result.provenance
+            ]
+            if settings.rag_return_provenance
+            else []
+        )
+        stage_items = [
+            StageResultResponse(
+                stage=sr.stage,
+                decision=sr.decision,
+                reason_code=sr.reason_code,
+                detail=sr.detail,
+            )
+            for sr in pipeline_result.stage_results
+        ]
+        response = RagQueryResponse(
+            request_id=pipeline_result.request_id,
+            decision=pipeline_result.final_decision,
+            answer=pipeline_result.answer,
+            retrieved_count=pipeline_result.retrieved_count,
+            accepted_context_count=pipeline_result.accepted_context_count,
+            rejected_context_count=pipeline_result.rejected_context_count,
+            provenance=provenance,
+            stage_results=stage_items,
+            redaction_count=pipeline_result.redaction_count,
+            latency_ms=pipeline_result.latency_ms.get("total", 0.0),
+            provider_called=pipeline_result.provider_called,
+            stop_reason=pipeline_result.stop_reason,
+            error_category=pipeline_result.error_category,
+        )
+    except Exception as exc:  # noqa: BLE001 -- safe response-boundary mapping
+        commit_rag_query_audit(mark_response_construction_failed(pipeline_result), audit_ctx)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Unexpected server error (request_id={request_id}).",
+        ) from exc
+
+    commit_rag_query_audit(pipeline_result, audit_ctx)
+    return response
