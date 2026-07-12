@@ -9,9 +9,11 @@ from app.retrieval.models import IngestionDocument, RetrievalQuery
 from app.retrieval.sqlite_bm25 import SqliteBM25Config, SqliteBM25Retriever
 from app.services.chunking import ChunkingConfig
 from app.services.ingestion import (
+    MAX_METADATA_DEPTH,
     IngestionService,
     IngestionServiceConfig,
     IngestionValidationError,
+    _metadata_depth,
     _sanitize_metadata,
 )
 
@@ -129,11 +131,166 @@ def test_spoofed_trust_and_classification_in_metadata_are_ignored(tmp_path):
 def test_sanitize_metadata_strips_all_reserved_keys():
     raw = {
         "trust_level": "x", "classification": "x", "source_type": "x",
-        "is_poisoned": True, "security_decision": "x", "document_id": "x",
-        "chunk_id": "x", "safe_key": "kept",
+        "is_poisoned": True, "expected_decision": "x", "security_decision": "x",
+        "policy_result": "x", "document_id": "x", "chunk_id": "x", "safe_key": "kept",
     }
-    cleaned = _sanitize_metadata(raw)
+    cleaned, stripped = _sanitize_metadata(raw)
     assert cleaned == {"safe_key": "kept"}
+    assert stripped == 9
+
+
+# -- Phase 12B Codex audit regression tests ---------------------------------
+
+
+def test_public_ingestion_cannot_claim_trusted_synthetic_source_key(tmp_path):
+    """Major #1: a public caller must not be able to select
+    source_key="synthetic_clean_corpus" (or any other elevated-trust
+    policy) and receive trust_level="trusted_internal". IngestionService
+    is the only caller reachable from the public route, and it must
+    always resolve policy in public-only mode."""
+    service = _service(tmp_path)
+    for elevated_key in ("synthetic_clean_corpus", "synthetic_external_feed"):
+        result = service.ingest_batch(
+            [_doc(external_id=f"claim-{elevated_key}", source_key=elevated_key)],
+            request_id=str(uuid.uuid4()),
+        )
+        assert result.rejected == 1
+        assert result.indexed == 0
+        assert "unknown" in result.items[0].reason.lower()
+
+
+def test_nested_reserved_metadata_key_is_rejected_or_sanitized(tmp_path):
+    """Major #2: a reserved key nested inside the free-form metadata dict
+    must not survive to storage."""
+    retriever = SqliteBM25Retriever(SqliteBM25Config(db_path=str(tmp_path / "nested.db")))
+    service = IngestionService(retriever)
+    doc = _doc(
+        external_id="nested-spoof",
+        metadata={"nested": {"trust_level": "trusted_internal", "is_poisoned": True}, "note": "ok"},
+    )
+    result = service.ingest_batch([doc], request_id=str(uuid.uuid4()))
+    assert result.indexed == 1
+    assert result.items[0].metadata_keys_stripped == 2
+    stored = retriever.get_document(result.items[0].document_id)
+    assert "trust_level" not in dict(stored.metadata).get("nested", {})
+    assert "is_poisoned" not in dict(stored.metadata).get("nested", {})
+    assert dict(stored.metadata)["note"] == "ok"
+
+
+def test_case_and_whitespace_varied_reserved_metadata_key_is_sanitized(tmp_path):
+    """Major #2: "Trust_Level", "TRUST-LEVEL", and " trust level " must
+    all be recognized as the reserved key `trust_level`, not just the
+    exact lowercase spelling."""
+    retriever = SqliteBM25Retriever(SqliteBM25Config(db_path=str(tmp_path / "case.db")))
+    service = IngestionService(retriever)
+    doc = _doc(
+        external_id="case-spoof",
+        metadata={"Trust_Level": "trusted_internal", "IS POISONED": True, "note": "ok"},
+    )
+    result = service.ingest_batch([doc], request_id=str(uuid.uuid4()))
+    assert result.items[0].metadata_keys_stripped == 2
+    stored = retriever.get_document(result.items[0].document_id)
+    assert dict(stored.metadata) == {"note": "ok"}
+
+
+def test_metadata_spoof_attempt_is_auditable_without_persisting_unsafe_value(tmp_path):
+    """Major #2: a spoofing attempt must be recorded as a count in the
+    ingestion result (auditable), but the unsafe value itself must never
+    be persisted anywhere -- including inside the safe metadata that is
+    stored."""
+    retriever = SqliteBM25Retriever(SqliteBM25Config(db_path=str(tmp_path / "audit.db")))
+    service = IngestionService(retriever)
+    doc = _doc(external_id="audit-spoof", metadata={"trust_level": "SUPER-SECRET-ELEVATED-VALUE"})
+    result = service.ingest_batch([doc], request_id=str(uuid.uuid4()))
+    assert result.items[0].metadata_keys_stripped == 1
+    stored = retriever.get_document(result.items[0].document_id)
+    assert "SUPER-SECRET-ELEVATED-VALUE" not in str(dict(stored.metadata))
+
+
+def test_metadata_depth_over_limit_is_rejected(tmp_path):
+    """Major #2: unreasonably deep metadata nesting is rejected outright
+    rather than silently truncated."""
+    deep: dict = {"v": 1}
+    for _ in range(MAX_METADATA_DEPTH + 3):
+        deep = {"nested": deep}
+    assert _metadata_depth(deep) > MAX_METADATA_DEPTH
+
+    service = _service(tmp_path)
+    result = service.ingest_batch([_doc(metadata=deep)], request_id=str(uuid.uuid4()))
+    assert result.rejected == 1
+    assert "depth" in result.items[0].reason.lower()
+
+
+def test_same_text_replay_with_changed_title_and_metadata_is_updated(tmp_path):
+    """Major #3: re-ingesting identical text with a changed title/metadata
+    must be reported as `updated`, not `unchanged`, and the new fields
+    must actually be persisted."""
+    retriever = SqliteBM25Retriever(SqliteBM25Config(db_path=str(tmp_path / "refresh.db")))
+    service = IngestionService(retriever)
+    doc = _doc(external_id="refresh-1", title="Original Title", metadata={"note": "v1"})
+    first = service.ingest_batch([doc], request_id=str(uuid.uuid4()))
+    assert first.items[0].status == "indexed"
+
+    updated_doc = _doc(external_id="refresh-1", title="Corrected Title", metadata={"note": "v2"})
+    second = service.ingest_batch([updated_doc], request_id=str(uuid.uuid4()))
+    assert second.items[0].status == "updated"
+
+    stored = retriever.get_document(first.items[0].document_id)
+    assert stored.title == "Corrected Title"
+    assert dict(stored.metadata)["note"] == "v2"
+
+
+def test_environment_configured_limits_actually_control_the_service(tmp_path):
+    """Major #4 (service-level slice): IngestionServiceConfig's chunking
+    limits, when actually passed to the service (as app/api/routes.py now
+    does from settings), control whether a document is accepted."""
+    tight_config = IngestionServiceConfig(chunking=ChunkingConfig(max_document_chars=10))
+    retriever = SqliteBM25Retriever(SqliteBM25Config(db_path=str(tmp_path / "limits.db")))
+    service = IngestionService(retriever, tight_config)
+    result = service.ingest_batch(
+        [_doc(external_id="too-long", text="this text is definitely longer than ten characters")],
+        request_id=str(uuid.uuid4()),
+    )
+    assert result.rejected == 1
+    assert "exceeds maximum" in result.items[0].reason
+
+
+def test_external_id_and_source_key_whitespace_normalized_before_dedup(tmp_path):
+    """Minor #3: whitespace/case variants of the same external_id/
+    source_key across two separate ingestion calls must resolve to the
+    same logical document (a corrected re-upload), not a second distinct
+    one -- proving normalization happens before canonical ID derivation
+    and duplicate detection, not just within a single batch."""
+    service = _service(tmp_path)
+    first = service.ingest_batch(
+        [_doc(external_id="policy-1", source_key="api_upload", text="First version of the text.")],
+        request_id=str(uuid.uuid4()),
+    )
+    second = service.ingest_batch(
+        [_doc(external_id=" policy-1 ", source_key="API_UPLOAD", text="Second version of the text.")],
+        request_id=str(uuid.uuid4()),
+    )
+    assert first.items[0].status == "indexed"
+    assert second.items[0].status == "updated"
+    assert first.items[0].document_id == second.items[0].document_id
+
+
+def test_duplicate_within_batch_detected_across_whitespace_case_variants(tmp_path):
+    """Minor #3 (batch-local variant): two items in the SAME batch that
+    normalize to the same identity (whitespace around external_id, case
+    variant of source_key -- external_id case itself is intentionally NOT
+    folded, see ingestion.py rationale) must be treated as an in-batch
+    duplicate (first wins, second rejected), not two separate documents."""
+    service = _service(tmp_path)
+    docs = [
+        _doc(external_id="policy-2", source_key="api_upload", text="First version."),
+        _doc(external_id=" policy-2 ", source_key="API_UPLOAD", text="Second version."),
+    ]
+    result = service.ingest_batch(docs, request_id=str(uuid.uuid4()))
+    assert result.indexed == 1
+    assert result.rejected == 1
+    rejected = next(i for i in result.items if i.status == "rejected")
+    assert "duplicate" in rejected.reason.lower()
 
 
 def test_canonical_document_id_stable_across_calls(tmp_path):

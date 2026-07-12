@@ -168,12 +168,49 @@ def _quote_fts5_term(term: str) -> str:
 def _build_safe_match_query(terms: list[str]) -> str:
     """Join sanitized terms into a MATCH expression.
 
-    Documented combining behavior: terms are joined with a single space,
-    which FTS5 treats as an implicit AND between space-separated quoted
-    tokens (a deliberate precision-favoring choice, not FTS5's only
-    option) -- a chunk must contain every extracted term to match.
+    Documented combining behavior: terms are joined with explicit ``OR``,
+    so a chunk matching *any* extracted term is a candidate hit, ranked by
+    `bm25()` (which still rewards chunks matching more terms, since BM25
+    sums per-term scores and down-weights very common terms via document
+    frequency). **Changed from implicit AND to OR per the Phase 12B Codex
+    audit (Major #5, "Implicit AND permits trivial retrieval
+    suppression"):** the original AND-only behavior meant one extra,
+    otherwise-irrelevant query term could silently zero out an otherwise
+    matching result -- a real false-negative/evasion primitive, not just a
+    ranking preference. See `docs/decisions/ADR-002-retrieval-engine.md`
+    for the updated decision record.
     """
-    return " ".join(_quote_fts5_term(term) for term in terms)
+    return " OR ".join(_quote_fts5_term(term) for term in terms)
+
+
+def _metadata_json(metadata: object) -> str:
+    # sort_keys=True makes this a canonical representation, so two
+    # semantically-identical dicts serialize identically regardless of
+    # key insertion order -- required for _is_unchanged's string
+    # comparison below to be meaningful rather than order-fragile.
+    return json.dumps(dict(metadata), ensure_ascii=False, sort_keys=True)
+
+
+def _is_unchanged(existing_row: sqlite3.Row, incoming: DocumentRecord) -> bool:
+    """Decide whether a re-ingested document is truly unchanged.
+
+    **Phase 12B Codex audit fix (Major #3, "'Unchanged' detection ignores
+    mutable and security-relevant state"):** the original implementation
+    compared only `content_hash`, so re-ingesting identical text with a
+    corrected title, metadata, or (if the source policy configuration
+    changes) classification/trust_level was wrongly reported as
+    `unchanged` and those fields silently never propagated. This now
+    compares every field `_replace_document` would otherwise update, so a
+    change to any of them is correctly detected as `updated`.
+    """
+    return (
+        existing_row["content_hash"] == incoming.content_hash
+        and existing_row["title"] == incoming.title
+        and existing_row["metadata_json"] == _metadata_json(incoming.metadata)
+        and existing_row["source_type"] == incoming.source_type
+        and existing_row["classification"] == incoming.classification
+        and existing_row["trust_level"] == incoming.trust_level
+    )
 
 
 class SqliteBM25Retriever(Retriever):
@@ -255,7 +292,11 @@ class SqliteBM25Retriever(Retriever):
                 conn.execute("BEGIN IMMEDIATE")
                 for document_record, chunk_records in prepared:
                     existing = conn.execute(
-                        "SELECT content_hash FROM documents WHERE document_id = ?",
+                        """
+                        SELECT content_hash, title, metadata_json, source_type,
+                               classification, trust_level
+                        FROM documents WHERE document_id = ?
+                        """,
                         (document_record.document_id,),
                     ).fetchone()
 
@@ -271,7 +312,7 @@ class SqliteBM25Retriever(Retriever):
                             )
                         )
                         indexed += 1
-                    elif existing["content_hash"] == document_record.content_hash:
+                    elif _is_unchanged(existing, document_record):
                         items.append(
                             IngestionItemResult(
                                 external_id=document_record.external_id,
@@ -320,7 +361,7 @@ class SqliteBM25Retriever(Retriever):
                 document.document_id, document.external_id, document.source_key,
                 document.source_id, document.source_type, document.classification,
                 document.trust_level, document.title, document.content_hash,
-                json.dumps(dict(document.metadata), ensure_ascii=False),
+                _metadata_json(document.metadata),
                 document.created_at, document.updated_at,
             ),
         )
@@ -348,7 +389,7 @@ class SqliteBM25Retriever(Retriever):
             """,
             (
                 document.title, document.content_hash,
-                json.dumps(dict(document.metadata), ensure_ascii=False),
+                _metadata_json(document.metadata),
                 document.updated_at, document.source_id, document.source_type,
                 document.classification, document.trust_level, document.document_id,
             ),
@@ -365,7 +406,7 @@ class SqliteBM25Retriever(Retriever):
                 """,
                 (
                     chunk.chunk_id, chunk.document_id, chunk.chunk_index, chunk.text,
-                    chunk.content_hash, json.dumps(dict(chunk.metadata), ensure_ascii=False),
+                    chunk.content_hash, _metadata_json(chunk.metadata),
                 ),
             )
             conn.execute(

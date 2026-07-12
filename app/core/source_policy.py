@@ -30,12 +30,31 @@ low-trust policy. Rationale:
 kept available for tests/tooling that explicitly want to exercise the
 low-trust fallback path, but this is never the default and is never
 reachable from a caller-settable request field.
+
+**Phase 12B Codex audit fix (Major #1, "Public caller can select a
+trusted source policy"):** the original design let any caller of the
+public `POST /v1/documents/ingest` endpoint select `source_key=
+"synthetic_clean_corpus"` and receive `trust_level="trusted_internal"` --
+the trust *tier mapping* was server-defined, but *which tier a given
+upload receives* was effectively caller-chosen, which does not satisfy
+"server-controlled trust" (`docs/modernization-final-plan.md` required
+decision C). Phase 12B has no authentication layer, so there is no
+server-side signal (other than "this came through the one public route")
+to decide trust from. The fix: elevated-trust policies
+(`synthetic_clean_corpus`, `synthetic_external_feed`) are moved to a
+separate table that `resolve_source_policy()` only consults when
+`allow_internal=True` is passed explicitly -- `IngestionService`
+(`app/services/ingestion.py`), the sole caller reachable from the public
+route, never passes it, so `PUBLIC_SOURCE_POLICIES` (effectively just
+`api_upload`) is the only reachable outcome through the public API today.
+`allow_internal=True` exists for tests and for a future authenticated/
+internal ingestion channel (not yet implemented) to use deliberately.
 """
 from __future__ import annotations
 
 from app.retrieval.models import SourcePolicyDecision
 
-_SOURCE_POLICIES: dict[str, SourcePolicyDecision] = {
+PUBLIC_SOURCE_POLICIES: dict[str, SourcePolicyDecision] = {
     "api_upload": SourcePolicyDecision(
         source_key="api_upload",
         source_type="api_upload",
@@ -43,6 +62,13 @@ _SOURCE_POLICIES: dict[str, SourcePolicyDecision] = {
         trust_level="untrusted_external",
         policy_id="policy-v1-api-upload",
     ),
+}
+
+# Elevated-trust policies. Deliberately NOT merged into
+# PUBLIC_SOURCE_POLICIES and NOT resolvable by the default
+# resolve_source_policy() call (the one used by the public ingestion
+# path) -- see the module docstring's Phase 12B Codex audit note.
+_INTERNAL_ONLY_SOURCE_POLICIES: dict[str, SourcePolicyDecision] = {
     "synthetic_clean_corpus": SourcePolicyDecision(
         source_key="synthetic_clean_corpus",
         source_type="synthetic_corpus",
@@ -70,22 +96,38 @@ UNKNOWN_SOURCE_POLICY = SourcePolicyDecision(
 
 class UnknownSourceKeyError(ValueError):
     """Raised when a caller-supplied source_key has no configured policy
-    and strict rejection (the default) is in effect."""
+    reachable in the current resolution mode (strict rejection, the
+    default, is in effect), or when it names an internal-only policy but
+    `allow_internal` was not passed."""
 
 
-def known_source_keys() -> tuple[str, ...]:
-    return tuple(sorted(_SOURCE_POLICIES))
+def known_source_keys(*, include_internal: bool = False) -> tuple[str, ...]:
+    keys = dict(PUBLIC_SOURCE_POLICIES)
+    if include_internal:
+        keys.update(_INTERNAL_ONLY_SOURCE_POLICIES)
+    return tuple(sorted(keys))
 
 
-def resolve_source_policy(source_key: str, *, strict: bool = True) -> SourcePolicyDecision:
+def resolve_source_policy(
+    source_key: str, *, strict: bool = True, allow_internal: bool = False
+) -> SourcePolicyDecision:
     """Resolve a caller-supplied source_key to a server-controlled policy.
 
-    Raises `UnknownSourceKeyError` for an unrecognized source_key unless
-    `strict=False` is explicitly passed (see module docstring for why the
-    default is strict rejection, and why this parameter is never wired to
-    a caller-settable request field).
+    By default (`allow_internal=False`), only `PUBLIC_SOURCE_POLICIES` is
+    consulted -- this is what `IngestionService` (the only caller reachable
+    from the public `POST /v1/documents/ingest` endpoint) always uses, so
+    an elevated-trust `source_key` is unreachable through public input.
+    Pass `allow_internal=True` only from a context that is not directly
+    driven by an unauthenticated caller (tests, internal tooling, or a
+    future authenticated ingestion channel).
+
+    Raises `UnknownSourceKeyError` for an unrecognized (or, without
+    `allow_internal`, an internal-only) source_key unless `strict=False`
+    is explicitly passed.
     """
-    policy = _SOURCE_POLICIES.get(source_key)
+    policy = PUBLIC_SOURCE_POLICIES.get(source_key)
+    if policy is None and allow_internal:
+        policy = _INTERNAL_ONLY_SOURCE_POLICIES.get(source_key)
     if policy is not None:
         return policy
     if strict:

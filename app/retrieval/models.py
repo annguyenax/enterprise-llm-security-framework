@@ -143,6 +143,14 @@ class IngestionItemResult:
     status: IngestionStatus
     reason: str | None = None
     chunk_count: int | None = None
+    # Number of reserved security-relevant metadata keys (trust_level,
+    # classification, is_poisoned, etc., at any nesting depth/case
+    # variant) that were silently stripped from caller-supplied metadata
+    # before storage. Zero means no spoofing attempt was detected; a
+    # positive count is an auditable signal that one was, without ever
+    # persisting or logging the stripped value itself. Added per the
+    # Phase 12B Codex audit (Major #2).
+    metadata_keys_stripped: int = 0
 
 
 @dataclass(frozen=True)

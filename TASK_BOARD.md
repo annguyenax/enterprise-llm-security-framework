@@ -333,7 +333,7 @@ audit approval is not itself that go-ahead.
 | Server-controlled source policy | Le Dinh Nghia | Done - `app/core/source_policy.py`: unknown `source_key` values are rejected (documented choice, not silently downgraded); caller can never set `trust_level`/`classification`/`source_type` |
 | Atomic ingestion service | Both | Done - `app/services/ingestion.py`: validation, reserved-metadata-key stripping, SHA-256 content hashing, deterministic server-derived IDs, one audit log event per batch with safe fields only |
 | API endpoints | Nguyen Van An | Done - `POST /v1/documents/ingest`, `POST /v1/retrieve` added to `app/api/routes.py`; `POST /v1/gateway/chat` and all Phase 0-11 endpoints unchanged (regression-tested) |
-| Tests | Both | Done - `tests/test_chunking.py` (14), `tests/test_sqlite_bm25.py` (31), `tests/test_ingestion.py` (14), `tests/test_retrieval_routes.py` (10) = 69 new tests; full suite 151/151 passing in a clean project-local `.venv` |
+| Tests | Both | Done - `tests/test_chunking.py` (14), `tests/test_sqlite_bm25.py` (34), `tests/test_ingestion.py` (23), `tests/test_retrieval_routes.py` (12) = 83 Phase 12B tests (69 original + 14 added resolving the Code X audit below); full suite 165/165 passing in a clean project-local `.venv` |
 | Smoke test | Both | Done - `scripts/smoke_test_retrieval.ps1`: ingest, retrieve, update, verify stale content gone, verified against a live local server |
 | Documentation | Both | Done - `README.md`, `app/README.md`, `tests/README.md`, `scripts/README.md` updated |
 
@@ -371,6 +371,60 @@ session's own verification (above) is thorough, but the phase is not
 declared `Done` until a team member independently repeats `pytest -q` and
 the smoke test in their own environment, and a repository-wide security
 review pass is recorded.
+
+### Phase 12B Code X Audit Resolution — **Status: Done**
+
+An independent Code X audit of implementation commit `6bfb714` returned
+verdict **REVISE**: 0 Critical, 5 Major (all blocking), 4 Minor findings.
+Full traceable resolution:
+`docs/modernization-ai-reviews/phase-12b-audit-resolution.md`.
+
+- **All 5 Major findings accepted and fixed**, each with a regression test
+  reproducing the exact scenario the audit demonstrated: (1) the public
+  `POST /v1/documents/ingest` endpoint could grant `trusted_internal`
+  status simply by claiming `source_key="synthetic_clean_corpus"` -
+  fixed by removing elevated-trust policies from the table the public
+  ingestion path resolves against (`app/core/source_policy.py`); (2)
+  reserved metadata-key stripping only matched exact top-level keys -
+  fixed with recursive, case/whitespace-normalized, depth-bounded
+  sanitization plus an auditable stripped-key count
+  (`app/services/ingestion.py`); (3) re-ingesting identical text with a
+  changed title/metadata was wrongly reported `unchanged` and the new
+  values never propagated - fixed by widening the comparison
+  (`app/retrieval/sqlite_bm25.py`); (4) `RETRIEVAL_MAX_DOCUMENT_CHARS`/
+  `RETRIEVAL_CHUNK_MAX_CHARS`/`RETRIEVAL_CHUNK_OVERLAP_CHARS` were never
+  actually wired into the ingestion service - fixed in
+  `app/api/routes.py`; (5) implicit AND term-combination meant one extra
+  irrelevant query term could zero out an otherwise-matching result - FTS5
+  term joining changed from AND to OR
+  (`app/retrieval/sqlite_bm25.py`, `ADR-002-retrieval-engine.md` updated).
+- **Minor findings:** 3 fixed now (eager FTS5 capability init at import
+  time; safe generic error mapping for unexpected storage failures,
+  never leaking the raw exception; a test cleanup fixture preventing
+  unbounded growth of `data/retrieval.db` across repeated test runs), 1
+  partially fixed with documented rationale (external_id/source_key
+  normalization: whitespace and source_key case are now folded before
+  duplicate detection, but external_id case is deliberately left as-is,
+  since a case-sensitive real-world ID scheme could otherwise have two
+  genuinely distinct documents silently merged - a worse failure mode
+  than the one being fixed), 0 rejected.
+- **14 new regression tests added** (83 Phase 12B tests total, up from
+  69); full suite **165/165 passing**.
+- `scripts/smoke_test_retrieval.ps1` was updated: its original
+  "stale content gone" check assumed AND-only suppression semantics that
+  finding (5) above removed; it now asserts the actual invariant (no
+  stale chunk text in any returned hit) directly, verified against a live
+  local server.
+- **No prohibited path changed** (`app/guards/`, `app/services/gateway.py`,
+  `app/services/evaluation_runner.py`, `app/services/llm_provider.py`,
+  `datasets/`, `redteam/`, `reports/evaluation/`,
+  `report-latex-template/`, `requirements.txt`) - verified via
+  `git diff --name-only` and `git diff --name-only 392d8ca...HEAD -- datasets redteam reports/evaluation report-latex-template`
+  (empty). No new dependency installed. No runtime database tracked
+  (`git ls-files "*.db" "*.sqlite" "*.sqlite3"` empty).
+- **Final recommendation: APPROVE PHASE 12B** (audit gate satisfied; see
+  the resolution document's own acceptance-gate table for the full
+  12-point checklist, all PASS).
 
 **Next phase:** Phase 12C — RAG Query Service, Provenance, and Centralized
 DLP. Per `AGENT_RULES.md` rule 12, Phase 12C does not start automatically

@@ -76,29 +76,42 @@ $updateBody = @{
 $updateResult = Invoke-RestMethod -Uri "$BaseUrl/v1/documents/ingest" -Method Post -Body $updateBody -ContentType "application/json"
 $updateResult | ConvertTo-Json -Depth 5
 
-Write-Section "5. POST /v1/retrieve (query: 2-year -- stale content must be gone)"
-$staleBody = @{ query = "SmokeWidget-$RunId 2-year"; top_k = 5 } | ConvertTo-Json
-$staleResult = Invoke-RestMethod -Uri "$BaseUrl/v1/retrieve" -Method Post -Body $staleBody -ContentType "application/json"
-$staleResult | ConvertTo-Json -Depth 5
+# Phase 12B Codex audit fix (Major #5 follow-on): retrieval terms are now
+# combined with OR (see app/retrieval/sqlite_bm25.py::_build_safe_match_query
+# and ADR-002-retrieval-engine.md), so a query naming both the shared
+# "SmokeWidget-<id>" token and a stale term like "2-year" will still match
+# document B (the shipping policy, which only shares the SmokeWidget
+# token) even after document A's "2-year" content is replaced -- that is
+# expected, correct OR-mode behavior, not a stale-row bug. The actual
+# invariant this script checks ("no stale FTS row survives an update") is
+# tested directly instead: search broadly for the shared token, then
+# assert no returned hit's *text* still contains the old phrase, and that
+# the new phrase is present.
+Write-Section "5. POST /v1/retrieve (query: SmokeWidget token -- check for stale text)"
+$combinedBody = @{ query = "SmokeWidget-$RunId warranty"; top_k = 5 } | ConvertTo-Json
+$combinedResult = Invoke-RestMethod -Uri "$BaseUrl/v1/retrieve" -Method Post -Body $combinedBody -ContentType "application/json"
+$combinedResult | ConvertTo-Json -Depth 5
 
-Write-Section "6. POST /v1/retrieve (query: 3-year -- updated content must be found)"
-$freshBody = @{ query = "SmokeWidget-$RunId 3-year"; top_k = 5 } | ConvertTo-Json
-$freshResult = Invoke-RestMethod -Uri "$BaseUrl/v1/retrieve" -Method Post -Body $freshBody -ContentType "application/json"
-$freshResult | ConvertTo-Json -Depth 5
+$staleTextPresent = $false
+$freshTextPresent = $false
+foreach ($hit in $combinedResult.hits) {
+    if ($hit.text -like "*2-year limited warranty*") { $staleTextPresent = $true }
+    if ($hit.text -like "*3-year extended warranty*") { $freshTextPresent = $true }
+}
 
 Write-Section "Summary"
 $ingestOk = ($ingestResult.indexed -eq 2) -and ($ingestResult.rejected -eq 0)
 $retrieveOk = $retrieveResult.total_hits -ge 1
 $updateOk = $updateResult.updated -eq 1
-$staleGone = $staleResult.total_hits -eq 0
-$freshFound = $freshResult.total_hits -ge 1
+$staleGone = -not $staleTextPresent
+$freshFound = $freshTextPresent
 
 Write-Host "health.status:                 $($health.status)"
 Write-Host "ingest indexed/rejected:       $($ingestResult.indexed) / $($ingestResult.rejected)"
 Write-Host "retrieve total_hits:           $($retrieveResult.total_hits)"
 Write-Host "update status:                 $($updateResult.items[0].status)"
-Write-Host "stale content gone:            $staleGone (total_hits=$($staleResult.total_hits))"
-Write-Host "updated content found:         $freshFound (total_hits=$($freshResult.total_hits))"
+Write-Host "stale text ('2-year') absent:  $staleGone"
+Write-Host "fresh text ('3-year') present: $freshFound"
 
 if ($health.status -eq "ok" -and $ingestOk -and $retrieveOk -and $updateOk -and $staleGone -and $freshFound) {
     Write-Host ""

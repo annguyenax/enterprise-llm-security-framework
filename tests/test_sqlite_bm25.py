@@ -277,8 +277,11 @@ def test_extract_safe_terms_truncates_and_bounds_term_count():
 
 
 def test_build_safe_match_query_quotes_every_term():
+    # Phase 12B Codex audit fix (Major #5): terms are combined with
+    # explicit OR, not implicit AND -- see _build_safe_match_query's
+    # docstring for why.
     expression = _build_safe_match_query(["warranty", "NEAR"])
-    assert expression == '"warranty" "NEAR"'
+    assert expression == '"warranty" OR "NEAR"'
 
 
 def test_top_k_bounds_enforced(tmp_path):
@@ -288,3 +291,59 @@ def test_top_k_bounds_enforced(tmp_path):
         retriever.search(RetrievalQuery(query="content", top_k=100))
     with pytest.raises(ValueError):
         retriever.search(RetrievalQuery(query="content", top_k=0))
+
+
+# -- Phase 12B Codex audit regression tests ---------------------------------
+
+
+def test_extra_irrelevant_query_term_does_not_suppress_previous_match(tmp_path):
+    """Major #5: adding one extra, unrelated term to an otherwise-matching
+    query must not zero out the result -- the original implicit-AND
+    combining made this a trivial retrieval-suppression primitive."""
+    retriever = _make_retriever(tmp_path)
+    retriever.upsert_documents([(_document(), [_chunk("doc_1", 0, "warranty policy content")])])
+
+    baseline = retriever.search(RetrievalQuery(query="warranty", top_k=5))
+    assert baseline.total_hits == 1
+
+    with_extra_term = retriever.search(
+        RetrievalQuery(query="warranty completely-unrelated-absent-term-xyz", top_k=5)
+    )
+    assert with_extra_term.total_hits == 1
+
+
+def test_more_matching_terms_still_ranks_higher_under_or(tmp_path):
+    """Major #5 follow-up: switching to OR must not lose BM25's natural
+    preference for chunks that match more of the query's terms."""
+    retriever = _make_retriever(tmp_path)
+    retriever.upsert_documents(
+        [
+            (_document(document_id="doc_a", external_id="a"), [_chunk("doc_a", 0, "warranty policy renewal")]),
+            (_document(document_id="doc_b", external_id="b"), [_chunk("doc_b", 0, "warranty only")]),
+        ]
+    )
+    result = retriever.search(RetrievalQuery(query="warranty policy renewal", top_k=5))
+    assert result.total_hits == 2
+    assert result.hits[0].document_id == "doc_a"
+
+
+def test_unchanged_detection_covers_title_metadata_and_policy_fields(tmp_path):
+    """Major #3 (retriever-level slice): identical text but a changed
+    title/metadata/policy field must be reported as `updated`, and the
+    stored row must reflect the new values -- not silently ignored because
+    only content_hash was compared."""
+    retriever = _make_retriever(tmp_path)
+    original = _document(content_hash="stable-hash")
+    chunks = [_chunk("doc_1", 0, "identical chunk text")]
+    retriever.upsert_documents([(original, chunks)])
+
+    changed_metadata = DocumentRecord(
+        document_id="doc_1", external_id="ext-1", source_key="api_upload",
+        source_id="api_upload", source_type="api_upload", classification="internal",
+        trust_level="untrusted_external", title="Title", content_hash="stable-hash",
+        created_at="t1", updated_at="t2", metadata={"corrected": "yes"},
+    )
+    result = retriever.upsert_documents([(changed_metadata, chunks)])
+    assert result.items[0].status == "updated"
+    stored = retriever.get_document("doc_1")
+    assert dict(stored.metadata) == {"corrected": "yes"}

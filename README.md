@@ -410,9 +410,23 @@ retriever requires a future ADR.
 
 **Phase 12B is marked In Review, not Done**, pending a full local `pytest`
 run and a repository-wide security review in the target environment (this
-session verified 151/151 tests passing and a live smoke test in a
+session verified 165/165 tests passing and a live smoke test in a
 project-local `.venv`, but per `AGENT_RULES.md` rule 9/10 the phase is not
 declared `Done` until that verification is independently repeated).
+
+**Independent audit (Code X):** Phase 12B was independently audited after
+implementation; verdict REVISE with 5 blocking Major findings (no
+Critical), all resolved with regression tests — see
+[docs/modernization-ai-reviews/phase-12b-audit-resolution.md](docs/modernization-ai-reviews/phase-12b-audit-resolution.md).
+Notable fixes: the public ingestion endpoint could no longer be tricked
+into granting `trusted_internal` status by claiming a synthetic
+`source_key`; metadata-based trust spoofing now defeats nested/case/
+whitespace variants; re-ingesting identical text with a changed
+title/metadata now correctly updates instead of silently no-op'ing;
+environment-configured ingestion limits are now actually wired to the
+service; and retrieval no longer returns zero hits just because a query
+contains one extra irrelevant term (FTS5 term combination changed from
+AND to OR, see `ADR-002-retrieval-engine.md`).
 
 Everything before Phase 4 was documentation/data only — Phase 0–3.1 produced scaffolding, research, architecture/threat-model docs, and the synthetic benchmark (`datasets/`, `redteam/`). See [PROJECT_PLAN.md](PROJECT_PLAN.md) for the full roadmap.
 

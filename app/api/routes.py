@@ -21,6 +21,7 @@ from app.retrieval.models import IngestionDocument, RetrievalQuery
 from app.retrieval.sqlite_bm25 import (
     EmptySearchQueryError,
     FTS5UnavailableError,
+    IngestionBatchError,
     SqliteBM25Config,
     SqliteBM25Retriever,
 )
@@ -43,17 +44,15 @@ from app.schemas.responses import (
     RetrieveResponse,
 )
 from app.services.audit_logger import log_event
+from app.services.chunking import ChunkingConfig
 from app.services.gateway import run_chat
-from app.services.ingestion import IngestionService, IngestionValidationError
+from app.services.ingestion import IngestionService, IngestionServiceConfig, IngestionValidationError
 
 router = APIRouter()
 
 # Module-level singletons, matching this codebase's existing convention of
-# a global `settings` object (app/core/config.py). Construction here is
-# cheap (no I/O) -- schema creation and the FTS5 capability check are lazy
-# and happen on first actual use, inside SqliteBM25Retriever itself, not
-# at import time. A future dependency-injection refactor is not needed
-# for Phase 12B's scope. See docs/modernization-v2-architecture.md §2/§7.
+# a global `settings` object (app/core/config.py). See
+# docs/modernization-v2-architecture.md §2/§7.
 _retriever: Retriever = SqliteBM25Retriever(
     SqliteBM25Config(
         db_path=settings.retrieval_db_path,
@@ -63,7 +62,33 @@ _retriever: Retriever = SqliteBM25Retriever(
         max_top_k=settings.retrieval_max_top_k,
     )
 )
-_ingestion_service = IngestionService(_retriever)
+# Configured resource limits are wired through explicitly -- fixed per the
+# Phase 12B Codex audit (Major #4, "Configured ingestion resource limits
+# are not wired to the service"): the original code constructed
+# IngestionService with all-default IngestionServiceConfig/ChunkingConfig,
+# so RETRIEVAL_MAX_DOCUMENT_CHARS / RETRIEVAL_CHUNK_MAX_CHARS /
+# RETRIEVAL_CHUNK_OVERLAP_CHARS had no actual effect on ingestion.
+_ingestion_service = IngestionService(
+    _retriever,
+    IngestionServiceConfig(
+        max_batch_size=settings.retrieval_max_batch_size,
+        chunking=ChunkingConfig(
+            max_chunk_chars=settings.retrieval_chunk_max_chars,
+            overlap_chars=settings.retrieval_chunk_overlap_chars,
+            max_document_chars=settings.retrieval_max_document_chars,
+        ),
+    ),
+)
+
+# Eager capability/schema initialization at import time -- fixed per the
+# Phase 12B Codex audit (Minor #1, "FTS5 capability verification is
+# lazy"): the original code left initialization to the first actual
+# retrieval-dependent request, so /health could report success even
+# though retrieval could never work. This now fails at import time (i.e.
+# at application startup, since app.main imports this module) with a
+# clear FTS5UnavailableError if the local SQLite build lacks FTS5,
+# matching the project's fail-closed convention elsewhere.
+_retriever.initialize()
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -158,6 +183,22 @@ def documents_ingest(request: DocumentIngestRequest) -> DocumentIngestResponse:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except IngestionValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except IngestionBatchError as exc:
+        # Fixed per the Phase 12B Codex audit (Minor #2, "Unexpected
+        # storage exceptions lack a stable API mapping"): IngestionBatchError
+        # embeds the raw underlying database exception message for
+        # server-side logs (see app/retrieval/sqlite_bm25.py), which must
+        # never reach the HTTP response -- only a fixed, generic message
+        # plus the request_id is returned to the caller.
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ingestion failed unexpectedly (request_id={request_id}). See server logs.",
+        ) from exc
+    except Exception as exc:  # noqa: BLE001 -- deliberate safety net, see Minor #2
+        raise HTTPException(
+            status_code=500,
+            detail=f"Unexpected server error (request_id={request_id}).",
+        ) from exc
 
     return DocumentIngestResponse(
         request_id=request_id,
@@ -173,6 +214,7 @@ def documents_ingest(request: DocumentIngestRequest) -> DocumentIngestResponse:
                 status=item.status,
                 reason=item.reason,
                 chunk_count=item.chunk_count,
+                metadata_keys_stripped=item.metadata_keys_stripped,
             )
             for item in result.items
         ],
@@ -193,12 +235,18 @@ def retrieve(request: RetrieveRequest) -> RetrieveResponse:
             detail=f"top_k exceeds the configured maximum of {settings.retrieval_max_top_k}.",
         )
 
+    request_id = str(uuid.uuid4())
     try:
         result = _retriever.search(RetrievalQuery(query=request.query, top_k=request.top_k))
     except EmptySearchQueryError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except FTS5UnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 -- deliberate safety net, see Minor #2
+        raise HTTPException(
+            status_code=500,
+            detail=f"Unexpected server error (request_id={request_id}).",
+        ) from exc
 
     return RetrieveResponse(
         normalized_query=result.normalized_query,

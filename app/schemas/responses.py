@@ -48,6 +48,7 @@ class IngestionItemResponse(BaseModel):
     status: str
     reason: str | None = None
     chunk_count: int | None = None
+    metadata_keys_stripped: int = 0
 
 
 class DocumentIngestResponse(BaseModel):

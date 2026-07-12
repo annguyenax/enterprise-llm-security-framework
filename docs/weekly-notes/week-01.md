@@ -367,3 +367,60 @@ Phase 0 kickoff. Focus was entirely on scaffolding: repository structure, planni
   repository-wide security review before being declared Done. Phase 12C
   does not start automatically and requires a separate, explicit
   go-ahead.
+
+## Phase 12B Code X Audit Resolution (same week, 2026-07-11)
+
+- An independent Code X audit of implementation commit `6bfb714` returned
+  verdict REVISE: 0 Critical, 5 Major (all blocking), 4 Minor findings.
+  Every Major finding was independently re-verified against the actual
+  code before being accepted - none was accepted purely on the audit's
+  say-so, per this task's own explicit instruction not to assume the
+  audit is automatically correct.
+- All 5 Major findings fixed, each with a regression test reproducing the
+  exact scenario the audit demonstrated: (1) a public caller could claim
+  `source_key="synthetic_clean_corpus"` and be granted
+  `trust_level="trusted_internal"` - fixed by removing elevated-trust
+  policies from the table the public ingestion path resolves against;
+  (2) reserved metadata-key stripping only matched exact top-level keys,
+  so `{"nested": {"trust_level": "..."}}` or `{"Trust_Level": "..."}`
+  survived unmodified - fixed with recursive, case/whitespace-normalized,
+  depth-bounded sanitization plus an auditable stripped-key count (never
+  the stripped value); (3) re-ingesting identical text with a changed
+  title/metadata was wrongly reported `unchanged`, silently freezing
+  stale fields - fixed by widening the persistence-comparison fingerprint;
+  (4) environment-configured ingestion resource limits
+  (`RETRIEVAL_MAX_DOCUMENT_CHARS` etc.) were never actually wired into the
+  service, so they had no effect - fixed in `app/api/routes.py`; (5)
+  implicit AND term-combination meant one extra irrelevant query term
+  could zero out an otherwise-matching retrieval result, a genuine
+  false-negative/evasion primitive - FTS5 term joining changed from AND
+  to OR (`ADR-002-retrieval-engine.md` updated to document why).
+- Minor findings: eager FTS5 capability check at import time (was lazy,
+  first-request-only); safe generic error mapping for unexpected storage
+  failures (was leaking raw exception text toward the client); a test
+  cleanup fixture preventing `data/retrieval.db` from growing unbounded
+  across repeated test runs; and a partial fix for ID normalization
+  (whitespace + source_key case folded before dedup, but external_id case
+  deliberately left as-is, since a case-sensitive real-world ID scheme
+  could otherwise have two genuinely distinct documents silently merged -
+  a worse failure mode than the one being fixed, documented explicitly
+  rather than silently accepted).
+- 14 new regression tests added (83 Phase 12B tests total, up from 69);
+  full suite grew to **165/165 passing**. `scripts/smoke_test_retrieval.ps1`
+  needed updating too - its original "stale content gone" check
+  implicitly relied on the AND-only suppression semantics that finding
+  (5) removed, so it now asserts the actual invariant (no stale chunk
+  text in any returned hit) directly; re-verified against a live local
+  server after the fix.
+- Created `docs/modernization-ai-reviews/phase-12b-audit-resolution.md`
+  (full traceable record: every finding's decision/fix/regression-test/
+  rationale/residual-risk, the ingestion-atomicity and metadata-spoofing
+  and FTS5-query-safety decisions restated precisely, and a 12-point
+  acceptance-gate checklist - all PASS). No file under `app/guards/`,
+  `app/services/gateway.py`, `app/services/evaluation_runner.py`,
+  `app/services/llm_provider.py`, `datasets/`, `redteam/`,
+  `reports/evaluation/`, `report-latex-template/`, or `requirements.txt`
+  was modified; no new dependency installed; no runtime database tracked.
+- **Final recommendation: APPROVE PHASE 12B.** Phase 12C still requires a
+  separate, explicit go-ahead - audit approval is not itself that
+  go-ahead.
