@@ -39,6 +39,18 @@ class Settings:
     retrieval_chunk_max_chars: int = 800
     retrieval_chunk_overlap_chars: int = 100
     retrieval_busy_timeout_ms: int = 5000
+    # Phase 12C RAG query pipeline settings -- see
+    # docs/modernization-v2-architecture.md §6/§7 Phase 12C and
+    # app/services/rag_query.py. Deliberately separate from the Phase 12B
+    # retrieval_* settings above: POST /v1/rag/query feeds retrieved
+    # content through guards and the provider, so its own top_k bound is
+    # intentionally tighter by default than the retrieval-only debugging
+    # endpoint's.
+    rag_default_top_k: int = 5
+    rag_max_top_k: int = 20
+    rag_max_aggregate_context_chars: int = 4000
+    dlp_max_inspect_chars: int = 20_000
+    rag_return_provenance: bool = True
 
 
 def load_settings() -> Settings:
@@ -63,6 +75,11 @@ def load_settings() -> Settings:
         retrieval_chunk_max_chars=int(os.getenv("RETRIEVAL_CHUNK_MAX_CHARS", "800")),
         retrieval_chunk_overlap_chars=int(os.getenv("RETRIEVAL_CHUNK_OVERLAP_CHARS", "100")),
         retrieval_busy_timeout_ms=int(os.getenv("RETRIEVAL_BUSY_TIMEOUT_MS", "5000")),
+        rag_default_top_k=int(os.getenv("RAG_DEFAULT_TOP_K", "5")),
+        rag_max_top_k=int(os.getenv("RAG_MAX_TOP_K", "20")),
+        rag_max_aggregate_context_chars=int(os.getenv("RAG_MAX_AGGREGATE_CONTEXT_CHARS", "4000")),
+        dlp_max_inspect_chars=int(os.getenv("DLP_MAX_INSPECT_CHARS", "20000")),
+        rag_return_provenance=_str_to_bool(os.getenv("RAG_RETURN_PROVENANCE", "true")),
     )
 
 

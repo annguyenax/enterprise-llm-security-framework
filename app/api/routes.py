@@ -1,10 +1,12 @@
-"""API routes for the LLM Security Gateway through Phase 12B.
+"""API routes for the LLM Security Gateway through Phase 12C.
 
-Phase 12B adds POST /v1/documents/ingest and POST /v1/retrieve (lexical
+Phase 12B added POST /v1/documents/ingest and POST /v1/retrieve (lexical
 retrieval foundation only -- see docs/modernization-v2-architecture.md §6).
-These are NOT wired into the guarded gateway pipeline yet: POST
-/v1/rag/query does not exist until Phase 12C, and POST /v1/gateway/chat's
-behavior is unchanged from Phase 6.
+Phase 12C adds POST /v1/rag/query (Input Guard -> retrieval -> Provenance/
+Trust Guard -> RAG Context Guard -> Mock Provider -> DLP -> Output Guard,
+see app/services/rag_query.py). POST /v1/gateway/chat remains completely
+unchanged -- it still uses only caller-supplied context_chunks and never
+calls the retriever or the new pipeline.
 """
 from __future__ import annotations
 
@@ -30,6 +32,7 @@ from app.schemas.requests import (
     DocumentIngestRequest,
     InputGuardRequest,
     OutputGuardRequest,
+    RagQueryRequest,
     RAGGuardRequest,
     RetrieveRequest,
 )
@@ -39,14 +42,18 @@ from app.schemas.responses import (
     GuardDecisionResponse,
     HealthResponse,
     IngestionItemResponse,
+    ProvenanceItemResponse,
+    RagQueryResponse,
     RAGGuardResponse,
     RetrievalHitResponse,
     RetrieveResponse,
+    StageResultResponse,
 )
 from app.services.audit_logger import log_event
 from app.services.chunking import ChunkingConfig
 from app.services.gateway import run_chat
 from app.services.ingestion import IngestionService, IngestionServiceConfig, IngestionValidationError
+from app.services.rag_query import run_rag_query
 
 router = APIRouter()
 
@@ -268,4 +275,81 @@ def retrieve(request: RetrieveRequest) -> RetrieveResponse:
             )
             for hit in result.hits
         ],
+    )
+
+
+@router.post("/v1/rag/query", response_model=RagQueryResponse)
+def rag_query(request: RagQueryRequest) -> RagQueryResponse:
+    """Phase 12C: the full guarded end-to-end RAG pipeline -- Input Guard
+    -> server-side retrieval -> Provenance/Trust Guard -> RAG Context
+    Guard -> Mock Provider -> centralized DLP -> Output Guard. See
+    `app/services/rag_query.py` module docstring for the exact stage
+    order and every fail-closed stop path. This endpoint retrieves
+    context itself; the request schema (`RagQueryRequest`,
+    `extra="forbid"`) has no field for `context_chunks`, `trust_level`,
+    `classification`, `source_type`, `is_poisoned`, `expected_decision`,
+    a guard decision, or a canonical document/chunk ID -- a caller cannot
+    supply or override any of them.
+    """
+    request_id = str(uuid.uuid4())
+    top_k = request.top_k or settings.rag_default_top_k
+    if top_k > settings.rag_max_top_k:
+        raise HTTPException(
+            status_code=400,
+            detail=f"top_k exceeds the configured maximum of {settings.rag_max_top_k}.",
+        )
+
+    try:
+        result = run_rag_query(
+            query=request.query, top_k=top_k, retriever=_retriever, request_id=request_id,
+        )
+    except EmptySearchQueryError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FTS5UnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 -- deliberate safety net, matches Minor #2 convention
+        raise HTTPException(
+            status_code=500,
+            detail=f"Unexpected server error (request_id={request_id}).",
+        ) from exc
+
+    provenance = (
+        [
+            ProvenanceItemResponse(
+                document_id=item.document_id,
+                chunk_id=item.chunk_id,
+                title=item.title,
+                source_type=item.source_type,
+                classification=item.classification,
+                trust_level=item.trust_level,
+                rank=item.rank,
+                retrieval_score=item.retrieval_score,
+                status=item.status,
+                reason_code=item.reason_code,
+            )
+            for item in result.provenance
+        ]
+        if settings.rag_return_provenance
+        else []
+    )
+
+    return RagQueryResponse(
+        request_id=result.request_id,
+        decision=result.final_decision,
+        answer=result.answer,
+        retrieved_count=result.retrieved_count,
+        accepted_context_count=result.accepted_context_count,
+        rejected_context_count=result.rejected_context_count,
+        provenance=provenance,
+        stage_results=[
+            StageResultResponse(
+                stage=sr.stage, decision=sr.decision, reason_code=sr.reason_code, detail=sr.detail
+            )
+            for sr in result.stage_results
+        ],
+        redaction_count=result.redaction_count,
+        latency_ms=result.latency_ms.get("total", 0.0),
+        provider_called=result.provider_called,
+        stop_reason=result.stop_reason,
+        error_category=result.error_category,
     )

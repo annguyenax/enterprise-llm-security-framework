@@ -42,8 +42,33 @@ uvicorn app.main:app --reload
 powershell -ExecutionPolicy Bypass -File scripts/smoke_test_retrieval.ps1
 ```
 
+- `smoke_test_rag_pipeline.ps1` (**Phase 12C**) exercises `POST
+  /v1/rag/query` end to end against a running server: ingests one benign
+  document and two documents containing indirect-prompt-injection text,
+  runs a benign query (expects `allow`, provenance returned, the DLP
+  stage present in `stage_results`), a mixed query (expects the poisoned
+  document excluded from `accepted_context_count`), an all-poisoned
+  query (expects `stop_reason=all_context_blocked` and
+  `provider_called=false`), and a direct-injection query (expects
+  `stop_reason=input_blocked` before retrieval), then reconfirms `POST
+  /v1/gateway/chat` is unaffected. Documented, known limitation: it
+  cannot demonstrate live secret redaction in a provider response,
+  because the default Mock LLM Provider never echoes retrieved chunk
+  text into its deterministic output — that exact scenario is covered
+  instead by `tests/test_dlp_guard.py` and `tests/test_rag_pipeline.py`
+  using a scripted offline provider double. Same scratch-database usage
+  pattern as `smoke_test_retrieval.ps1`:
+
+```powershell
+$env:RETRIEVAL_DB_PATH = "$env:TEMP\smoke-rag-pipeline.db"
+uvicorn app.main:app --reload
+# in a second shell:
+powershell -ExecutionPolicy Bypass -File scripts/smoke_test_rag_pipeline.ps1
+```
+
 No evaluation script calls an LLM API, vector database, or external service.
-`smoke_test_retrieval.ps1` uses only Python's standard-library `sqlite3`
-(via the running server) and never touches `datasets/`/`redteam/`. Any
-future paid API call still requires explicit approval under
-`AGENT_RULES.md` rule 4.
+`smoke_test_retrieval.ps1` and `smoke_test_rag_pipeline.ps1` use only
+Python's standard-library `sqlite3` and the offline Mock LLM Provider (via
+the running server), and never touch `datasets/`/`redteam/`. Any future
+paid API call still requires explicit approval under `AGENT_RULES.md`
+rule 4.

@@ -564,6 +564,76 @@ and requires a separate, explicit go-ahead. It also remains gated on
 Phase 12B actually reaching `Done` via an independent re-audit PASS, which
 has not yet occurred.
 
+**Note on sequencing:** the project owner gave an explicit go-ahead to
+start Phase 12C implementation (see below) before that Phase 12B
+independent re-audit PASS was obtained. This is recorded transparently
+here rather than silently contradicting the note above — Phase 12B's own
+status (`In Review`, not `Done`) is unchanged by Phase 12C starting; both
+phases remain gated on their own independent audits before either is
+declared `Done`.
+
+## Phase 12C — RAG Query Service, Provenance, and Centralized DLP — **Status: In Review**
+
+| Task | Owner | Status |
+|---|---|---|
+| Typed pipeline result contracts | Nguyen Van An | Done - `app/core/pipeline.py` (`StageResult`, `ProvenanceSummary`, `RagPipelineResult`). `GuardProfile` ablation config explicitly deferred to Phase 12E per its own docstring, not silently omitted. |
+| Provenance/Trust Guard | Le Dinh Nghia | Done - `app/guards/provenance_guard.py`: three fixed allow-lists (`trust_level`/`classification`/`source_type`) matching `app/core/source_policy.py`'s real values, fail-closed on anything else (including the `untrusted_unknown`/`unverified` fallback pair); reads only server-assigned `RetrievalHit` fields, never request input. |
+| Centralized DLP | Both | Done - `app/guards/dlp_guard.py`: canary secret, OpenAI/AWS/GitHub key shapes, PEM private-key blocks, bearer tokens, secret-assignment patterns; bounded input size; `app/guards/output_guard.py` and `app/services/audit_logger.py` now import their shared patterns from here instead of duplicating them (behavior-preserving, regression-tested). |
+| End-to-end pipeline orchestration | Nguyen Van An | Done - `app/services/rag_query.py`: Input Guard -> retrieval -> Provenance/Trust Guard -> RAG Context Guard (per chunk + bounded aggregate pass) -> Mock Provider -> DLP -> Output Guard -> audit, with every stop path fail-closed and guard exceptions mapped to a safe `block` instead of an unhandled exception. |
+| Multi-chunk coordination decision | Both | Done (explicit decision, per Phase 12A audit resolution's requirement) - implemented as a bounded, deterministic aggregate inspection (final accepted chunks' bounded excerpts, capped total 4000 chars by default, re-run through the existing unmodified RAG Context Guard as one synthetic chunk). Reduces but does not eliminate multi-chunk risk; no new ML detector added. Named test: `tests/test_rag_pipeline.py::test_multi_chunk_coordination_is_caught_by_the_aggregate_check`. |
+| API endpoint | Nguyen Van An | Done - `POST /v1/rag/query` added to `app/api/routes.py`; strict request schema (`RagQueryRequest`, `extra="forbid"`, no `context_chunks`/trust/classification/source_type/`is_poisoned`/`expected_decision`/guard-decision/ID fields); `POST /v1/gateway/chat` and all Phase 0-12B endpoints unchanged (regression-tested). |
+| Configuration | Le Dinh Nghia | Done - `app/core/config.py`: `rag_default_top_k` (5), `rag_max_top_k` (20), `rag_max_aggregate_context_chars` (4000), `dlp_max_inspect_chars` (20000), `rag_return_provenance` (true); all defaulted, `Settings(...)` backward compatibility preserved. |
+| Tests | Both | Done - `tests/test_provenance_guard.py` (11), `tests/test_dlp_guard.py` (13), `tests/test_rag_pipeline.py` (32), `tests/test_rag_query_routes.py` (23) = 79 new Phase 12C tests (267 total, up from 188). |
+| Smoke test | Both | Done - `scripts/smoke_test_rag_pipeline.ps1`: ingest benign + 2 poisoned docs, benign/mixed/all-poisoned/direct-injection queries, `/v1/gateway/chat` regression check; run live against `uvicorn` on a scratch `RETRIEVAL_DB_PATH` this session - **PASSED**. Documents (does not fake) one live-untestable scenario: the deterministic Mock LLM Provider never echoes retrieved content, so live secret-redaction-in-response cannot be demonstrated against a real server; that exact case is covered by `tests/test_dlp_guard.py`/`tests/test_rag_pipeline.py` with a scripted provider double instead. |
+| Documentation | Both | Done - `README.md`, `app/README.md`, `tests/README.md`, `scripts/README.md`, `TASK_BOARD.md`, `docs/weekly-notes/week-01.md` updated. |
+
+**Validation (this session):** `python -m py_compile` clean on every new/
+changed file. `pytest -q` with an explicit writable `--basetemp` (shared
+environment's default temp dir has a pre-existing, unrelated permissions
+issue - see `tests/README.md`): **267 passed** (188 pre-Phase-12C + 79
+new Phase 12C tests), zero failures, zero behavior changes to any
+existing test. Live smoke test (`scripts/smoke_test_rag_pipeline.ps1`)
+run against a real `uvicorn` server on a scratch database - **PASSED**,
+including the direct-injection-blocks-before-retrieval path, the
+all-poisoned-documents-blocks-before-provider path, and the
+`/v1/gateway/chat` regression check. `git diff --name-only` confirmed no
+file under `datasets/`, `redteam/`, `reports/evaluation/`,
+`report-latex-template/` was touched; `requirements.txt` unchanged (no
+new dependency - `dlp_guard.py`'s detectors are plain `re` patterns, same
+as every other guard); `git ls-files "*.db" "*.sqlite" "*.sqlite3"`
+returned empty (no runtime database tracked). No network call is made
+anywhere in the new code - the Mock LLM Provider remains fully offline.
+
+**Scope discipline:** allowed-file additions were new Phase 12C modules
+(`app/core/pipeline.py`, `app/guards/provenance_guard.py`,
+`app/guards/dlp_guard.py`, `app/services/rag_query.py`), plus targeted
+edits to `app/api/routes.py`, `app/core/config.py`,
+`app/schemas/requests.py`, `app/schemas/responses.py`, and (for DLP
+pattern consolidation only, behavior-preserving and regression-tested)
+`app/guards/output_guard.py` and `app/services/audit_logger.py`.
+`app/guards/rag_guard.py` was **not** modified - its own `FAKE_SECRET_PATTERN`
+copy was left in place, since touching it was not necessary for a safe
+integration (only `output_guard.py`/`audit_logger.py` were named in
+`docs/modernization-v2-architecture.md` §5's consolidation target). No
+file under `app/guards/input_guard.py`, `app/services/gateway.py`,
+`app/services/evaluation_runner.py`, `app/services/llm_provider.py`,
+`datasets/`, `redteam/`, `reports/evaluation/`, `report-latex-template/`,
+or `requirements.txt` was modified. No vector database, embedding model,
+external LLM API, semantic guard model, dashboard, or Phase 12D benchmark
+data was added.
+
+**Marked In Review, not Done** (per `AGENT_RULES.md` rule 9/10): this
+session's own implementation and verification (above) is thorough, but
+per this task's own explicit instruction, Phase 12C is not declared
+`Done` until a maintainer independently repeats verification and an
+independent security audit passes - matching the same process already
+applied to Phase 12A and Phase 12B.
+
+**Next phase:** Phase 12D — Benchmark v2 Generation and Freeze. Per
+`AGENT_RULES.md` rule 12, Phase 12D does not start automatically and
+requires a separate, explicit go-ahead; per this task's own explicit
+instruction, this session stops here and does not begin Phase 12D work.
+
 ## Notes
 
 ### Phase 5.1 - RAG Guard Red-team Hardening - **Status: Done**

@@ -2,7 +2,7 @@
 
 **Xây dựng Hệ thống Bảo mật LLM Chống Tấn công Prompt Injection và Data Poisoning trong Môi trường Doanh nghiệp**
 
-> Status: **Phase 10 - Final LaTeX report integration (In Review).** The lab-scale gateway, guards, offline mock provider, controlled evaluation harness, and final report content are integrated. This is a university internship proof-of-concept (PoC), not a production system.
+> Status: **Phase 10 (v1 report track) In Review; v2 modernization wave now at Phase 12C - End-to-End RAG Security Pipeline (In Review).** The lab-scale gateway, guards, offline mock provider, controlled v1 evaluation harness, and final v1 report content are integrated (Phase 0-10). The separate v2 modernization wave (Phase 12A-12H, see `TASK_BOARD.md`) has since added real SQLite FTS5/BM25 retrieval, server-controlled provenance, and a guarded end-to-end RAG pipeline. This is a university internship proof-of-concept (PoC), not a production system.
 
 ## Project Summary
 
@@ -409,12 +409,13 @@ retriever requires a future ADR.
 **Known limitations (not bugs):**
 - Lexical/keyword retrieval only — no semantic similarity, no embeddings,
   no vector database (deferred to optional Phase 12F, its own future ADR).
-- No `POST /v1/rag/query` yet — retrieval is not connected to any guard or
-  the LLM provider. That is Phase 12C.
+- Retrieval is now connected to a guard pipeline via `POST /v1/rag/query`
+  (Phase 12C, see below) — `POST /v1/gateway/chat` itself still does not
+  use retrieval, unchanged since Phase 6.
 - No real LLM call anywhere in this repository.
 - Not production-ready: no production claim, no real-world detection-rate
   claim, evaluated only on synthetic content created during manual testing
-  (Phase 12B has no benchmark of its own — that is Phase 12D/12E).
+  (Phase 12B/12C have no benchmark of their own — that is Phase 12D/12E).
 
 **Phase 12B is marked In Review, not Done**, pending an independent
 re-audit of the latest resolution pass returning PASS (this session
@@ -444,6 +445,86 @@ instead of Python characters, and a bounded, iterative
 (non-recursive) preflight now rejects pathologically deep or cyclic
 metadata with a controlled error instead of an unhandled
 `RecursionError`.
+
+### Phase 12C End-to-End RAG Security Pipeline (In Review)
+
+Phase 12C adds `POST /v1/rag/query`: Input Guard → server-side retrieval
+(Phase 12B) → Provenance/Trust Guard → RAG Context Guard (per chunk, then
+a bounded aggregate pass) → Mock LLM Provider → centralized DLP → Output
+Guard → structured audit → safe response. `POST /v1/gateway/chat` is
+**unchanged** — it still only ever uses caller-supplied `context_chunks`
+and never calls the retriever or this new pipeline.
+
+**Query** (server retrieves context itself — the request has no field for
+`context_chunks`, `trust_level`, `classification`, `source_type`,
+`is_poisoned`, `expected_decision`, a guard decision, or a canonical
+document/chunk ID; `extra="forbid"` rejects any attempt to add one):
+
+```powershell
+$body = @{ query = "What is the Aurora Widget's warranty period?"; top_k = 5 } | ConvertTo-Json
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/v1/rag/query" -Method Post -Body $body -ContentType "application/json"
+```
+
+**Smoke test** (ingest a benign + two poisoned documents, exercise every
+stop path against a live server):
+
+```powershell
+$env:RETRIEVAL_DB_PATH = "$env:TEMP\smoke-rag-pipeline.db"
+uvicorn app.main:app --reload
+# in a second shell:
+powershell -ExecutionPolicy Bypass -File scripts/smoke_test_rag_pipeline.ps1
+```
+
+**Provenance/Trust Guard** (`app/guards/provenance_guard.py`): three
+fixed allow-lists (`trust_level`, `classification`, `source_type`)
+matching exactly the values `app/core/source_policy.py`'s real policies
+produce — fails closed on anything else, including the
+`untrusted_unknown`/`unverified` fallback pair. A caller cannot influence
+this decision; it reads only a retrieved hit's server-assigned fields.
+Trust does not prove content safety — an accepted, even
+`trusted_internal`, chunk still goes through the same content-based RAG
+Context Guard afterward; a compromised high-trust source remains a
+documented residual risk.
+
+**Multi-chunk coordination decision** (required by the Phase 12A audit
+resolution, Grok Critical 2): implemented as a bounded, deterministic
+**aggregate inspection** — the final accepted chunks' bounded excerpts
+(capped total, default 4000 chars) are joined and re-run through the
+same, unmodified RAG Context Guard as one synthetic chunk, catching an
+instruction split across chunks that no single chunk's inspection alone
+would trip. This reduces, but does not eliminate, multi-chunk
+coordination risk — no new ML detector was added.
+
+**Centralized DLP** (`app/guards/dlp_guard.py`): deterministic regex
+detectors (canary secret, OpenAI/AWS/GitHub key shapes, PEM private-key
+blocks, bearer tokens, `key: value`/`key=value` secret assignments)
+redact the provider's output before the Output Guard or the API response
+see it. This module is also now the single source of the secret patterns
+previously duplicated in `app/guards/output_guard.py` and
+`app/services/audit_logger.py` — both now import from it; their own
+matching/decision behavior is unchanged (verified by regression tests
+comparing redaction output before and after consolidation).
+
+**Fail-closed stop paths:** input blocked, retrieval failed (safe 400/503,
+matching `POST /v1/retrieve`'s existing convention), no retrieval hits
+(safe `allow`/no-answer, not an error), all hits rejected by provenance,
+all/aggregate-blocked by the RAG Context Guard, provider failure, DLP
+processing failure, output blocked, and an unexpected-internal-failure
+safety net — every path returns a safe, structured response (never a raw
+exception), and a guard-stage exception fails closed to `block` rather
+than crashing or silently passing content through.
+
+**Response is safe by default:** no full retrieved chunk text — only a
+per-hit provenance summary (document/chunk ID, title, source_type,
+classification, trust_level, rank, score, accepted/rejected status, a
+safe reason code).
+
+**Not yet independently audited.** 79 new tests were added this phase
+(267/267 total passing); see
+[tests/README.md](tests/README.md) and [app/README.md](app/README.md)
+for the full stage-by-stage design and test breakdown. **Phase 12C is
+marked In Review, not Done** — an independent audit, matching the process
+already applied to Phase 12A/12B, has not yet occurred.
 
 Everything before Phase 4 was documentation/data only — Phase 0–3.1 produced scaffolding, research, architecture/threat-model docs, and the synthetic benchmark (`datasets/`, `redteam/`). See [PROJECT_PLAN.md](PROJECT_PLAN.md) for the full roadmap.
 

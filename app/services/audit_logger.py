@@ -17,16 +17,28 @@ from typing import Any
 
 from app.core.config import settings
 from app.core.decisions import Decision
+from app.guards.dlp_guard import (
+    AWS_KEY_PATTERN,
+    FAKE_SECRET_PATTERN,
+    GITHUB_TOKEN_PATTERN,
+    OPENAI_KEY_PATTERN,
+    PRIVATE_KEY_BLOCK_PATTERN,
+)
 from app.schemas.responses import GuardDecisionResponse, RAGGuardResponse
 
 _WRITE_LOCK = threading.Lock()
 
+# Phase 12C centralization: these five patterns are now defined once in
+# app/guards/dlp_guard.py (per docs/modernization-v2-architecture.md §5)
+# instead of being redefined here. Same regex source and flags as before
+# this change -- see tests/test_dlp_guard.py's
+# test_audit_logger_redaction_unchanged_after_consolidation.
 _SECRET_PATTERNS: tuple[re.Pattern[str], ...] = (
-    re.compile(r"FAKE-SECRET-0000-EXAMPLE(-[A-Z-]+)?", re.IGNORECASE),
-    re.compile(r"\bsk-[A-Za-z0-9]{16,}\b"),
-    re.compile(r"\bAKIA[A-Z0-9]{12,}\b"),
-    re.compile(r"\bghp_[A-Za-z0-9]{20,}\b"),
-    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.DOTALL),
+    FAKE_SECRET_PATTERN,
+    OPENAI_KEY_PATTERN,
+    AWS_KEY_PATTERN,
+    GITHUB_TOKEN_PATTERN,
+    PRIVATE_KEY_BLOCK_PATTERN,
 )
 
 

@@ -11,14 +11,18 @@ import re
 from dataclasses import dataclass
 
 from app.core.decisions import Decision, most_severe
+from app.guards.dlp_guard import FAKE_SECRET_PATTERN, OUTPUT_GUARD_REALISTIC_SECRET_PATTERN
 from app.schemas.responses import GuardDecisionResponse
 
 REDACTED = "[REDACTED]"
 
-# The one fixed fake-secret format used across this project's synthetic
-# benchmark (see datasets/poisoned/fake-secret-leak.md and
-# docs/dataset/dataset-validation-report.md §9). Never a real vendor format.
-FAKE_SECRET_PATTERN = re.compile(r"FAKE-SECRET-0000-EXAMPLE(-[A-Z-]+)?", re.IGNORECASE)
+# FAKE_SECRET_PATTERN is re-exported (imported above, not redefined) from
+# app/guards/dlp_guard.py -- Phase 12C centralization per
+# docs/modernization-v2-architecture.md §5. Kept as a module attribute
+# here for backward-compatible `from app.guards.output_guard import
+# FAKE_SECRET_PATTERN` imports; the regex source and matching behavior
+# are unchanged -- see tests/test_dlp_guard.py's consolidation-parity
+# tests.
 
 
 @dataclass(frozen=True)
@@ -45,7 +49,7 @@ RULES: tuple[Rule, ...] = (
     ),
     Rule(
         "output-realistic-api-key", "sensitive_information_disclosure",
-        _rx(r"\bsk-[A-Za-z0-9]{16,}\b|\bAKIA[A-Z0-9]{12,}\b|\bghp_[A-Za-z0-9]{20,}\b|-----BEGIN [A-Z ]*PRIVATE KEY-----"),
+        OUTPUT_GUARD_REALISTIC_SECRET_PATTERN,
         Decision.BLOCK, 0.95,
         "Detected a realistic-looking API key / access token / private-key pattern in the output.",
         redact=True,
