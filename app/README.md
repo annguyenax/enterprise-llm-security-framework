@@ -86,12 +86,24 @@ Python's standard-library `sqlite3` module (no new dependency):
   containing a reserved key is caught just like a plain nested dict is),
   matching case/whitespace/hyphen/underscore variants of the reserved key
   names, up to a bounded nesting depth beyond which the metadata is
-  rejected outright. The configured metadata size limit is enforced
-  against the raw, caller-submitted metadata *before* any stripping
-  happens, so a large value cannot evade the limit merely by being placed
-  under a key that sanitization would remove. Unknown `source_key` values
-  are rejected, not silently downgraded to a low-trust policy - see
-  `core/source_policy.py`'s module docstring for the documented rationale.
+  rejected outright. Before any of that recursive handling runs, an
+  **iterative, non-recursive preflight** (an explicit stack, not Python
+  function-call recursion) validates raw metadata structure, type, and
+  nesting depth, and rejects direct Python object-identity cycles
+  (reachable only via a direct service-level call - HTTP JSON can never
+  contain a cycle) - this bounds traversal before `json.dumps` or the
+  recursive sanitizer ever run, so a pathologically deep structure
+  (verified to ~900 levels) is rejected in a bounded number of steps
+  instead of raising an unhandled `RecursionError`. The configured
+  metadata size limit is enforced against the raw, caller-submitted
+  metadata *before* any stripping happens (so a large value cannot evade
+  the limit merely by being placed under a key that sanitization would
+  remove), and is measured as the actual **UTF-8 encoded byte length** of
+  a deterministically-serialized form - not a Python character count,
+  which under-counts multi-byte content such as Vietnamese text or emoji.
+  Unknown `source_key` values are rejected, not silently downgraded to a
+  low-trust policy - see `core/source_policy.py`'s module docstring for
+  the documented rationale.
 
 Query text is never concatenated raw into an FTS5 `MATCH` expression: user
 queries are tokenized into plain lexical terms and each term is

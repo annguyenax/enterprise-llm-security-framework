@@ -14,8 +14,23 @@
   documented rationale) and one further tightened this pass
 - **Re-audit reviewed commits:** original implementation `6bfb7147a080346b1879bd8e05fd04efec5f36c5`,
   first-pass fix `04f68dd9fda9f8e58553fad844a27384de96aa21`
-- **Final resolution date:** 2026-07-11 (same day, second pass)
+- **Second resolution date:** 2026-07-11 (same day, second pass)
+- **Final re-audit file:** `docs/modernization-ai-reviews/codex-phase-12b-final-reaudit.md`
+- **Final re-audit verdict:** REVISE — 1 remaining blocking Major finding
+  (metadata-size measurement used a Python character count instead of a
+  UTF-8 byte count, and neither `json.dumps` nor the recursive depth/
+  sanitize helpers had any bound checked before running, so a
+  sufficiently deep structure raised an unhandled `RecursionError`
+  instead of a controlled rejection), 0 Critical, all previously-resolved
+  Major/Minor findings reconfirmed unaffected
+- **Third (final) resolution date:** 2026-07-12
 - **Resolution branch:** `phase-12b-retrieval-foundation`
+- **Current status: NOT DONE.** This pass resolves the final re-audit's
+  reported findings and adds the required regression coverage, but per
+  this task's explicit instruction the phase is **not** marked complete
+  here — see "Final recommendation" below (READY FOR FINAL RE-AUDIT, not
+  Done). An independent re-audit of this pass's diff is still required
+  before Phase 12B can be considered closed.
 
 The original audit reported **zero Critical issues**, **5 Major issues**
 (all marked blocking), and **4 Minor issues** (all marked non-blocking).
@@ -152,11 +167,139 @@ None reported by the audit. Nothing to resolve.
   is known; the recursion now covers every JSON-compatible container type
   uniformly rather than special-casing specific combinations, which is
   what allowed the list-of-list gap to exist in the first place.
-- **Resolution status:** Resolved and regression-tested (confirmed only
-  after this pass — the original "Resolved" status recorded during the
-  first audit was inaccurate and has been corrected in place, per the
-  instruction not to claim resolution before code and tests actually
-  demonstrate it).
+- **Resolution status (as of the second pass):** Believed resolved and
+  regression-tested at the time — **superseded by the findings below**,
+  reported by the independent final re-audit against this exact fix.
+
+#### Major #2 (continued) — final re-audit findings: byte-vs-character size, unbounded recursion
+
+- **Code X evidence (final re-audit,
+  `docs/modernization-ai-reviews/codex-phase-12b-final-reaudit.md`,
+  verdict REVISE):** two residual bugs in the second-pass fix above:
+  1. **Byte-vs-character size measurement.** The raw-metadata size check
+     used `len(json.dumps(raw_metadata, ensure_ascii=False))`, which is a
+     Python **character** count, not a **byte** count. Multi-byte UTF-8
+     content (Vietnamese text, emoji) is under-counted: the reviewer's
+     example metadata object serialized to 2,412 UTF-8 bytes but measured
+     as only ~1,212 characters — passing the nominal 2,000-character limit
+     it should have failed against an equivalent byte limit.
+  2. **Unbounded recursion before any bound was checked.** Both
+     `json.dumps(...)` and the recursive `_metadata_depth`/
+     `_sanitize_metadata` helpers were called directly against
+     caller-supplied metadata with no prior bound check. A sufficiently
+     deep structure (reviewer's probe: ~900 nested lists) exceeded
+     Python's recursion limit inside `json.dumps` itself, raising an
+     unhandled `RecursionError` (surfacing as an unmapped HTTP 500)
+     instead of the intended controlled rejection.
+- **Decision:** Accepted — both are genuine gaps in the previous fix, not
+  disputed.
+- **Final fix applied (this pass, 2026-07-12):**
+  - Added `_preflight_metadata()` (`app/services/ingestion.py`): an
+    **iterative, explicit-stack-based** (never recursive)
+    structure/type/cycle/depth check that runs **before** any
+    `json.dumps` call or recursive traversal. It traverses dicts and
+    lists with a `list`-as-stack of `(value, depth, ancestor_ids)`
+    entries — so traversal depth is bounded by loop iterations, not by
+    the Python call stack — and rejects: non-string dict keys, NaN/
+    Infinity floats, any non-JSON-compatible type, structures whose depth
+    would exceed `MAX_METADATA_DEPTH` (both dict-value and list-item
+    descent count, matching `_metadata_depth`'s existing semantics), and
+    direct Python object-identity cycles (an ancestor container
+    re-visited on the *current* traversal path — tracked as a `tuple` of
+    `id()`s per path, not a global "seen" set, so legitimate shared/
+    repeated sub-objects at sibling positions are never mistaken for a
+    cycle). A structure exceeding the depth bound is rejected after a
+    handful of stack pops (as soon as one branch's depth would exceed the
+    limit), not by exhausting the traversal.
+  - Added `_metadata_byte_size()`: serializes already-preflighted
+    metadata deterministically (`json.dumps(..., ensure_ascii=False,
+    sort_keys=True, separators=(",", ":"))`) and returns
+    `len(serialized.encode("utf-8"))` — the actual UTF-8 byte length, not
+    a character count. `MAX_METADATA_JSON_CHARS` was renamed to
+    `MAX_METADATA_JSON_BYTES` (still 2000) to make the unit explicit in
+    the name itself, not just the docstring.
+  - `IngestionService.ingest_batch`'s per-document metadata handling was
+    reordered to the required pipeline: (1) iterative preflight
+    (structure/cycle/type/depth), (2) deterministic raw JSON
+    serialization, (3) UTF-8 byte-size enforcement against
+    `MAX_METADATA_JSON_BYTES`, (4) recursive `_sanitize_metadata` (now
+    provably safe, since (1) already bounds depth before it runs), (5)
+    persistence, (6) the existing safe (counts/status-only) audit event.
+    The standalone raw-depth check that previously called
+    `_metadata_depth(raw_metadata) > MAX_METADATA_DEPTH` directly was
+    removed as redundant — `_preflight_metadata` now performs that check
+    iteratively before either `json.dumps` or `_sanitize_metadata` ever
+    run. `_metadata_depth` itself was **not** removed (existing direct
+    unit tests still call it, and it is still useful as a standalone
+    depth-measurement utility).
+  - Defensive `RecursionError` catches remain around `_metadata_byte_size`
+    and `_sanitize_metadata` as a **safety net only** — since
+    `_preflight_metadata` already bounds depth/cycles/type before either
+    runs, these should never actually fire in practice, but a gap in the
+    preflight can then never surface as an unhandled 500; it degrades to
+    the same safe, generic rejection message instead (no internal detail
+    leaked).
+- **Files and functions changed:** `app/services/ingestion.py` only
+  (`_preflight_metadata` new; `_metadata_byte_size` new;
+  `MAX_METADATA_JSON_CHARS` renamed `MAX_METADATA_JSON_BYTES`;
+  `ingest_batch`'s metadata-handling block reordered and wrapped with
+  defensive `RecursionError` handling).
+- **Regression tests added (`tests/test_ingestion.py`, all new this
+  pass):** `test_utf8_byte_size_correctly_measured_for_vietnamese_text`
+  (Regression A — Vietnamese text under the old character limit but over
+  the real byte limit), `test_metadata_byte_size_boundary_exact_and_over_by_one`
+  (Regression B — exact-boundary and one-byte-over behavior using the
+  service's own deterministic serialization rule),
+  `test_preflight_rejects_900_level_nested_list_without_recursion_error`
+  and `test_service_rejects_900_level_nested_list_without_recursion_error`
+  (Regression C — the reviewer's exact ~900-level probe, at both the
+  helper and service level, confirming no `RecursionError` escapes),
+  `test_preflight_rejects_deep_mixed_dict_list_nesting` (Regression D —
+  alternating dict/list nesting above `MAX_METADATA_DEPTH`),
+  `test_preflight_rejects_direct_cyclic_metadata_without_hanging` and
+  `test_service_rejects_direct_cyclic_metadata_without_hanging`
+  (Regression E — a directly-constructed self-referential dict, only
+  reachable via a direct Python/service call since HTTP JSON cannot
+  contain a cycle), `test_repeated_shared_immutable_values_are_not_mistaken_for_cycles`
+  (proves legitimately repeated/shared sub-objects are accepted, not
+  false-positively rejected as cyclic),
+  `test_deep_nesting_and_oversize_rejections_do_not_leak_raw_metadata_in_audit_log`
+  (Regression G — both new rejection paths log only safe status/count
+  fields, never the submitted value). Also added in
+  `tests/test_retrieval_routes.py`: the existing
+  `test_public_ingestion_strips_prohibited_key_inside_list_of_list` was
+  extended to cover all four reserved keys (`trust_level`, `is_poisoned`,
+  `expected_decision`, `security_decision` — Regression F, previously
+  only two of the four were exercised at the HTTP level),
+  `test_ingest_rejects_utf8_oversized_metadata_via_route` and
+  `test_ingest_rejects_deeply_nested_metadata_via_route_without_500`
+  (HTTP-level confirmation that both new rejection paths are reachable
+  through the real route, not only the service layer directly — the
+  deep-nesting route test uses a moderate depth well below any client-
+  side JSON-encoding recursion limit, so it isolates the *server's*
+  handling rather than the test client's own request serialization; the
+  full ~900-level case is exercised at the service level instead, which
+  calls `ingest_batch` directly with an already-constructed Python
+  object).
+- **Rationale:** Confined to `app/services/ingestion.py`'s metadata
+  handling and its own test coverage — no architectural change, no new
+  dependency (the iterative preflight is plain Python using a `list` as
+  an explicit stack). The processing-order change (preflight before
+  serialization/sanitization) is required by the finding itself, not an
+  independent design choice.
+- **Residual risk:** `MAX_METADATA_JSON_BYTES=2000` and
+  `MAX_METADATA_DEPTH=6` remain fixed constants, not configurable via
+  `Settings` (same accepted limitation as the prior pass). The cycle
+  check only guards direct Python/service-level callers, by design (HTTP
+  JSON bodies cannot contain a cycle, since `json.loads` only ever builds
+  a tree) — this is a completeness statement, not a gap. No further
+  metadata-traversal, size-measurement, or recursion-safety bypass is
+  known as of this pass.
+- **Resolution status:** Resolved and regression-tested this pass (final
+  re-audit's two findings). Per this task's instructions, this document
+  records the fix and evidence but does **not** independently declare
+  this final pass "PASS" without another independent re-audit — see
+  "Final recommendation."
 
 ### Major #3 — "Unchanged" detection ignores mutable and security-relevant state
 
@@ -311,11 +454,27 @@ None reported by the audit. Nothing to resolve.
   environment override does not, since `app.core.config.settings` is
   built once at first import and cached in `sys.modules`) because it
   replaces the already-constructed objects directly. No other route reads
-  those two names, so this has no effect outside this test module. The
-  route tests genuinely no longer touch `data/retrieval.db` at all — this
-  was directly verified by running the test file and then querying
-  `data/retrieval.db` for a document count (0, only the empty schema the
-  application itself creates on any startup).
+  those two names, so this has no effect outside this test module.
+  **Final re-audit fix (Section 5, this pass):** the previous wording
+  above ("the route tests genuinely no longer touch `data/retrieval.db`
+  at all") overclaimed — it was true only for *this module's own test
+  documents*, not for the *eager schema-creation side effect* of
+  `app/api/routes.py` calling `_retriever.initialize()` at import time
+  (Minor #1), which could still create an empty, schema-only
+  `data/retrieval.db` on disk the moment any test module in the session
+  first imported `app.main`, before this fixture ever ran, if that
+  happened to be a different, earlier-collected test file. `tests/conftest.py`
+  (new this pass) now sets `RETRIEVAL_DB_PATH` to a per-session temporary
+  path at collection time, before any test module in the directory is
+  imported — pytest loads `conftest.py` before importing sibling test
+  modules, which is what makes this reliable regardless of which test
+  file imports `app.main` first, unlike setting the same environment
+  variable inside an individual test file (too late, since
+  `app.core.config.settings` is a module-level singleton built once at
+  first import and cached in `sys.modules`). With this fix, the full test
+  session never touches the repository's `data/retrieval.db` at all —
+  verified by running the full suite and then confirming
+  `data/`/`*.db` do not exist afterward (see Validation section).
 
 ### Deferred
 
@@ -354,11 +513,12 @@ fix above:
   mutation. Route-level batch-size overflow returns `400`. Inside
   `IngestionService.ingest_batch`, all per-document validations run and
   prepare valid items *before* any database mutation begins, in this
-  explicit order (re-audit fix: the raw metadata's JSON size and
-  structure are now validated **before** sanitization, not after — see
-  Major #2): duplicate-in-batch → unknown/internal-only source key → raw
-  metadata JSON-compatibility and size → raw metadata nesting depth →
-  metadata sanitization → chunking/document-length limits.
+  explicit order (final re-audit fix — see Major #2 continued):
+  duplicate-in-batch → unknown/internal-only source key → iterative,
+  non-recursive raw metadata structure/cycle/type/depth preflight →
+  deterministic raw JSON serialization → UTF-8 byte-size enforcement →
+  recursive metadata sanitization (now safe, since preflight already
+  bounds depth) → chunking/document-length limits.
 - **Duplicate behavior:** For duplicate `(normalized_source_key,
   normalized_external_id)` pairs within one batch, the first occurrence
   is prepared for persistence and later occurrences are rejected
@@ -409,10 +569,22 @@ fix above:
   nesting depth or container combination, regardless of key case/
   whitespace variant (Major #2 fix, corrected after re-audit). Metadata
   deeper than `MAX_METADATA_DEPTH` (6, raised from 4 after re-audit — see
-  Major #2) is rejected outright (whole document, not truncated). The
-  metadata's raw JSON size is checked **before** sanitization (re-audit
-  fix), so a large value cannot evade `MAX_METADATA_JSON_CHARS` by being
-  placed under a key that would later be stripped.
+  Major #2) is rejected outright (whole document, not truncated), via an
+  **iterative, non-recursive preflight** (`_preflight_metadata`) that
+  runs before any recursive traversal or `json.dumps` call, so a
+  pathologically deep structure (verified up to ~900 levels) is rejected
+  in a bounded number of stack pops rather than raising an unhandled
+  `RecursionError` (final re-audit fix). The metadata's size is checked
+  **before** sanitization (re-audit fix) and measured as the actual
+  **UTF-8 encoded byte length** of a deterministically-serialized form
+  (`ensure_ascii=False`, `sort_keys=True`, fixed separators) against
+  `MAX_METADATA_JSON_BYTES` — **not** a Python character count (final
+  re-audit fix: the previous check used `len(json.dumps(...))`, which
+  under-counts multi-byte UTF-8 content such as Vietnamese text or
+  emoji). A direct Python object-identity cycle (only reachable via a
+  direct service-level call, never via HTTP JSON) is rejected via
+  explicit per-path ancestor tracking, not mistaken for legitimate
+  shared/repeated sub-objects.
 - **Audit behavior:** Every ingestion result item carries
   `metadata_keys_stripped: int`, propagated into the JSONL audit log
   event — a count only, never the stripped key names or the unsafe values
@@ -463,39 +635,51 @@ fix above:
 
 ## Phase 12B acceptance gate
 
-**Updated after the re-audit** (original first-pass numbers superseded):
+**Updated after the final re-audit** (prior pass's numbers superseded):
 
 | Requirement | Status |
 |---|---|
-| All Critical findings resolved | PASS — none reported in either audit round |
-| All blocking Major findings resolved | PASS — all 5 accepted and fixed; Major #2 required a second pass after the re-audit found the first fix incomplete (list-of-lists bypass), now fixed and regression-tested |
-| Regression tests added | PASS — 95 Phase 12B tests total across `test_chunking.py` (14), `test_sqlite_bm25.py` (34), `test_ingestion.py` (34), `test_retrieval_routes.py` (13); 12 of these were added this re-audit pass |
-| Full pytest passed | PASS — **177/177** in the project-local `.venv` (82 pre-Phase-12B + 95 Phase 12B) |
-| Smoke test passed | PASS — `scripts/smoke_test_retrieval.ps1` against a live local server, testing the stale-content invariant directly (not AND-only suppression semantics, which Major #5 removed) |
+| All Critical findings resolved | PASS — none reported in any of the three audit rounds |
+| All blocking Major findings resolved | PASS — all 5 original Major findings accepted and fixed; Major #2 required a third pass after the final re-audit found the byte-vs-character size measurement and unbounded-recursion gaps, now fixed and regression-tested |
+| Regression tests added | PASS — 106 Phase 12B tests total across `test_chunking.py` (14), `test_sqlite_bm25.py` (34), `test_ingestion.py` (43), `test_retrieval_routes.py` (15); 9 new tests added in `test_ingestion.py` and 2 new tests added in `test_retrieval_routes.py` (plus 1 existing route test extended, no count change) this final re-audit pass |
+| Full pytest passed | PASS — **188/188** in the project-local `.venv` (82 pre-Phase-12B + 106 Phase 12B), run with an explicit writable `--basetemp` (the shared environment's default Windows temp directory has a pre-existing permissions issue unrelated to this change) |
+| Smoke test passed | PASS (unchanged this pass) — `scripts/smoke_test_retrieval.ps1` against a live local server |
 | FTS5 has no fallback | PASS — unchanged; `check_capability()` still has zero fallback path, invoked eagerly at import time (Minor #1) |
-| Batch semantics are consistent | PASS — code, tests, API responses, and this document agree on the "partial success per document, atomic per accepted batch" model; validation ordering within a document (raw metadata size → raw depth → sanitize → chunking) is now also explicit and tested |
-| Trust remains server-controlled | PASS — Major #1 closed the public-source-key-selects-trust gap; trust/classification/source_type are still only ever assigned in `source_policy.py` |
+| Batch semantics are consistent | PASS — code, tests, API responses, and this document agree on the "partial success per document, atomic per accepted batch" model; validation ordering within a document (iterative preflight → deterministic serialization → UTF-8 byte-size check → sanitize → chunking) is now explicit, tested, and matches this document |
+| Trust remains server-controlled | PASS — unchanged this pass; trust/classification/source_type are still only ever assigned in `source_policy.py` |
 | No benchmark label is used at runtime | PASS — unchanged; `is_poisoned` still appears nowhere in any Phase 12B runtime code path |
-| No stale FTS rows remain after updates | PASS — unchanged mechanism (manual delete-then-insert against `chunks_fts` by rowid), correctly triggered for metadata/title-only changes (Major #3) |
+| No stale FTS rows remain after updates | PASS — unchanged this pass |
 | Existing gateway regression passes | PASS — `/health` and `/v1/gateway/chat` byte-identical behavior reconfirmed |
 | No prohibited path changed | PASS — verified via `git diff --name-only` and `git diff --name-only 392d8ca...HEAD -- datasets redteam reports/evaluation report-latex-template` (empty) |
-| No runtime database tracked | PASS — verified via `git ls-files "*.db" "*.sqlite" "*.sqlite3"` (empty); route tests independently verified to leave `data/retrieval.db` with zero test documents |
-| No dependency added | PASS — `sqlite3` remains standard library; `requirements.txt` untouched |
-| No raw prohibited metadata value persisted or logged | PASS — verified for the list-of-list case specifically, at the helper, service, and route/HTTP levels, plus the audit-log event |
+| No runtime database tracked | PASS — verified via `git ls-files "*.db" "*.sqlite" "*.sqlite3"` (empty); full session verified to leave `data/retrieval.db` absent entirely (Minor #4 residual, now fixed via `tests/conftest.py`) |
+| No dependency added | PASS — `sqlite3` remains standard library; `requirements.txt` untouched this pass |
+| No raw prohibited metadata value persisted or logged | PASS — verified for the list-of-list case (all four reserved keys, extended this pass) and for both new rejection paths (deep-nesting, UTF-8 oversize), at the helper, service, and route/HTTP levels, plus the audit-log event |
+| No RecursionError escapes from deep metadata | PASS (new this pass) — verified up to ~900 nested levels at the helper and service level; verified through the real HTTP route at a moderate depth |
+| UTF-8 bytes measured correctly | PASS (new this pass) — verified with Vietnamese text and an exact/one-over byte boundary |
 
 ## Final recommendation
 
-**APPROVE PHASE 12B.**
+**READY FOR FINAL RE-AUDIT — NOT DONE.**
 
-This recommendation reflects the state **after** the re-audit's finding
-was fixed and regression-tested — the identically-worded recommendation
-recorded after the first pass (before the re-audit) was premature, since
-Major #2 was not actually fully resolved at that time. All findings from
-both the original Code X audit and the independent re-audit were
-evaluated on their own evidence, not accepted by default; every accepted
-Critical/Major finding was fixed with the smallest safe change and a
-regression test that specifically exercises the scenario demonstrated;
-every Minor finding was fixed, or deferred/accepted with a concrete,
-documented rationale. No mandatory Phase 12B invariant was violated by any
-fix. Phase 12C still requires a separate, explicit go-ahead — this
-approval is scoped to Phase 12B only.
+This is deliberately **not** "APPROVE" or "Done." Per this task's
+explicit instruction, Phase 12B is not marked complete until an
+independent re-audit of this pass's diff returns PASS. This pass fixes
+the two findings the final re-audit reported against the previous
+pass's metadata handling (Python-character-count size measurement
+instead of UTF-8 bytes; unbounded recursion in `json.dumps` and the
+depth/sanitize helpers with no iterative preflight bound), adds the
+required regression coverage (Regressions A–G), makes a small, safe
+route-test database isolation improvement (`tests/conftest.py`), and
+corrects this document's and the project's other documentation to match
+the actual code and its actual residual state, including removing an
+overclaiming statement about route-test database isolation. All changes
+are confined to `app/services/ingestion.py`, `tests/test_ingestion.py`,
+`tests/test_retrieval_routes.py`, the new `tests/conftest.py`, and
+documentation — no prohibited path was touched, no dependency was added,
+and every previously-resolved finding (Major #1, #3, #4, #5; Minor #1,
+#2) was reconfirmed unaffected by this pass's changes. The full test
+suite (188/188) and the explicit checks in the acceptance-gate table
+above (compile checks, `git diff --check`, prohibited-path diff, tracked-
+database check) were re-run against this pass's diff. What remains is
+independent verification of this specific diff by a reviewer who has not
+already seen it — the same standard applied to the previous two passes.

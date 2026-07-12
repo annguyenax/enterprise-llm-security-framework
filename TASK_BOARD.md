@@ -333,7 +333,7 @@ audit approval is not itself that go-ahead.
 | Server-controlled source policy | Le Dinh Nghia | Done - `app/core/source_policy.py`: unknown `source_key` values are rejected (documented choice, not silently downgraded); caller can never set `trust_level`/`classification`/`source_type` |
 | Atomic ingestion service | Both | Done - `app/services/ingestion.py`: validation, reserved-metadata-key stripping, SHA-256 content hashing, deterministic server-derived IDs, one audit log event per batch with safe fields only |
 | API endpoints | Nguyen Van An | Done - `POST /v1/documents/ingest`, `POST /v1/retrieve` added to `app/api/routes.py`; `POST /v1/gateway/chat` and all Phase 0-11 endpoints unchanged (regression-tested) |
-| Tests | Both | Done - `tests/test_chunking.py` (14), `tests/test_sqlite_bm25.py` (34), `tests/test_ingestion.py` (23), `tests/test_retrieval_routes.py` (12) = 83 Phase 12B tests (69 original + 14 added resolving the Code X audit below); full suite 165/165 passing in a clean project-local `.venv` |
+| Tests | Both | Done - `tests/test_chunking.py` (14), `tests/test_sqlite_bm25.py` (34), `tests/test_ingestion.py` (43), `tests/test_retrieval_routes.py` (15), `tests/conftest.py` (session config, no tests of its own) = 106 Phase 12B tests (69 original + 14 Code X audit + 12 first re-audit + 11 final re-audit, see the three resolution sections below); full suite 188/188 passing in a clean project-local `.venv` |
 | Smoke test | Both | Done - `scripts/smoke_test_retrieval.ps1`: ingest, retrieve, update, verify stale content gone, verified against a live local server |
 | Documentation | Both | Done - `README.md`, `app/README.md`, `tests/README.md`, `scripts/README.md` updated |
 
@@ -433,7 +433,7 @@ immediately after this one, which records the actual final state.
   the resolution document's own acceptance-gate table for the full
   12-point checklist, all PASS).
 
-### Phase 12B Code X Re-audit Resolution — **Status: Done**
+### Phase 12B Code X Re-audit Resolution — **Status: Superseded by final re-audit below (see next section)**
 
 An independent re-audit of the first-pass fix (commit `04f68dd`) returned
 verdict **REVISE**: 0 Critical, 1 remaining blocking Major finding (#2,
@@ -473,13 +473,96 @@ partial. Full traceable resolution (updated in place):
   metadata size/depth are validated before sanitization.
 - **No prohibited path changed, no new dependency, no runtime database
   tracked** - reconfirmed via the same git checks as the first pass.
-- **Final recommendation: APPROVE PHASE 12B** (this time based on a
+- **Correction:** a further independent re-audit of this fix found the
+  metadata-size check still measured a Python character count instead of
+  a UTF-8 byte count, and neither `json.dumps` nor the recursive depth/
+  sanitize helpers had any bound checked before running, so a
+  sufficiently deep structure raised an unhandled `RecursionError`
+  instead of a controlled rejection. The "APPROVE PHASE 12B"
+  recommendation recorded below was therefore again premature and is
+  corrected by the follow-up section immediately after this one.
+- ~~**Final recommendation: APPROVE PHASE 12B**~~ (this time based on a
   verdict where the one remaining blocking finding has been fixed and
-  regression-tested, not merely claimed).
+  regression-tested, not merely claimed) — **superseded, see next
+  section.**
+
+### Phase 12B Final Metadata Re-audit Resolution — **Status: Done (fix); Phase 12B overall remains In Review**
+
+An independent final re-audit of the second-pass fix returned verdict
+**REVISE**: 0 Critical, 1 remaining blocking Major finding (#2, byte-vs-
+character size measurement and unbounded recursion), all other
+previously-resolved findings reconfirmed unaffected. Full traceable
+resolution (updated in place):
+`docs/modernization-ai-reviews/phase-12b-audit-resolution.md`.
+
+- **Root cause:** (1) the raw-metadata size check used
+  `len(json.dumps(raw_metadata, ensure_ascii=False))`, a Python
+  *character* count, not a UTF-8 *byte* count — multi-byte content
+  (Vietnamese text, emoji) was under-counted, so a payload well over the
+  intended byte limit could still pass; (2) neither `json.dumps` nor the
+  recursive `_metadata_depth`/`_sanitize_metadata` helpers had any bound
+  checked before being called, so a sufficiently deep structure (the
+  re-audit's probe: ~900 nested lists) exceeded Python's recursion limit
+  and raised an unhandled `RecursionError` instead of a controlled
+  rejection.
+- **Fix:** `app/services/ingestion.py` gained `_preflight_metadata()` — an
+  **iterative, explicit-stack-based** (never recursive) check that
+  validates structure/type/cycle/depth *before* any `json.dumps` call or
+  recursive traversal, bounding traversal by loop iterations instead of
+  the Python call stack — and `_metadata_byte_size()`, which measures the
+  actual UTF-8 encoded byte length of a deterministically-serialized
+  form. `MAX_METADATA_JSON_CHARS` was renamed `MAX_METADATA_JSON_BYTES`
+  (still 2000) to make the unit explicit. `ingest_batch`'s metadata
+  handling was reordered to: preflight → deterministic serialization →
+  UTF-8 byte-size check → sanitize (now provably safe, since preflight
+  already bounds depth) → persist → audit. Defensive `RecursionError`
+  catches remain as a safety net only.
+- **Route-test database isolation, residual completed:** the prior pass's
+  route-level singleton-swap fixture did not prevent the very first
+  `app.main` import in a pytest session (possibly from a different,
+  earlier-collected test file) from still creating an empty, schema-only
+  `data/retrieval.db` via `app/api/routes.py`'s eager
+  `_retriever.initialize()` at import time. New `tests/conftest.py`
+  redirects `RETRIEVAL_DB_PATH` to a per-session temporary path before
+  any test module in the directory is collected/imported (pytest loads
+  `conftest.py` before importing sibling test modules), so the full test
+  session now never touches `data/retrieval.db` at all — not just this
+  one module's own test documents. The prior documentation's stronger
+  claim ("route tests genuinely no longer touch `data/retrieval.db` at
+  all") was correct only about this module's own test documents, not
+  about the eager-init side effect; that overclaim is now corrected.
+- **11 new regression tests added** (106 Phase 12B tests total, up from
+  95: 9 in `tests/test_ingestion.py` covering UTF-8 byte accounting,
+  exact/near-boundary byte behavior, ~900-level nested-list rejection,
+  deep mixed dict/list nesting, direct-Python cyclic-metadata rejection,
+  non-cyclic shared-value handling, and audit-log safety for both new
+  rejection paths; 2 in `tests/test_retrieval_routes.py` covering the
+  same two new rejection paths through the real HTTP route, plus the
+  existing list-of-list route regression extended to cover all four
+  reserved keys instead of two); full suite **188/188 passing** in the
+  project-local `.venv` (run with an explicit writable `--basetemp`, since
+  the shared environment's default Windows temp directory has a
+  pre-existing, unrelated permissions issue).
+- Documentation corrected: this document, `README.md`, `app/README.md`,
+  `tests/README.md`, and
+  `docs/modernization-ai-reviews/phase-12b-audit-resolution.md` no longer
+  describe the metadata size limit in characters, now describe the
+  iterative preflight running before serialization/sanitization, and no
+  longer overclaim route-test database isolation completeness.
+- **No prohibited path changed, no new dependency, no runtime database
+  tracked** — reconfirmed via the same git checks as the first two
+  passes.
+- **Final recommendation: READY FOR FINAL RE-AUDIT, NOT DONE.** Per this
+  task's explicit instruction, Phase 12B is **not** marked `Done` here —
+  an independent re-audit of this specific diff is still required before
+  the phase can be closed. See the resolution document's own "Final
+  recommendation" section for the full statement.
 
 **Next phase:** Phase 12C — RAG Query Service, Provenance, and Centralized
 DLP. Per `AGENT_RULES.md` rule 12, Phase 12C does not start automatically
-and requires a separate, explicit go-ahead.
+and requires a separate, explicit go-ahead. It also remains gated on
+Phase 12B actually reaching `Done` via an independent re-audit PASS, which
+has not yet occurred.
 
 ## Notes
 

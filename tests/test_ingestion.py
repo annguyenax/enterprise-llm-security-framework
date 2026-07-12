@@ -14,11 +14,13 @@ from app.retrieval.sqlite_bm25 import SqliteBM25Config, SqliteBM25Retriever
 from app.services.chunking import ChunkingConfig
 from app.services.ingestion import (
     MAX_METADATA_DEPTH,
-    MAX_METADATA_JSON_CHARS,
+    MAX_METADATA_JSON_BYTES,
     IngestionService,
     IngestionServiceConfig,
     IngestionValidationError,
+    _metadata_byte_size,
     _metadata_depth,
+    _preflight_metadata,
     _sanitize_metadata,
 )
 
@@ -335,6 +337,7 @@ def test_metadata_json_size_bound_rejects_oversized_metadata(tmp_path):
     result = service.ingest_batch([_doc(metadata=huge_metadata)], request_id=str(uuid.uuid4()))
     assert result.rejected == 1
     assert "metadata too large" in result.items[0].reason
+    assert "bytes" in result.items[0].reason
 
 
 # -- Phase 12B re-audit regression tests (recursive metadata traversal) ----
@@ -470,7 +473,7 @@ def test_raw_metadata_over_limit_rejected_even_when_large_value_is_under_prohibi
     *after* sanitization had already removed that key. The raw size check
     must run first."""
     service = _service(tmp_path)
-    huge_under_reserved = {"trust_level": "x" * (MAX_METADATA_JSON_CHARS + 500)}
+    huge_under_reserved = {"trust_level": "x" * (MAX_METADATA_JSON_BYTES + 500)}
     result = service.ingest_batch(
         [_doc(external_id="raw-size-bypass", metadata=huge_under_reserved)],
         request_id=str(uuid.uuid4()),
@@ -536,3 +539,209 @@ def test_prohibited_values_do_not_appear_in_audit_log(tmp_path, monkeypatch):
     raw_log_text = log_path.read_text(encoding="utf-8")
     assert secret_value not in raw_log_text
     assert '"metadata_keys_stripped": 1' in raw_log_text
+
+
+# -- Phase 12B final re-audit regression tests (UTF-8 byte size + bounded --
+# -- iterative depth/cycle preflight) --------------------------------------
+#
+# The Code X final re-audit found two residual bugs in the previous fix:
+# (1) the metadata size limit was measured as a Python *character* count
+# (`len(json.dumps(...))`), which under-counts multi-byte UTF-8 content
+# (Vietnamese text, emoji), letting oversized payloads through; (2) neither
+# `json.dumps` nor the recursive `_metadata_depth`/`_sanitize_metadata`
+# helpers had any bound checked before being called, so a ~900-level-deep
+# structure raised an unhandled `RecursionError` instead of a controlled
+# rejection. Both are fixed by `_preflight_metadata` (iterative, explicit
+# stack, runs first) and `_metadata_byte_size` (UTF-8 byte length of a
+# deterministic serialization). These tests fail against the pre-fix code.
+
+
+def test_utf8_byte_size_correctly_measured_for_vietnamese_text(tmp_path):
+    """Regression A: metadata under the OLD (buggy) character limit but
+    over the real UTF-8 byte limit must be rejected. Vietnamese text with
+    diacritics is 2 bytes/char in UTF-8, so a payload can be under 2000
+    *characters* while being well over 2000 *bytes*."""
+    vietnamese_metadata = {"note": "á" * 1200}
+    char_len = len(
+        json.dumps(vietnamese_metadata, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    )
+    byte_len = _metadata_byte_size(vietnamese_metadata)
+    assert char_len < MAX_METADATA_JSON_BYTES  # would have passed the old, buggy char-count check
+    assert byte_len > MAX_METADATA_JSON_BYTES  # the real UTF-8 byte size does not
+
+    service = _service(tmp_path)
+    result = service.ingest_batch(
+        [_doc(external_id="vn-bytes", metadata=vietnamese_metadata)], request_id=str(uuid.uuid4())
+    )
+    assert result.rejected == 1
+    assert result.indexed == 0
+    assert "too large" in result.items[0].reason
+    assert "bytes" in result.items[0].reason
+
+
+def test_metadata_byte_size_boundary_exact_and_over_by_one(tmp_path):
+    """Regression B: exact-boundary and one-byte-over behavior, using the
+    same deterministic serialization rule the service uses internally."""
+    overhead = _metadata_byte_size({"blob": ""})
+    at_limit_blob_len = MAX_METADATA_JSON_BYTES - overhead
+    over_limit_blob_len = at_limit_blob_len + 1
+
+    at_limit_metadata = {"blob": "x" * at_limit_blob_len}
+    over_limit_metadata = {"blob": "x" * over_limit_blob_len}
+    assert _metadata_byte_size(at_limit_metadata) == MAX_METADATA_JSON_BYTES
+    assert _metadata_byte_size(over_limit_metadata) == MAX_METADATA_JSON_BYTES + 1
+
+    service = _service(tmp_path)
+    at_limit_result = service.ingest_batch(
+        [_doc(external_id="at-byte-limit", metadata=at_limit_metadata)], request_id=str(uuid.uuid4())
+    )
+    assert at_limit_result.rejected == 0
+    assert at_limit_result.indexed == 1
+
+    over_limit_result = service.ingest_batch(
+        [_doc(external_id="over-byte-limit", metadata=over_limit_metadata)],
+        request_id=str(uuid.uuid4()),
+    )
+    assert over_limit_result.rejected == 1
+    assert "too large" in over_limit_result.items[0].reason
+
+
+def test_preflight_rejects_900_level_nested_list_without_recursion_error():
+    """Regression C: a ~900-level-deep nested list must be rejected with a
+    controlled reason, never an unhandled RecursionError, by the iterative
+    preflight itself (not just by the service wrapping it in a catch)."""
+    deep_list: object = "leaf"
+    for _ in range(900):
+        deep_list = [deep_list]
+
+    reason = _preflight_metadata({"x": deep_list})
+    assert reason is not None
+    assert "depth" in reason.lower()
+
+
+def test_service_rejects_900_level_nested_list_without_recursion_error(tmp_path):
+    """Regression C (service-level): the same ~900-level structure through
+    the full ingest_batch pipeline must be a controlled rejection, not a
+    crash."""
+    deep_list: object = "leaf"
+    for _ in range(900):
+        deep_list = [deep_list]
+
+    service = _service(tmp_path)
+    result = service.ingest_batch(
+        [_doc(external_id="deep-900-service", metadata={"x": deep_list})],
+        request_id=str(uuid.uuid4()),
+    )
+    assert result.rejected == 1
+    assert result.indexed == 0
+    assert "depth" in result.items[0].reason.lower()
+
+
+def test_preflight_rejects_deep_mixed_dict_list_nesting(tmp_path):
+    """Regression D: alternating dict/list nesting well above
+    MAX_METADATA_DEPTH must be rejected, whether the container at each
+    level is a dict or a list."""
+    deep: object = "leaf"
+    for i in range(50):
+        deep = [{"level": deep}] if i % 2 == 0 else {"wrap": [deep]}
+
+    reason = _preflight_metadata({"root": deep})
+    assert reason is not None
+    assert "depth" in reason.lower()
+
+    service = _service(tmp_path)
+    result = service.ingest_batch(
+        [_doc(external_id="deep-mixed", metadata={"root": deep})], request_id=str(uuid.uuid4())
+    )
+    assert result.rejected == 1
+    assert "depth" in result.items[0].reason.lower()
+
+
+def test_preflight_rejects_direct_cyclic_metadata_without_hanging():
+    """Regression E (helper level): a directly-constructed self-referential
+    dict (only possible via a direct Python/service call -- HTTP JSON can
+    never contain a cycle) must be rejected via explicit object-identity
+    tracking, not hang or recurse unboundedly."""
+    cyclic: dict = {"safe": "value"}
+    cyclic["self"] = cyclic
+
+    reason = _preflight_metadata(cyclic)
+    assert reason is not None
+    assert "cyclic" in reason.lower()
+
+
+def test_service_rejects_direct_cyclic_metadata_without_hanging(tmp_path):
+    """Regression E (service level): the same direct Python cycle,
+    submitted through IngestionService.ingest_batch (the only path a
+    non-HTTP caller could use), must be a controlled rejection."""
+    cyclic: dict = {"safe": "value"}
+    cyclic["self"] = cyclic
+
+    service = _service(tmp_path)
+    result = service.ingest_batch(
+        [_doc(external_id="cyclic-meta", metadata=cyclic)], request_id=str(uuid.uuid4())
+    )
+    assert result.rejected == 1
+    assert result.indexed == 0
+    assert "cyclic" in result.items[0].reason.lower()
+
+
+def test_repeated_shared_immutable_values_are_not_mistaken_for_cycles(tmp_path):
+    """The cycle check must track object identity only along the current
+    ancestor path, not "every value seen anywhere" -- otherwise a metadata
+    object that legitimately repeats the same string/shared sub-list at
+    multiple sibling positions (not a cycle: no infinite loop) would be
+    wrongly rejected."""
+    shared_list = ["repeated", "values"]
+    raw = {"a": shared_list, "b": shared_list, "c": ["repeated", "repeated", "repeated"]}
+
+    assert _preflight_metadata(raw) is None
+
+    service = _service(tmp_path)
+    result = service.ingest_batch(
+        [_doc(external_id="shared-not-cyclic", metadata=raw)], request_id=str(uuid.uuid4())
+    )
+    assert result.rejected == 0
+    assert result.indexed == 1
+
+
+def test_deep_nesting_and_oversize_rejections_do_not_leak_raw_metadata_in_audit_log(
+    tmp_path, monkeypatch
+):
+    """Regression G: both new rejection paths (bounded-depth preflight and
+    UTF-8 byte-size enforcement) must log only safe status/count fields --
+    never the submitted metadata value itself."""
+    log_path = tmp_path / "audit.jsonl"
+    monkeypatch.setattr(
+        audit_logger,
+        "settings",
+        Settings(
+            app_env=settings.app_env,
+            log_path=str(log_path),
+            enable_audit_log=True,
+            llm_provider=settings.llm_provider,
+            llm_model_name=settings.llm_model_name,
+            llm_provider_timeout_seconds=settings.llm_provider_timeout_seconds,
+        ),
+    )
+
+    retriever = SqliteBM25Retriever(SqliteBM25Config(db_path=str(tmp_path / "audit-safety.db")))
+    service = IngestionService(retriever)
+
+    deep_list: object = "leaf-marker-value"
+    for _ in range(900):
+        deep_list = [deep_list]
+    oversize_secret = "SUPER-SECRET-OVERSIZE-METADATA-VALUE-" * 100
+
+    docs = [
+        _doc(external_id="deep-audit-safety", metadata={"x": deep_list}),
+        _doc(external_id="oversize-audit-safety", metadata={"note": oversize_secret}),
+    ]
+    result = service.ingest_batch(docs, request_id=str(uuid.uuid4()))
+    assert result.rejected == 2
+
+    raw_log_text = log_path.read_text(encoding="utf-8")
+    assert "leaf-marker-value" not in raw_log_text
+    assert oversize_secret not in raw_log_text
+    assert "SUPER-SECRET" not in raw_log_text
+    assert '"metadata_keys_stripped": 0' in raw_log_text

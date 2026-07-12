@@ -465,7 +465,85 @@ Phase 0 kickoff. Focus was entirely on scaffolding: repository structure, planni
   `datasets/`, `redteam/`, `reports/evaluation/`,
   `report-latex-template/`, or `requirements.txt` was modified; no new
   dependency installed; no runtime database tracked.
-- **Final recommendation: APPROVE PHASE 12B**, this time based on a
+- ~~**Final recommendation: APPROVE PHASE 12B**, this time based on a
   verdict where the one remaining blocking finding is actually fixed and
-  regression-tested. Phase 12C still requires a separate, explicit
-  go-ahead.
+  regression-tested.~~ **Superseded** — a further independent re-audit
+  (below) found this fix still incomplete. Phase 12C still requires a
+  separate, explicit go-ahead, and remains additionally gated on Phase
+  12B actually reaching `Done`.
+
+## Phase 12B Final Metadata Re-audit Resolution (2026-07-12)
+
+- An independent final re-audit of the second-pass fix returned verdict
+  **REVISE**: 0 Critical, 1 remaining blocking Major finding (#2), all
+  other previously-resolved findings reconfirmed unaffected.
+- **Finding 1 (byte-vs-character size):** the raw-metadata size check
+  used `len(json.dumps(raw_metadata, ensure_ascii=False))` — a Python
+  *character* count, not a UTF-8 *byte* count. Multi-byte content
+  (Vietnamese text, emoji) was under-counted: the reviewer's example
+  serialized to 2,412 UTF-8 bytes but measured as only ~1,212 characters,
+  passing a nominal 2,000-character limit it should have failed against
+  an equivalent byte limit.
+- **Finding 2 (unbounded recursion):** neither `json.dumps(...)` nor the
+  recursive `_metadata_depth`/`_sanitize_metadata` helpers had any bound
+  checked before being called. A sufficiently deep structure (reviewer's
+  probe: ~900 nested lists) exceeded Python's recursion limit inside
+  `json.dumps` itself, raising an unhandled `RecursionError` instead of a
+  controlled rejection.
+- Fix: `app/services/ingestion.py` gained `_preflight_metadata()` — an
+  **iterative, explicit-stack-based** (never recursive) check validating
+  structure/type/cycle/depth *before* any `json.dumps` call or recursive
+  traversal runs, bounding traversal by loop iterations instead of the
+  Python call stack — and `_metadata_byte_size()`, measuring the real
+  UTF-8 encoded byte length of a deterministic serialization
+  (`ensure_ascii=False`, `sort_keys=True`, fixed separators).
+  `MAX_METADATA_JSON_CHARS` was renamed `MAX_METADATA_JSON_BYTES` (still
+  2000) to make the unit explicit. `ingest_batch`'s metadata handling was
+  reordered to: preflight → deterministic serialization → UTF-8
+  byte-size check → sanitize (now provably safe, since preflight already
+  bounds depth) → persist → audit. Defensive `RecursionError` catches
+  remain as a safety net only, since the preflight should make them
+  unreachable in practice.
+- Route-test database isolation residual completed: new `tests/conftest.py`
+  redirects `RETRIEVAL_DB_PATH` to a per-session temporary path before any
+  test module in the directory is collected/imported (pytest loads
+  `conftest.py` before importing sibling test modules), closing the gap
+  where the prior pass's module-scoped fixture could not prevent an
+  *earlier-collected* test file's `app.main` import from still creating
+  an empty, schema-only `data/retrieval.db` via `app/api/routes.py`'s
+  eager `_retriever.initialize()`. The prior documentation's claim that
+  route tests "genuinely no longer touch `data/retrieval.db` at all" was
+  accurate only about this one module's own test documents, not about
+  that eager-init side effect from a different test file — corrected in
+  place in `tests/test_retrieval_routes.py`'s docstring and the
+  audit-resolution document.
+- 11 new regression tests added (106 Phase 12B tests, up from 95): 9 in
+  `tests/test_ingestion.py` (UTF-8 byte accounting, exact/near-boundary
+  byte behavior, ~900-level nested-list rejection without a
+  `RecursionError`, deep mixed dict/list nesting, direct-Python
+  cyclic-metadata rejection at both the helper and service level,
+  non-cyclic shared-value handling, audit-log safety for both new
+  rejection paths) and 2 in `tests/test_retrieval_routes.py` (the same
+  two new rejection paths through the real HTTP route); the existing
+  route-level list-of-list regression was also extended to cover all four
+  reserved keys instead of two. Full suite grew to **188/188 passing**
+  (run with an explicit writable `--basetemp`, since the shared
+  environment's default Windows temp directory has a pre-existing,
+  unrelated permissions issue).
+- Documentation corrected in `README.md`, `app/README.md`,
+  `tests/README.md`, `TASK_BOARD.md`, this file, and
+  `docs/modernization-ai-reviews/phase-12b-audit-resolution.md`: the
+  metadata size limit is now described in UTF-8 bytes, not characters;
+  the iterative preflight is described as running before serialization
+  and sanitization; and the route-test database isolation overclaim is
+  removed.
+- No file under `app/guards/`, `app/services/gateway.py`,
+  `app/services/evaluation_runner.py`, `app/services/llm_provider.py`,
+  `datasets/`, `redteam/`, `reports/evaluation/`,
+  `report-latex-template/`, or `requirements.txt` was modified; no new
+  dependency installed; no runtime database tracked.
+- **Final recommendation: READY FOR FINAL RE-AUDIT, NOT DONE.** Per this
+  task's explicit instruction, Phase 12B is not marked `Done` — an
+  independent re-audit of this specific diff is required before the
+  phase can be closed. Phase 12C still requires a separate, explicit
+  go-ahead and is additionally gated on that re-audit returning PASS.

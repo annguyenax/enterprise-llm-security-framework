@@ -21,13 +21,22 @@ uuid-suffixed `external_id` per document so tests *within* this module
 (which now share one fresh temporary database for the whole module) never
 collide with each other either.
 
-Residual note: `app/api/routes.py` eagerly calls `_retriever.initialize()`
-at import time (Minor #1 fix from the prior audit resolution), so the very
-first import of `app.main` in a pytest session still creates an empty,
-schema-only `data/retrieval.db` on disk as a side effect of application
-startup -- this is the app's own intended behavior, not a test-isolation
-bug, and no test document ever lands in it once this fixture swaps the
-singletons before any test body runs.
+**Final re-audit fix (Section 5 residual):** the previous version of this
+docstring noted that `app/api/routes.py` eagerly calling
+`_retriever.initialize()` at import time (Minor #1 fix from the prior
+audit resolution) still created an empty, schema-only `data/retrieval.db`
+on disk as a side effect of the *first* `app.main` import in a pytest
+session, before this module's fixture ever ran. `tests/conftest.py` now
+redirects `RETRIEVAL_DB_PATH` to a per-session temporary file before any
+test module (in any file, not just this one) is collected/imported, so
+that eager initialization -- wherever in the session it first happens --
+never touches the repository's `data/retrieval.db` at all. This module's
+own singleton-swap fixture below is kept as well (not removed): it still
+gives each test *module* its own fresh, isolated database file rather
+than sharing the one session-wide temp path `conftest.py` establishes,
+which matters because this module's tests share state within themselves
+but must not leak into other test modules that also exercise
+`_retriever`/`_ingestion_service`.
 """
 import uuid
 from unittest.mock import patch
@@ -211,18 +220,34 @@ def test_public_ingestion_strips_prohibited_key_inside_list_of_list(tmp_path):
     """Re-audit fix (HTTP-level regression): the exact list-of-list
     metadata bypass the re-audit demonstrated must be defeated through
     the real public route, not only through the internal helper
-    function or the service layer directly."""
+    function or the service layer directly.
+
+    Final re-audit fix (Finding F): covers all four reserved keys the
+    ingestion pipeline must strip -- `trust_level`, `is_poisoned`,
+    `expected_decision`, and `security_decision` -- not just the first
+    two; the earlier route-level regression only exercised two of the
+    four and left the other two unverified at the HTTP boundary."""
+    unique_marker = _unique("list-bypass")
     response = client.post(
         "/v1/documents/ingest",
         json={
             "documents": [
                 {
-                    "external_id": _unique("list-bypass"),
+                    "external_id": unique_marker,
                     "source_key": "api_upload",
                     "title": "t",
-                    "text": "some text",
+                    "text": f"some text {unique_marker}",
                     "metadata": {
-                        "wrapper": [[{"trust_level": "trusted_internal", "is_poisoned": True}]]
+                        "wrapper": [
+                            [
+                                {
+                                    "trust_level": "trusted_internal",
+                                    "is_poisoned": True,
+                                    "expected_decision": "allow",
+                                    "security_decision": "allow",
+                                }
+                            ]
+                        ]
                     },
                 }
             ]
@@ -231,12 +256,77 @@ def test_public_ingestion_strips_prohibited_key_inside_list_of_list(tmp_path):
     assert response.status_code == 200
     body = response.json()
     assert body["indexed"] == 1
-    assert body["items"][0]["metadata_keys_stripped"] == 2
+    assert body["items"][0]["metadata_keys_stripped"] == 4
 
-    retrieve_response = client.post("/v1/retrieve", json={"query": "some text", "top_k": 5})
+    retrieve_response = client.post("/v1/retrieve", json={"query": unique_marker, "top_k": 5})
     hit_metadata_text = str(retrieve_response.json()["hits"])
     assert "trusted_internal" not in hit_metadata_text
     assert "is_poisoned" not in hit_metadata_text
+    assert "expected_decision" not in hit_metadata_text
+    assert "security_decision" not in hit_metadata_text
+
+
+def test_ingest_rejects_utf8_oversized_metadata_via_route():
+    """Final re-audit fix (Regression A, HTTP-level): a real JSON request
+    body carrying Vietnamese metadata that is under the old character
+    limit but over the real UTF-8 byte limit must be rejected through the
+    actual public route, not only through the service layer directly."""
+    response = client.post(
+        "/v1/documents/ingest",
+        json={
+            "documents": [
+                {
+                    "external_id": _unique("vn-bytes-route"),
+                    "source_key": "api_upload",
+                    "title": "t",
+                    "text": "some text",
+                    "metadata": {"note": "á" * 1200},
+                }
+            ]
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["rejected"] == 1
+    assert body["indexed"] == 0
+    assert "too large" in body["items"][0]["reason"]
+    assert "bytes" in body["items"][0]["reason"]
+
+
+def test_ingest_rejects_deeply_nested_metadata_via_route_without_500():
+    """Final re-audit fix (Regression D, HTTP-level): deeply nested
+    metadata submitted as a real JSON request body must come back as a
+    controlled 200-with-rejected-item response, never an unhandled 500.
+    Kept moderately deep (well above MAX_METADATA_DEPTH but far below any
+    client-side JSON-encoding recursion limit) so this test isolates the
+    *server's* handling, not the test client's own request serialization;
+    the full ~900-level extreme case is covered at the service level in
+    `tests/test_ingestion.py` (`test_service_rejects_900_level_nested_list_
+    without_recursion_error`), which calls `ingest_batch` directly with an
+    already-constructed Python object, bypassing JSON request encoding."""
+    deep_list: object = "leaf"
+    for _ in range(50):
+        deep_list = [deep_list]
+
+    response = client.post(
+        "/v1/documents/ingest",
+        json={
+            "documents": [
+                {
+                    "external_id": _unique("deep-route"),
+                    "source_key": "api_upload",
+                    "title": "t",
+                    "text": "some text",
+                    "metadata": {"x": deep_list},
+                }
+            ]
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["rejected"] == 1
+    assert body["indexed"] == 0
+    assert "depth" in body["items"][0]["reason"].lower()
 
 
 def test_storage_failure_maps_to_safe_generic_error_without_leaking_cause():

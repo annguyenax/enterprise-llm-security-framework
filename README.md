@@ -346,7 +346,12 @@ and `*.db` entries — no runtime database is ever committed).
 **Ingest documents** (server assigns trust/classification from a
 `source_key` allowlist — see `app/core/source_policy.py` — a caller can
 never set `trust_level`/`classification` directly, and any attempt via the
-free-form `metadata` field is silently stripped):
+free-form `metadata` field is silently stripped, at any nesting depth
+through any combination of dicts/lists, after an iterative
+structure/type/cycle/depth preflight bounds the metadata before any
+recursive handling runs; the configured size limit is enforced against
+the raw metadata's actual UTF-8 encoded byte length, not a character
+count):
 
 ```powershell
 $body = @{
@@ -411,25 +416,34 @@ retriever requires a future ADR.
   claim, evaluated only on synthetic content created during manual testing
   (Phase 12B has no benchmark of its own — that is Phase 12D/12E).
 
-**Phase 12B is marked In Review, not Done**, pending a full local `pytest`
-run and a repository-wide security review in the target environment (this
-session verified 165/165 tests passing and a live smoke test in a
-project-local `.venv`, but per `AGENT_RULES.md` rule 9/10 the phase is not
-declared `Done` until that verification is independently repeated).
+**Phase 12B is marked In Review, not Done**, pending an independent
+re-audit of the latest resolution pass returning PASS (this session
+verified 188/188 tests passing in a project-local `.venv`, but per
+`AGENT_RULES.md` rule 9/10 the phase is not declared `Done` until that
+independent verification is obtained).
 
 **Independent audit (Code X):** Phase 12B was independently audited after
 implementation; verdict REVISE with 5 blocking Major findings (no
-Critical), all resolved with regression tests — see
-[docs/modernization-ai-reviews/phase-12b-audit-resolution.md](docs/modernization-ai-reviews/phase-12b-audit-resolution.md).
-Notable fixes: the public ingestion endpoint could no longer be tricked
-into granting `trusted_internal` status by claiming a synthetic
-`source_key`; metadata-based trust spoofing now defeats nested/case/
-whitespace variants; re-ingesting identical text with a changed
-title/metadata now correctly updates instead of silently no-op'ing;
-environment-configured ingestion limits are now actually wired to the
-service; and retrieval no longer returns zero hits just because a query
-contains one extra irrelevant term (FTS5 term combination changed from
-AND to OR, see `ADR-002-retrieval-engine.md`).
+Critical), all resolved with regression tests. Two subsequent rounds of
+independent re-audit each found the previous pass's Major #2 fix
+(reserved-metadata filtering) still incomplete and required further
+correction — see
+[docs/modernization-ai-reviews/phase-12b-audit-resolution.md](docs/modernization-ai-reviews/phase-12b-audit-resolution.md)
+for the full three-round history. Notable fixes: the public ingestion
+endpoint could no longer be tricked into granting `trusted_internal`
+status by claiming a synthetic `source_key`; metadata-based trust
+spoofing now defeats nested/case/whitespace variants through any
+combination of dicts and lists; re-ingesting identical text with a
+changed title/metadata now correctly updates instead of silently
+no-op'ing; environment-configured ingestion limits are now actually wired
+to the service; retrieval no longer returns zero hits just because a
+query contains one extra irrelevant term (FTS5 term combination changed
+from AND to OR, see `ADR-002-retrieval-engine.md`); and (final re-audit
+round) the metadata size limit is now measured in actual UTF-8 bytes
+instead of Python characters, and a bounded, iterative
+(non-recursive) preflight now rejects pathologically deep or cyclic
+metadata with a controlled error instead of an unhandled
+`RecursionError`.
 
 Everything before Phase 4 was documentation/data only — Phase 0–3.1 produced scaffolding, research, architecture/threat-model docs, and the synthetic benchmark (`datasets/`, `redteam/`). See [PROJECT_PLAN.md](PROJECT_PLAN.md) for the full roadmap.
 
