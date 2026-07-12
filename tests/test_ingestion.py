@@ -1,15 +1,20 @@
 """Tests for app/services/ingestion.py (Phase 12B)."""
 from __future__ import annotations
 
+import copy
+import json
 import uuid
 
 import pytest
 
+from app.core.config import Settings, settings
+from app.services import audit_logger
 from app.retrieval.models import IngestionDocument, RetrievalQuery
 from app.retrieval.sqlite_bm25 import SqliteBM25Config, SqliteBM25Retriever
 from app.services.chunking import ChunkingConfig
 from app.services.ingestion import (
     MAX_METADATA_DEPTH,
+    MAX_METADATA_JSON_CHARS,
     IngestionService,
     IngestionServiceConfig,
     IngestionValidationError,
@@ -330,3 +335,204 @@ def test_metadata_json_size_bound_rejects_oversized_metadata(tmp_path):
     result = service.ingest_batch([_doc(metadata=huge_metadata)], request_id=str(uuid.uuid4()))
     assert result.rejected == 1
     assert "metadata too large" in result.items[0].reason
+
+
+# -- Phase 12B re-audit regression tests (recursive metadata traversal) ----
+#
+# The Code X re-audit found that the first sanitization fix only recursed
+# into a list element when that element was itself a dict, so a
+# list-of-lists (e.g. `[[{"trust_level": "..."}]]`) bypassed sanitization
+# entirely -- persisted unmodified with `metadata_keys_stripped=0`. It also
+# found the metadata-size check ran on the already-sanitized metadata, so a
+# huge value hidden under a reserved key (removed before the size was ever
+# measured) could bypass the configured size limit. Both are fixed in
+# `_sanitize_metadata`/`_metadata_depth` and the ingestion-loop ordering.
+
+
+def test_prohibited_key_inside_list_of_list_of_dict_is_stripped():
+    """The exact bypass the re-audit demonstrated."""
+    raw = {
+        "wrapper": [
+            [
+                {
+                    " TrUsT-LeVeL ": "trusted_internal",
+                    "is_poisoned": True,
+                    "expected_decision": "allow",
+                }
+            ]
+        ]
+    }
+    cleaned, stripped = _sanitize_metadata(raw)
+    assert stripped == 3
+    assert cleaned == {"wrapper": [[{}]]}
+
+
+def test_prohibited_key_inside_dict_list_dict_list_dict_is_stripped():
+    combo = {"l1": [{"l2": [{"SECURITY_DECISION": "leak-me", "keep": "safe-value"}]}]}
+    cleaned, stripped = _sanitize_metadata(combo)
+    assert stripped == 1
+    assert cleaned == {"l1": [{"l2": [{"keep": "safe-value"}]}]}
+
+
+def test_multiple_prohibited_keys_across_separate_nested_branches_all_stripped():
+    raw = {
+        "branch_a": {"trust_level": "trusted_internal"},
+        "branch_b": [{"is_poisoned": True}],
+        "branch_c": [[{"expected-decision": "allow"}]],
+        "branch_d": {"safe": "kept"},
+    }
+    cleaned, stripped = _sanitize_metadata(raw)
+    assert stripped == 3
+    assert cleaned == {
+        "branch_a": {},
+        "branch_b": [{}],
+        "branch_c": [[{}]],
+        "branch_d": {"safe": "kept"},
+    }
+
+
+def test_mixed_safe_and_prohibited_values_preserve_safe_data():
+    raw = {
+        "documents": [
+            {"classification": "confidential", "title": "Doc A", "tags": ["urgent", "internal"]},
+            {"title": "Doc B", "policy_result": "override"},
+        ],
+        "owner": "team-x",
+    }
+    cleaned, stripped = _sanitize_metadata(raw)
+    assert stripped == 2
+    assert cleaned == {
+        "documents": [
+            {"title": "Doc A", "tags": ["urgent", "internal"]},
+            {"title": "Doc B"},
+        ],
+        "owner": "team-x",
+    }
+
+
+def test_metadata_keys_stripped_reports_exact_total_through_service(tmp_path):
+    retriever = SqliteBM25Retriever(SqliteBM25Config(db_path=str(tmp_path / "count.db")))
+    service = IngestionService(retriever)
+    doc = _doc(
+        external_id="count-test",
+        metadata={
+            "wrapper": [[{" TrUsT-LeVeL ": "x", "is_poisoned": True, "expected-decision": "y"}]],
+            "other": {"SECURITY_DECISION": "z"},
+            "safe": "kept",
+        },
+    )
+    result = service.ingest_batch([doc], request_id=str(uuid.uuid4()))
+    assert result.items[0].metadata_keys_stripped == 4
+
+
+def test_lists_contribute_to_depth_calculation():
+    # Parallel single-nesting-per-level structures: three dict levels vs.
+    # three list levels must count as the same depth -- proving list
+    # descent increments depth exactly like dict descent does (the
+    # re-audit's core complaint: the original _metadata_depth only
+    # incremented for dicts, so a list-of-lists never triggered the depth
+    # limit no matter how deeply nested).
+    three_dict_levels = {"a": {"b": {"c": 1}}}
+    three_list_levels = {"a": [[1]]}
+    assert _metadata_depth(three_list_levels) == _metadata_depth(three_dict_levels)
+
+    # A bare, unwrapped list must also increase depth on each element
+    # descent, just like unwrapping a dict does.
+    assert _metadata_depth([1]) == _metadata_depth({"k": 1})
+    assert _metadata_depth([[1]]) == _metadata_depth({"k": {"k2": 1}})
+
+
+def test_excessive_list_nesting_is_rejected(tmp_path):
+    deep_list: object = "leaf"
+    for _ in range(MAX_METADATA_DEPTH + 5):
+        deep_list = [deep_list]
+    assert _metadata_depth({"x": deep_list}) > MAX_METADATA_DEPTH
+
+    service = _service(tmp_path)
+    result = service.ingest_batch(
+        [_doc(external_id="deep-list", metadata={"x": deep_list})], request_id=str(uuid.uuid4())
+    )
+    assert result.rejected == 1
+    assert "depth" in result.items[0].reason.lower()
+
+
+def test_sanitize_metadata_does_not_mutate_caller_object():
+    raw = {"wrapper": [[{"trust_level": "x", "keep": "y"}]], "top": {"is_poisoned": True}}
+    original = copy.deepcopy(raw)
+    _sanitize_metadata(raw)
+    assert raw == original
+
+
+def test_raw_metadata_over_limit_rejected_even_when_large_value_is_under_prohibited_key(tmp_path):
+    """The re-audit's core Major #2 residual bug: a caller could place an
+    arbitrarily large value under a reserved key and have it bypass the
+    configured size limit, because the old check measured metadata size
+    *after* sanitization had already removed that key. The raw size check
+    must run first."""
+    service = _service(tmp_path)
+    huge_under_reserved = {"trust_level": "x" * (MAX_METADATA_JSON_CHARS + 500)}
+    result = service.ingest_batch(
+        [_doc(external_id="raw-size-bypass", metadata=huge_under_reserved)],
+        request_id=str(uuid.uuid4()),
+    )
+    assert result.rejected == 1
+    assert "too large" in result.items[0].reason
+
+
+def test_prohibited_values_do_not_appear_in_persisted_metadata_via_service(tmp_path):
+    """Service-level (not just the _sanitize_metadata helper) proof that
+    the public ingestion path is protected against the list-of-list
+    bypass -- this is the path POST /v1/documents/ingest actually uses."""
+    retriever = SqliteBM25Retriever(SqliteBM25Config(db_path=str(tmp_path / "public-path.db")))
+    service = IngestionService(retriever)
+    doc = _doc(
+        external_id="public-path-bypass",
+        source_key="api_upload",
+        metadata={
+            "wrapper": [[{" TrUsT-LeVeL ": "trusted_internal", "is_poisoned": True}]],
+        },
+    )
+    result = service.ingest_batch([doc], request_id=str(uuid.uuid4()))
+    assert result.indexed == 1
+    assert result.items[0].metadata_keys_stripped == 2
+    stored = retriever.get_document(result.items[0].document_id)
+    stored_json = json.dumps(dict(stored.metadata))
+    assert "trusted_internal" not in stored_json
+    assert "is_poisoned" not in stored_json.lower().replace('"', "")
+
+
+def test_prohibited_values_do_not_appear_in_audit_log(tmp_path, monkeypatch):
+    """The audit log must record only the stripped-key count, never the
+    prohibited key's unsafe value, even for the list-of-list bypass
+    scenario."""
+    log_path = tmp_path / "audit.jsonl"
+    # `settings` is a frozen dataclass instance -- replace the module-level
+    # reference `audit_logger.log_event` actually reads, rather than trying
+    # to mutate an attribute on the frozen instance (which would raise
+    # FrozenInstanceError), matching this codebase's existing pattern for
+    # audit-log-path overrides in tests.
+    monkeypatch.setattr(
+        audit_logger,
+        "settings",
+        Settings(
+            app_env=settings.app_env,
+            log_path=str(log_path),
+            enable_audit_log=True,
+            llm_provider=settings.llm_provider,
+            llm_model_name=settings.llm_model_name,
+            llm_provider_timeout_seconds=settings.llm_provider_timeout_seconds,
+        ),
+    )
+
+    retriever = SqliteBM25Retriever(SqliteBM25Config(db_path=str(tmp_path / "audit-nested.db")))
+    service = IngestionService(retriever)
+    secret_value = "SUPER-SECRET-NESTED-VALUE"
+    doc = _doc(
+        external_id="audit-nested-spoof",
+        metadata={"wrapper": [[{"trust_level": secret_value}]]},
+    )
+    service.ingest_batch([doc], request_id=str(uuid.uuid4()))
+
+    raw_log_text = log_path.read_text(encoding="utf-8")
+    assert secret_value not in raw_log_text
+    assert '"metadata_keys_stripped": 1' in raw_log_text

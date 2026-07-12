@@ -59,7 +59,17 @@ _RESERVED_METADATA_KEYS = frozenset(
 )
 
 MAX_METADATA_JSON_CHARS = 2000
-MAX_METADATA_DEPTH = 4
+# Depth counts every container crossing (dict-value and list-item descent
+# both count), including the final step down to a primitive leaf value.
+# Raised from 4 to 6 during the Phase 12B re-audit fix: with list nesting
+# now correctly counted (see _metadata_depth), a realistic
+# dict-inside-list-inside-dict-inside-list-inside-dict combination (5
+# container crossings) needs a 6th unit of budget left over to reach its
+# own leaf values without being truncated -- 4 left essentially no room
+# for any real-world combination once list-depth-counting was fixed. 6
+# still firmly rejects pathological depth (10+ levels, see
+# test_metadata_depth_over_limit_is_rejected).
+MAX_METADATA_DEPTH = 6
 
 
 class IngestionValidationError(ValueError):
@@ -84,7 +94,14 @@ def _metadata_depth(value: object, current: int = 0) -> int:
     """Compute the maximum nesting depth of a caller-supplied metadata
     value, so ingestion can reject unreasonably deep structures before
     attempting to sanitize/store them (Phase 12B Codex audit, Major #2:
-    "bound metadata depth")."""
+    "bound metadata depth").
+
+    **Fixed per the Phase 12B re-audit:** a list now increases depth by
+    one, exactly like a dict does, when descending into its elements --
+    the original implementation only incremented depth for dicts, so a
+    list-of-lists could nest arbitrarily deep without ever tripping this
+    pre-check.
+    """
     if isinstance(value, dict):
         if not value:
             return current
@@ -92,50 +109,61 @@ def _metadata_depth(value: object, current: int = 0) -> int:
     if isinstance(value, list):
         if not value:
             return current
-        return max((_metadata_depth(v, current) for v in value), default=current)
+        return max(_metadata_depth(v, current + 1) for v in value)
     return current
 
 
-def _sanitize_metadata(raw: dict, *, _depth: int = 0) -> tuple[dict, int]:
-    """Recursively strip reserved keys from `raw` at any nesting depth,
-    matching case/whitespace variants of the reserved-key names (Phase
-    12B Codex audit, Major #2: the original implementation only removed
-    exact top-level keys, so `{"nested": {"trust_level": "..."}}` or
-    `{"Trust_Level": "..."}` both passed through unmodified).
+def _sanitize_metadata(value: object, *, _depth: int = 0) -> tuple[object, int]:
+    """Recursively strip reserved keys from `value` at any nesting depth
+    and through any combination of dicts and lists, matching case/
+    whitespace variants of the reserved-key names (Phase 12B Codex audit,
+    Major #2; re-audit finding: the first fix only recursed into a list
+    element when that element was itself a dict, so a list-of-lists such
+    as `[[{"trust_level": "..."}]]` bypassed sanitization entirely and
+    was persisted unmodified with `metadata_keys_stripped=0`).
 
-    Returns `(clean_metadata, stripped_count)` so a caller can record how
+    This now recurses uniformly over every JSON-compatible container --
+    dict, list, nested lists, dicts inside lists, lists inside dicts, any
+    combination -- and passes primitive values (str/int/float/bool/None)
+    through unchanged. Callers always pass a `dict` at the top level (a
+    document's whole metadata object); the recursive calls may pass any
+    JSON-compatible value.
+
+    Returns `(clean_value, stripped_count)` so a caller can record how
     many reserved keys were removed (for an auditable "a spoofing attempt
     occurred" signal) without ever persisting or logging the stripped
-    value itself. `_depth` is an internal safety bound in addition to the
-    caller-facing `_metadata_depth` pre-check -- deeper structures are
-    dropped rather than recursed into indefinitely.
+    value itself. Every level constructs a **new** dict/list rather than
+    mutating `value` in place, so the caller-supplied metadata object is
+    never mutated. `_depth` is an internal safety bound in addition to
+    the caller-facing `_metadata_depth` pre-check -- structures deeper
+    than `MAX_METADATA_DEPTH` are dropped (replaced with `None`, a valid,
+    safely-nestable JSON value) rather than recursed into indefinitely.
     """
     if _depth > MAX_METADATA_DEPTH:
-        return {}, 0
+        return None, 0
 
-    clean: dict = {}
-    stripped = 0
-    for key, value in raw.items():
-        if _normalize_metadata_key(key) in _RESERVED_METADATA_KEYS:
-            stripped += 1
-            continue
-        if isinstance(value, dict):
-            nested_clean, nested_stripped = _sanitize_metadata(value, _depth=_depth + 1)
-            clean[key] = nested_clean
+    if isinstance(value, dict):
+        clean: dict = {}
+        stripped = 0
+        for key, sub_value in value.items():
+            if _normalize_metadata_key(key) in _RESERVED_METADATA_KEYS:
+                stripped += 1
+                continue
+            cleaned_sub, nested_stripped = _sanitize_metadata(sub_value, _depth=_depth + 1)
+            clean[key] = cleaned_sub
             stripped += nested_stripped
-        elif isinstance(value, list):
-            nested_list: list = []
-            for item in value:
-                if isinstance(item, dict):
-                    nested_clean, nested_stripped = _sanitize_metadata(item, _depth=_depth + 1)
-                    nested_list.append(nested_clean)
-                    stripped += nested_stripped
-                else:
-                    nested_list.append(item)
-            clean[key] = nested_list
-        else:
-            clean[key] = value
-    return clean, stripped
+        return clean, stripped
+
+    if isinstance(value, list):
+        clean_list: list = []
+        stripped = 0
+        for item in value:
+            cleaned_item, nested_stripped = _sanitize_metadata(item, _depth=_depth + 1)
+            clean_list.append(cleaned_item)
+            stripped += nested_stripped
+        return clean_list, stripped
+
+    return value, 0
 
 
 def _derive_document_id(source_key: str, external_id: str) -> str:
@@ -232,7 +260,46 @@ class IngestionService:
                 )
                 continue
 
+            # Phase 12B re-audit fix: the metadata-size limit must apply
+            # to the RAW caller-submitted metadata, before prohibited
+            # keys are stripped -- otherwise a caller can place an
+            # arbitrarily large value under a reserved key (e.g.
+            # {"trust_level": "x" * 1_000_000}) and have it evade the
+            # configured size limit entirely, since sanitization would
+            # remove that key before the size was ever measured. The
+            # order here is deliberate: (1) raw structure/size, (2) raw
+            # depth, (3) sanitize, per the required pipeline.
             raw_metadata = dict(document.metadata)
+
+            try:
+                raw_metadata_json_size = len(json.dumps(raw_metadata, ensure_ascii=False))
+            except (TypeError, ValueError):
+                rejected_items.append(
+                    IngestionItemResult(
+                        external_id=document.external_id,
+                        source_key=document.source_key,
+                        document_id=None,
+                        status="rejected",
+                        reason="metadata is not JSON-compatible",
+                    )
+                )
+                continue
+
+            if raw_metadata_json_size > MAX_METADATA_JSON_CHARS:
+                rejected_items.append(
+                    IngestionItemResult(
+                        external_id=document.external_id,
+                        source_key=document.source_key,
+                        document_id=None,
+                        status="rejected",
+                        reason=(
+                            f"metadata too large ({raw_metadata_json_size} chars, "
+                            f"max {MAX_METADATA_JSON_CHARS})"
+                        ),
+                    )
+                )
+                continue
+
             if _metadata_depth(raw_metadata) > MAX_METADATA_DEPTH:
                 rejected_items.append(
                     IngestionItemResult(
@@ -246,21 +313,6 @@ class IngestionService:
                 continue
 
             safe_metadata, metadata_keys_stripped = _sanitize_metadata(raw_metadata)
-            metadata_json_size = len(json.dumps(safe_metadata, ensure_ascii=False))
-            if metadata_json_size > MAX_METADATA_JSON_CHARS:
-                rejected_items.append(
-                    IngestionItemResult(
-                        external_id=document.external_id,
-                        source_key=document.source_key,
-                        document_id=None,
-                        status="rejected",
-                        reason=(
-                            f"metadata too large ({metadata_json_size} chars, "
-                            f"max {MAX_METADATA_JSON_CHARS})"
-                        ),
-                    )
-                )
-                continue
 
             try:
                 text_chunks = chunk_text(document.text, self._config.chunking)

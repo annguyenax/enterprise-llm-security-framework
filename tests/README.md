@@ -3,15 +3,16 @@
 pytest coverage for the gateway, dataset loader, three rule-based guards, and
 the Phase 12B retrieval foundation.
 
-**Status: Phase 12B (In Review), post Code X audit resolution.** Coverage
-includes the offline provider contract, bypass variants, targeted RAG
-sanitization, benign false positives, gateway ordering, severity
-aggregation, audit redaction, and (Phase 12B) deterministic chunking,
-SQLite FTS5/BM25 retrieval, safe FTS query construction, atomic
-ingestion/upsert, server-controlled source policy, and the two new
-retrieval routes. **165 tests total** (82 pre-Phase-12B + 83 Phase 12B,
-the latter including 14 regression tests added while resolving the
-independent Code X audit — see
+**Status: Phase 12B (In Review), post Code X audit and re-audit
+resolution.** Coverage includes the offline provider contract, bypass
+variants, targeted RAG sanitization, benign false positives, gateway
+ordering, severity aggregation, audit redaction, and (Phase 12B)
+deterministic chunking, SQLite FTS5/BM25 retrieval, safe FTS query
+construction, atomic ingestion/upsert, server-controlled source policy,
+recursive metadata-spoofing defenses, and the two new retrieval routes.
+**177 tests total** (82 pre-Phase-12B + 95 Phase 12B, the latter including
+regression tests added across two rounds of independent audit
+resolution — see
 `docs/modernization-ai-reviews/phase-12b-audit-resolution.md`).
 
 ## Test Modules

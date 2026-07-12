@@ -372,12 +372,19 @@ declared `Done` until a team member independently repeats `pytest -q` and
 the smoke test in their own environment, and a repository-wide security
 review pass is recorded.
 
-### Phase 12B Code X Audit Resolution — **Status: Done**
+### Phase 12B Code X Audit Resolution — **Status: Superseded by re-audit below (see next section)**
 
 An independent Code X audit of implementation commit `6bfb714` returned
 verdict **REVISE**: 0 Critical, 5 Major (all blocking), 4 Minor findings.
 Full traceable resolution:
 `docs/modernization-ai-reviews/phase-12b-audit-resolution.md`.
+
+**Correction:** an independent re-audit of this fix (commit `04f68dd`)
+found that Major #2 (reserved metadata filtering) was only **partially**
+resolved - a list-of-lists metadata structure bypassed the recursive
+sanitization entirely. The "APPROVE PHASE 12B" recommendation recorded
+below was therefore premature and is corrected by the follow-up section
+immediately after this one, which records the actual final state.
 
 - **All 5 Major findings accepted and fixed**, each with a regression test
   reproducing the exact scenario the audit demonstrated: (1) the public
@@ -425,6 +432,50 @@ Full traceable resolution:
 - **Final recommendation: APPROVE PHASE 12B** (audit gate satisfied; see
   the resolution document's own acceptance-gate table for the full
   12-point checklist, all PASS).
+
+### Phase 12B Code X Re-audit Resolution — **Status: Done**
+
+An independent re-audit of the first-pass fix (commit `04f68dd`) returned
+verdict **REVISE**: 0 Critical, 1 remaining blocking Major finding (#2,
+"partially resolved"), 4 Minor findings mostly resolved with one accepted
+partial. Full traceable resolution (updated in place):
+`docs/modernization-ai-reviews/phase-12b-audit-resolution.md`.
+
+- **Root cause:** the first-pass metadata-sanitization fix only recursed
+  into a list element when that element was itself a `dict`, so a
+  list-of-lists (the re-audit's exact probe:
+  `{"wrapper": [[{" TrUsT-LeVeL ": "trusted_internal", "is_poisoned": true, "expected_decision": "allow"}]]}`)
+  bypassed sanitization entirely - persisted unmodified with
+  `metadata_keys_stripped` incorrectly reporting `0`. Separately, the
+  metadata-size limit was checked *after* sanitization, so a huge value
+  hidden under a reserved key (removed before the size was ever measured)
+  could bypass `MAX_METADATA_JSON_CHARS`.
+- **Fix:** `app/services/ingestion.py`'s `_sanitize_metadata` and
+  `_metadata_depth` were rewritten to recurse **uniformly** over every
+  JSON-compatible combination of dicts and lists (not just "list of
+  dict"). The ingestion loop was reordered so raw metadata JSON size and
+  structure are validated *before* sanitization strips anything.
+  `MAX_METADATA_DEPTH` was raised from 4 to 6 - a direct, necessary
+  consequence of correctly counting list depth (a realistic 5-container
+  structure needs a 6th unit of budget to reach its own leaf values).
+- **Route-test database isolation also completed** (Minor #4 remainder):
+  `tests/test_retrieval_routes.py` now replaces `app.api.routes`'s
+  `_retriever`/`_ingestion_service` singletons with instances pointed at
+  a `pytest`-managed temporary file for the whole module, restoring the
+  originals at teardown - verified to leave `data/retrieval.db` with zero
+  test documents after a full run of that file.
+- **12 new regression tests added** (95 Phase 12B tests total, up from
+  83); full suite **177/177 passing** in the project-local `.venv`.
+- Documentation corrected: `README.md` and `app/README.md` no longer
+  claim FTS5 terms are joined with implicit AND (both now correctly state
+  explicit server-generated OR); the metadata section now accurately
+  describes recursive handling across both dicts and lists, and that raw
+  metadata size/depth are validated before sanitization.
+- **No prohibited path changed, no new dependency, no runtime database
+  tracked** - reconfirmed via the same git checks as the first pass.
+- **Final recommendation: APPROVE PHASE 12B** (this time based on a
+  verdict where the one remaining blocking finding has been fixed and
+  regression-tested, not merely claimed).
 
 **Next phase:** Phase 12C — RAG Query Service, Provenance, and Centralized
 DLP. Per `AGENT_RULES.md` rule 12, Phase 12C does not start automatically

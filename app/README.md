@@ -75,21 +75,35 @@ Python's standard-library `sqlite3` module (no new dependency):
   persistence via `Retriever.upsert_documents()`.
 - `core/source_policy.py` - the **only** place `trust_level`/
   `classification`/`source_type` are assigned, always server-side from a
-  `source_key` allowlist. A caller can never set these directly (the
-  ingestion request schema has no such fields, `extra="forbid"` rejects
-  any attempt to add them) and any attempt to smuggle them through the
-  free-form `metadata` dict is silently stripped before storage. Unknown
-  `source_key` values are rejected, not silently downgraded to a low-trust
-  policy - see `core/source_policy.py`'s module docstring for the
-  documented rationale.
+  `source_key` allowlist (only `api_upload` is reachable through the
+  public `POST /v1/documents/ingest` endpoint; elevated-trust internal
+  policies require `allow_internal=True`, which the public route never
+  passes). A caller can never set these directly (the ingestion request
+  schema has no such fields, `extra="forbid"` rejects any attempt to add
+  them at the top level) and any attempt to smuggle them through the
+  free-form `metadata` field is stripped before storage - recursively,
+  through any combination of nested dicts and lists (a list-of-lists
+  containing a reserved key is caught just like a plain nested dict is),
+  matching case/whitespace/hyphen/underscore variants of the reserved key
+  names, up to a bounded nesting depth beyond which the metadata is
+  rejected outright. The configured metadata size limit is enforced
+  against the raw, caller-submitted metadata *before* any stripping
+  happens, so a large value cannot evade the limit merely by being placed
+  under a key that sanitization would remove. Unknown `source_key` values
+  are rejected, not silently downgraded to a low-trust policy - see
+  `core/source_policy.py`'s module docstring for the documented rationale.
 
 Query text is never concatenated raw into an FTS5 `MATCH` expression: user
 queries are tokenized into plain lexical terms and each term is
-individually double-quoted before being joined (implicit AND) into the
-final match expression, so FTS5 operators (`NEAR`, `AND`/`OR`/`NOT`,
-column-filter syntax, wildcards) typed by a caller are treated as literal
-search terms, never as operators. SQL parameterization alone does not
-protect against this - FTS5 `MATCH` has its own query language.
+individually double-quoted before being joined with an explicit,
+server-generated `OR` into the final match expression, so FTS5 operators
+(`NEAR`, `AND`/`OR`/`NOT`, column-filter syntax, wildcards) typed by a
+caller are treated as literal search terms, never as operators. `OR` (not
+implicit `AND`) means one extra, otherwise-irrelevant query term cannot
+zero out an otherwise-matching result, while `bm25()` ranking still
+rewards chunks matching more of the query's terms. SQL parameterization
+alone does not protect against FTS5 query-syntax manipulation - FTS5
+`MATCH` has its own query language.
 
 The runtime retrieval/ingestion path never reads or stores the v1
 benchmark's `is_poisoned` field - see `docs/modernization-v2-threat-model.md`

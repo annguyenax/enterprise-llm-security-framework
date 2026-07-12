@@ -375,12 +375,15 @@ powershell -ExecutionPolicy Bypass -File scripts/smoke_test_retrieval.ps1
 
 **Safe FTS5 query construction:** user query text is never concatenated
 raw into an FTS5 `MATCH` expression. Queries are tokenized into plain
-lexical terms, each individually double-quoted, and joined with implicit
-AND — so FTS5 operators (`NEAR`, `AND`/`OR`/`NOT`, column filters,
-wildcards) typed by a caller are treated as literal search terms, not
-executed as query syntax. SQL parameterization alone does not protect
-against this (FTS5 `MATCH` has its own query language) — see
-`docs/decisions/ADR-002-retrieval-engine.md`.
+lexical terms, each individually double-quoted, and joined with an
+explicit, server-generated `OR` — so FTS5 operators (`NEAR`, `AND`/`OR`/`NOT`,
+column filters, wildcards) typed by a caller are treated as literal search
+terms, not executed as query syntax. Term combination uses `OR` (not
+implicit `AND`) so that one extra, otherwise-irrelevant query term cannot
+zero out an otherwise-matching result — `bm25()` ranking still rewards
+chunks matching more of the query's terms. SQL parameterization alone does
+not protect against FTS5 query-syntax manipulation (FTS5 `MATCH` has its
+own query language) — see `docs/decisions/ADR-002-retrieval-engine.md`.
 
 **Ingestion/upsert semantics:** canonical `document_id` is derived
 server-side from `source_key` + `external_id` (SHA-256-based, deterministic
