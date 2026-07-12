@@ -578,16 +578,17 @@ declared `Done`.
 |---|---|---|
 | Typed pipeline result contracts | Nguyen Van An | Done - `app/core/pipeline.py` (`StageResult`, `ProvenanceSummary`, `RagPipelineResult`). `GuardProfile` ablation config explicitly deferred to Phase 12E per its own docstring, not silently omitted. |
 | Provenance/Trust Guard | Le Dinh Nghia | Done - `app/guards/provenance_guard.py`: three fixed allow-lists (`trust_level`/`classification`/`source_type`) matching `app/core/source_policy.py`'s real values, fail-closed on anything else (including the `untrusted_unknown`/`unverified` fallback pair); reads only server-assigned `RetrievalHit` fields, never request input. |
-| Centralized DLP | Both | Done - `app/guards/dlp_guard.py`: canary secret, OpenAI/AWS/GitHub key shapes, PEM private-key blocks, bearer tokens, secret-assignment patterns; bounded input size; `app/guards/output_guard.py` and `app/services/audit_logger.py` now import their shared patterns from here instead of duplicating them (behavior-preserving, regression-tested). |
+| Centralized DLP | Both | Done - complete bounded-prefix enforcement (no uninspected suffix), overlap-safe counts, DLP `SANITIZE` semantics, and one complete shared audit-redaction API covering all detector families. |
 | End-to-end pipeline orchestration | Nguyen Van An | Done - `app/services/rag_query.py`: Input Guard -> retrieval -> Provenance/Trust Guard -> RAG Context Guard (per chunk + bounded aggregate pass) -> Mock Provider -> DLP -> Output Guard -> audit, with every stop path fail-closed and guard exceptions mapped to a safe `block` instead of an unhandled exception. |
-| Multi-chunk coordination decision | Both | Done (explicit decision, per Phase 12A audit resolution's requirement) - implemented as a bounded, deterministic aggregate inspection (final accepted chunks' bounded excerpts, capped total 4000 chars by default, re-run through the existing unmodified RAG Context Guard as one synthetic chunk). Reduces but does not eliminate multi-chunk risk; no new ML detector added. Named test: `tests/test_rag_pipeline.py::test_multi_chunk_coordination_is_caught_by_the_aggregate_check`. |
+| Multi-chunk coordination decision | Both | Done - provider context is deterministically bounded first, separators count against the global limit, exactly that context is aggregate-inspected and sent onward, and aggregate `SANITIZE` fails closed. Semantic coordination remains residual. |
 | API endpoint | Nguyen Van An | Done - `POST /v1/rag/query` added to `app/api/routes.py`; strict request schema (`RagQueryRequest`, `extra="forbid"`, no `context_chunks`/trust/classification/source_type/`is_poisoned`/`expected_decision`/guard-decision/ID fields); `POST /v1/gateway/chat` and all Phase 0-12B endpoints unchanged (regression-tested). |
-| Configuration | Le Dinh Nghia | Done - `app/core/config.py`: `rag_default_top_k` (5), `rag_max_top_k` (20), `rag_max_aggregate_context_chars` (4000), `dlp_max_inspect_chars` (20000), `rag_return_provenance` (true); all defaulted, `Settings(...)` backward compatibility preserved. |
-| Tests | Both | Done - `tests/test_provenance_guard.py` (11), `tests/test_dlp_guard.py` (13), `tests/test_rag_pipeline.py` (32), `tests/test_rag_query_routes.py` (23) = 79 new Phase 12C tests (267 total, up from 188). |
+| Configuration | Le Dinh Nghia | Done - defaults remain backward compatible; positive values, top-k relationships, hard ceilings, and environment integer/boolean parsing are validated before serving. |
+| Tests | Both | Done - 135 Phase 12C tests across provenance, DLP, pipeline, route, and configuration modules (including the 8-test terminal-audit-coverage fix and the 4-test nested-response-construction fix below); 323 total. |
 | Smoke test | Both | Done - `scripts/smoke_test_rag_pipeline.ps1`: ingest benign + 2 poisoned docs, benign/mixed/all-poisoned/direct-injection queries, `/v1/gateway/chat` regression check; run live against `uvicorn` on a scratch `RETRIEVAL_DB_PATH` this session - **PASSED**. Documents (does not fake) one live-untestable scenario: the deterministic Mock LLM Provider never echoes retrieved content, so live secret-redaction-in-response cannot be demonstrated against a real server; that exact case is covered by `tests/test_dlp_guard.py`/`tests/test_rag_pipeline.py` with a scripted provider double instead. |
 | Documentation | Both | Done - `README.md`, `app/README.md`, `tests/README.md`, `scripts/README.md`, `TASK_BOARD.md`, `docs/weekly-notes/week-01.md` updated. |
 
-**Validation (this session):** `python -m py_compile` clean on every new/
+**Initial implementation validation (superseded by the multidisciplinary
+audit-resolution validation below):** `python -m py_compile` clean on every new/
 changed file. `pytest -q` with an explicit writable `--basetemp` (shared
 environment's default temp dir has a pre-existing, unrelated permissions
 issue - see `tests/README.md`): **267 passed** (188 pre-Phase-12C + 79
@@ -622,17 +623,138 @@ or `requirements.txt` was modified. No vector database, embedding model,
 external LLM API, semantic guard model, dashboard, or Phase 12D benchmark
 data was added.
 
-**Marked In Review, not Done** (per `AGENT_RULES.md` rule 9/10): this
-session's own implementation and verification (above) is thorough, but
-per this task's own explicit instruction, Phase 12C is not declared
-`Done` until a maintainer independently repeats verification and an
-independent security audit passes - matching the same process already
-applied to Phase 12A and Phase 12B.
+### Phase 12C Multidisciplinary Audit Resolution — **Status: Superseded by final re-audit below (see next section)**
+
+Gemini, Grok, and Code X independently returned `REVISE`. Code X's two
+Critical, five blocking Major, and two Minor findings were accepted and
+resolved. Gemini's unverified telemetry concern was partially accepted:
+per-request telemetry is complete, while p50/p95 aggregation remains Phase
+12E. Its public ablation-toggle proposal was deferred to Phase 12E because
+public bypass controls would weaken the serving path; Phase 12C always runs
+the full profile. Grok's recommendations produced multilingual/zero-width,
+high-trust-malicious, mixed-trust, and benign counterexample tests. Full
+decisions and evidence: `docs/modernization-ai-reviews/phase-12c-audit-resolution.md`.
+
+Audit-resolution validation used external temporary paths: focused Phase 12C
+suite **123 passed**, full suite **311 passed**, Python compile checks passed,
+and the live PowerShell RAG smoke test passed against a temporary SQLite DB.
+No prohibited artifact, dependency, or tracked database changed.
+
+~~**Recommendation at the time: APPROVE PHASE 12C.**~~ **Superseded** — a
+further independent Code X re-audit of this exact state (below) found
+terminal audit coverage was still incomplete for two paths. Phase 12D
+still requires a separate, explicit go-ahead, and remains additionally
+gated on Phase 12C actually reaching `Done`.
+
+### Phase 12C Code X Final Re-audit — **Status: Done (fix); Phase 12C overall remains In Review**
+
+An independent Code X final re-audit of the multidisciplinary-resolution
+state above returned verdict **REVISE**: 0 remaining Critical, 1 remaining
+blocking Major ("terminal audit coverage is still incomplete"), everything
+else previously resolved reconfirmed unaffected. Full traceable resolution:
+`docs/modernization-ai-reviews/phase-12c-audit-resolution.md` ("Code X final
+re-audit" section).
+
+- **Root cause:** two paths in `app/api/routes.py::rag_query` reached the
+  service but bypassed the pipeline's own internal audit commit entirely:
+  (1) the configured `top_k > settings.rag_max_top_k` policy rejection
+  returned HTTP 400 *before* `run_rag_query` (and its `log_event` call)
+  ever ran; (2) `run_rag_query`'s audit commit happened *before*
+  `RagQueryResponse(...)` construction was attempted, so a
+  response-construction failure left behind an earlier, contradictory
+  "success" (`allowed`) audit event for a request the caller actually
+  received as a 500.
+- **Fix:** split audit commitment out of the pipeline function.
+  `app/services/rag_query.py::run_rag_query_uncommitted(...)` now
+  contains the full pipeline body and returns `(RagPipelineResult,
+  RagQueryAuditContext)` without logging; `commit_rag_query_audit(result,
+  audit_ctx)` is the extracted, explicit commit step, callable exactly
+  once for whichever outcome is actually visible to the caller.
+  `run_rag_query` (unchanged public signature/behavior, used by every
+  existing direct/service caller) is now a two-line wrapper: call
+  `run_rag_query_uncommitted`, immediately `commit_rag_query_audit`,
+  return the result. `audit_top_k_rejected(...)` emits exactly one safe
+  `block`/`top_k_rejected` event for the first gap; the route now calls
+  `run_rag_query_uncommitted` and only calls `commit_rag_query_audit`
+  *after* `RagQueryResponse(...)` construction succeeds (or with
+  `mark_response_construction_failed(pipeline_result)` if it does not) for
+  the second gap. This is an explicit internal Python contract (two named
+  functions plus a small internal dataclass), not a public flag.
+- **Regression tests added (8):** `test_audit_top_k_rejected_emits_exactly_one_safe_block_event`,
+  `test_run_rag_query_uncommitted_does_not_audit_until_committed`,
+  `test_mark_response_construction_failed_produces_corrected_block_event`,
+  `test_exact_empty_sanitized_query_is_rejected_and_audited_once` (all in
+  `tests/test_rag_pipeline.py`); `test_top_k_rejection_returns_400_without_calling_retriever_or_provider`,
+  `test_top_k_rejection_returns_safe_response_even_if_audit_sink_fails`,
+  `test_response_construction_failure_emits_exactly_one_corrected_audit_event`,
+  `test_response_construction_failure_audit_sink_failure_still_returns_safe_500`
+  (all in `tests/test_rag_query_routes.py`).
+- **Test evidence:** focused Phase 12C suite **131 passed** (up from 123);
+  full suite **319 passed** (up from 311); `python -m py_compile` clean;
+  live smoke test (`scripts/smoke_test_rag_pipeline.ps1`) against a real
+  `uvicorn` server on a scratch database/log path — **PASSED** — plus a
+  manual live check confirming a `top_k=30` request now produces exactly
+  one `stop_reason=top_k_rejected` audit event with no raw query.
+- **No prohibited path changed, no new dependency, no runtime database
+  tracked** — reconfirmed via the same git checks as prior passes.
+- ~~**Final recommendation: READY FOR ONE FINAL CODE X RE-AUDIT.**~~
+  **Superseded** — a further independent Code X re-audit of this exact
+  diff found one more blocking gap in the same terminal-audit-coverage
+  area (nested response-model construction), recorded in the next
+  section.
+
+### Phase 12C Code X Final Terminal-Audit Re-audit (Nested Response Construction) — **Status: Done (fix); Phase 12C overall remains In Review**
+
+A further independent Code X re-audit of the terminal-audit-coverage fix
+above returned verdict **REVISE**: 0 remaining Critical, 1 remaining
+blocking Major ("nested `ProvenanceItemResponse` construction occurs
+outside the protected response-construction and terminal-audit block").
+Full traceable resolution: `docs/modernization-ai-reviews/phase-12c-audit-resolution.md`
+("Code X final terminal-audit re-audit" section).
+
+- **Root cause:** `app/api/routes.py::rag_query` built the `provenance =
+  [ProvenanceItemResponse(...) for ...]` list **before** the `try` block
+  that protected `RagQueryResponse(...)` construction. A failure
+  constructing a `ProvenanceItemResponse` — reachable only after the
+  full pipeline, including the provider, had already run — propagated as
+  a raw, unprotected exception: no safe `request_id`-bearing HTTP 500,
+  and zero terminal audit events.
+- **Fix:** moved the `provenance = [...]` list comprehension (and made
+  the already-effectively-nested `stage_items = [StageResultResponse(...)
+  for ...]` list explicit) inside the same `try` block as
+  `RagQueryResponse(...)` itself, so every nested and outer response
+  object is now built in one protected block, and the success/`SANITIZE`
+  terminal audit commits only after the entire response tree is
+  confirmed valid. No change to `app/services/rag_query.py` was needed —
+  its audit-deferral contract already supported this.
+- **Regression tests added (4, all in `tests/test_rag_query_routes.py`):**
+  `test_nested_provenance_item_response_failure_maps_to_safe_500_with_audit`,
+  `test_nested_provenance_item_response_failure_with_audit_sink_failure_still_returns_safe_500`,
+  `test_successful_nested_response_construction_emits_exactly_one_normal_event`,
+  `test_nested_stage_result_response_failure_maps_to_safe_500_with_audit`.
+- **Test evidence:** focused Phase 12C suite **135 passed** (up from 131);
+  full suite **323 passed** (up from 319); `python -m py_compile` clean;
+  live smoke test (`scripts/smoke_test_rag_pipeline.ps1`) against a real
+  `uvicorn` server on a scratch database/log path — **PASSED**.
+- **No prohibited path changed, no new dependency, no runtime database
+  tracked** — reconfirmed via the same git checks as prior passes.
+- **Documentation correction:** the prior pass's claim that "every
+  response-construction path was already protected" was inaccurate;
+  corrected in place, and the schema-level 422 boundary (FastAPI/Pydantic
+  validation failures before `rag_query`'s function body runs, therefore
+  outside the one-terminal-audit-event contract) is now explicitly
+  documented rather than left implicit.
+- **Final recommendation: READY FOR ONE FINAL CODE X RE-AUDIT.** Not
+  APPROVE, not DONE. Per this task's explicit instruction, Phase 12C
+  remains **In Review** — an independent re-audit of this specific diff
+  is still required before the phase can be closed.
 
 **Next phase:** Phase 12D — Benchmark v2 Generation and Freeze. Per
 `AGENT_RULES.md` rule 12, Phase 12D does not start automatically and
 requires a separate, explicit go-ahead; per this task's own explicit
 instruction, this session stops here and does not begin Phase 12D work.
+It also remains gated on Phase 12C actually reaching `Done` via an
+independent re-audit PASS, which has not yet occurred.
 
 ## Notes
 

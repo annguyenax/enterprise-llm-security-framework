@@ -10,6 +10,7 @@ from app.guards.dlp_guard import (
     OPENAI_KEY_PATTERN,
     OUTPUT_GUARD_REALISTIC_SECRET_PATTERN,
     PRIVATE_KEY_BLOCK_PATTERN,
+    redact_sensitive_text,
     scan_and_redact,
 )
 
@@ -111,9 +112,50 @@ def test_bounded_input_size_truncates_inspection():
     text = long_prefix + secret_beyond_bound
     result = scan_and_redact(text, max_chars=10)
     assert result.truncated is True
-    # The secret sits beyond the inspected window and is passed through
-    # unredacted -- a documented, bounded-input-size limitation, not a bug.
-    assert secret_beyond_bound in result.redacted_text
+    assert result.redacted_text == long_prefix[:10]
+    assert secret_beyond_bound not in result.redacted_text
+
+
+def test_secrets_entirely_after_dlp_boundary_are_never_returned():
+    secrets = (
+        "Bearer abcdef1234567890xyz",
+        "password=UltraSecret123",
+        "api_key=sk-abcdefghij1234567890",
+        "-----BEGIN PRIVATE KEY-----\nprivate-material\n-----END PRIVATE KEY-----",
+    )
+    for secret in secrets:
+        result = scan_and_redact("x" * 20 + secret, max_chars=20)
+        assert result.truncated is True
+        assert result.redacted_text == "x" * 20
+        assert secret not in result.redacted_text
+
+
+def test_secret_crossing_dlp_boundary_cannot_be_reconstructed_from_output():
+    secret = "Bearer abcdef1234567890xyz"
+    text = "safe-prefix " + secret
+    boundary = len("safe-prefix Bearer abc")
+    result = scan_and_redact(text, max_chars=boundary)
+    assert result.truncated is True
+    assert result.redacted_text == text[:boundary]
+    assert secret not in result.redacted_text
+
+
+def test_long_benign_output_is_safely_truncated_to_inspected_prefix():
+    text = "benign " * 100
+    result = scan_and_redact(text, max_chars=37)
+    assert result.truncated is True
+    assert result.redacted_text == text[:37]
+    assert result.findings == ()
+
+
+def test_scan_rejects_non_positive_inspection_limit():
+    for invalid in (0, -1):
+        try:
+            scan_and_redact("text", max_chars=invalid)
+        except ValueError as exc:
+            assert "positive" in str(exc)
+        else:
+            raise AssertionError("expected ValueError")
 
 
 def test_findings_never_carry_the_raw_secret_value():
@@ -180,11 +222,19 @@ def test_audit_logger_redaction_unchanged_after_consolidation():
             assert redacted == sample
 
 
-def test_dlp_patterns_are_the_single_source_audit_logger_now_uses():
-    assert audit_logger._SECRET_PATTERNS == (
-        FAKE_SECRET_PATTERN,
-        OPENAI_KEY_PATTERN,
-        AWS_KEY_PATTERN,
-        GITHUB_TOKEN_PATTERN,
-        PRIVATE_KEY_BLOCK_PATTERN,
+def test_dlp_redaction_api_is_the_single_source_audit_logger_now_uses():
+    assert audit_logger.redact_sensitive_text is redact_sensitive_text
+    samples = (
+        "Bearer abcdef1234567890xyz",
+        "password=UltraSecret123",
+        "api_key=sk-abcdefghij1234567890",
     )
+    for sample in samples:
+        assert sample not in audit_logger._redact_secrets(sample)
+
+
+def test_overlapping_assignment_and_api_key_counts_one_source_span():
+    result = scan_and_redact("api_key=sk-abcdefghij1234567890", max_chars=1000)
+    assert result.redacted_text == "[REDACTED]"
+    assert result.redaction_count == 1
+    assert len(result.findings) == 1

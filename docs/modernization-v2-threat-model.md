@@ -155,6 +155,18 @@ Unchanged from `docs/diagrams/threat-model.md` §"Explicitly Out of Scope" and
 - Advanced adversarial ML attacks against embeddings (not applicable while
   retrieval is lexical/BM25-only).
 
+### Phase 12C claim boundary
+
+The centralized DLP module demonstrates deterministic, pattern-based
+mitigation of verbatim canary, credential, private-key, bearer-token, and
+secret-assignment leakage. It does not establish resistance to paraphrased,
+encoded, fragmented, or semantic leakage. Evidence produced with the local
+deterministic Mock Provider measures the implemented redaction rules and
+pipeline placement, not stochastic real-LLM behavior or a real-world leakage
+rate. Likewise, provenance trust establishes a server-assigned origin/policy
+classification only; even `trusted_internal` content remains subject to the
+complete context-guard pipeline and is not presumed safe.
+
 ## 6. On Numeric Targets (reconciliation note)
 
 `grok-phase-12a-redteam-gate.md` §10 proposes illustrative acceptance

@@ -12,7 +12,17 @@ from dataclasses import dataclass
 
 
 def _str_to_bool(value: str) -> bool:
-    return value.strip().lower() in {"1", "true", "yes", "on"}
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"Invalid boolean setting value: {value!r}")
+
+
+RAG_MAX_TOP_K_HARD_LIMIT = 50
+RAG_MAX_AGGREGATE_CONTEXT_CHARS_HARD_LIMIT = 100_000
+DLP_MAX_INSPECT_CHARS_HARD_LIMIT = 1_000_000
 
 
 @dataclass(frozen=True)
@@ -51,6 +61,41 @@ class Settings:
     rag_max_aggregate_context_chars: int = 4000
     dlp_max_inspect_chars: int = 20_000
     rag_return_provenance: bool = True
+
+    def __post_init__(self) -> None:
+        """Fail startup/construction on unsafe Phase 12C limits."""
+        integer_fields = {
+            "rag_default_top_k": self.rag_default_top_k,
+            "rag_max_top_k": self.rag_max_top_k,
+            "rag_max_aggregate_context_chars": self.rag_max_aggregate_context_chars,
+            "dlp_max_inspect_chars": self.dlp_max_inspect_chars,
+        }
+        for name, value in integer_fields.items():
+            if type(value) is not int or value <= 0:
+                raise ValueError(f"{name} must be a positive integer")
+
+        if self.rag_default_top_k > self.rag_max_top_k:
+            raise ValueError("rag_default_top_k must not exceed rag_max_top_k")
+        if self.rag_max_top_k > self.retrieval_max_top_k:
+            raise ValueError("rag_max_top_k must not exceed retrieval_max_top_k")
+        if self.rag_max_top_k > RAG_MAX_TOP_K_HARD_LIMIT:
+            raise ValueError(
+                f"rag_max_top_k must not exceed {RAG_MAX_TOP_K_HARD_LIMIT}"
+            )
+        if (
+            self.rag_max_aggregate_context_chars
+            > RAG_MAX_AGGREGATE_CONTEXT_CHARS_HARD_LIMIT
+        ):
+            raise ValueError(
+                "rag_max_aggregate_context_chars must not exceed "
+                f"{RAG_MAX_AGGREGATE_CONTEXT_CHARS_HARD_LIMIT}"
+            )
+        if self.dlp_max_inspect_chars > DLP_MAX_INSPECT_CHARS_HARD_LIMIT:
+            raise ValueError(
+                f"dlp_max_inspect_chars must not exceed {DLP_MAX_INSPECT_CHARS_HARD_LIMIT}"
+            )
+        if not isinstance(self.rag_return_provenance, bool):
+            raise ValueError("rag_return_provenance must be a boolean")
 
 
 def load_settings() -> Settings:

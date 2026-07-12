@@ -2,7 +2,9 @@
 
 Application code for the LLM Security Gateway / Guardrail Proxy.
 
-**Status: Phase 12C (In Review) - end-to-end RAG security pipeline.**
+**Status: Phase 12C (In Review - ready for one final independent Code X
+re-audit after the multidisciplinary audit resolution and a subsequent
+terminal-audit-coverage fix) - end-to-end RAG security pipeline.**
 Rule-based Input, Provenance/Trust, RAG Context, and Output guards,
 centralized DLP, deterministic dataset loading, JSONL audit logging, a
 mock chat pipeline, and a persistent local document ingestion/retrieval
@@ -135,8 +137,8 @@ there is no field for `context_chunks`, `trust_level`, `classification`,
 canonical document/chunk ID, so a caller cannot supply or override any of
 them. Context is always retrieved server-side.
 
-Stage order (every stop path is fail-closed and returns a structured
-`RagQueryResponse`, never an unhandled exception):
+Stage order (guard failures fail closed; retrieval failures use safe audited
+HTTP mappings rather than a `RagQueryResponse`):
 
 1. **Input Guard** (existing, unchanged) - a blocked/human-review query
    never reaches retrieval or the provider.
@@ -161,36 +163,45 @@ Stage order (every stop path is fail-closed and returns a structured
    §3).
 4. **RAG Context Guard** (existing, unchanged), run once per
    provenance-accepted chunk, then a **bounded aggregate pass**: the
-   final accepted chunks' bounded excerpts (capped by
-   `RAG_MAX_AGGREGATE_CONTEXT_CHARS`, default 4000 chars total) are
+   accepted chunks are deterministically truncated/excluded first, with
+   chunk separators included in `RAG_MAX_AGGREGATE_CONTEXT_CHARS`
+   (default 4000 chars total). That exact bounded representation is
    joined and re-inspected as one synthetic chunk by the same,
    unmodified `evaluate_rag_context()` - a deterministic, best-effort
    mitigation for an instruction split across multiple chunks that no
    single chunk's inspection would catch alone (Phase 12A audit
    resolution, Grok Critical 2's required explicit decision - see
    `docs/modernization-v2-threat-model.md` §3, Tampering row). This does
-   not eliminate multi-chunk coordination risk, only reduces it for
-   cases the existing rule set can detect once combined.
+   not eliminate semantic multi-chunk coordination risk. The provider
+   receives only the bounded chunks inspected here. Aggregate `sanitize`
+   fails closed because the sanitized joined text cannot be mapped safely
+   back to individual source chunks.
 5. **Mock LLM Provider** (existing, unchanged) - receives only the
-   chunks that survived steps 3-4.
+   chunks that survived steps 3-4 and only the post-Input-Guard effective
+   query; raw text removed by Input Guard sanitization is not included in
+   any provider-visible request field.
 6. **Centralized DLP** (`app/guards/dlp_guard.py`, new) - deterministic
    regex detectors (canary secret, OpenAI/AWS/GitHub key shapes,
    PEM private-key blocks, bearer tokens, `key: value`/`key=value`
    secret assignments) redact the provider's raw output before Output
-   Guard or the API response ever see it. Bounded input size
-   (`DLP_MAX_INSPECT_CHARS`, default 20,000 chars). This module is also
+   Guard or the API response ever see it. Content after the bounded
+   inspection prefix (`DLP_MAX_INSPECT_CHARS`, default 20,000 chars) is
+   dropped rather than appended uninspected; truncation is recorded in
+   the stage result. Any finding produces `Decision.SANITIZE`. This module is also
    now the single source of the secret patterns previously duplicated in
-   `app/guards/output_guard.py` and `app/services/audit_logger.py`
-   (both now import from here; behavior unchanged, verified by
-   `tests/test_dlp_guard.py`'s consolidation-parity tests).
+   `app/guards/output_guard.py` and `app/services/audit_logger.py`.
+   Audit logging calls the complete shared redaction API, so bearer and
+   secret-assignment detectors cannot drift out of its safety net.
 7. **Output Guard** (existing, unchanged) - evaluates the DLP-redacted
    text, never the raw provider output.
-8. **Structured audit event** - one JSONL event per call, safe fields
+8. **Structured audit event** - one JSONL event attempt per call, safe fields
    only (see "Audit Logging" below); the raw query is never logged, only
    a SHA-256 hash prefix and length (stricter than other endpoints'
    redacted-preview convention, since a natural-language RAG query may
    embed sensitive enterprise content that pattern-based redaction alone
-   would not catch).
+   would not catch). Retrieval errors are audited before their safe HTTP
+   mapping. If the configured sink itself fails, a single metadata-only
+   fallback logger signal is emitted without raw values or retry recursion.
 
 Guard exceptions at any stage fail closed (mapped to a safe `block`
 decision for that stage, not an unhandled 500); a bug in one guard
@@ -210,7 +221,9 @@ default - only a safe per-hit provenance summary (`document_id`,
 - No `GuardProfile` ablation harness yet (`app/core/pipeline.py` holds
   only the Phase 12C typed pipeline result; the on/off layer-ablation
   configuration named in `docs/modernization-v2-architecture.md` §2 is a
-  Phase 12E concern, deliberately not implemented in this pass).
+  Phase 12E concern, deliberately not implemented in this pass). Public
+  requests cannot disable guards through fields, headers, or serving-mode
+  configuration; the full secure profile is mandatory.
 - Multi-chunk coordination is only partially mitigated (see "End-to-End
   RAG Pipeline" above) - not fully solved.
 - Not production-ready: no production claim, no real-world detection-rate
@@ -224,12 +237,31 @@ not written to the decision summary. Phase 12B ingestion writes one audit
 event per batch call recording only safe fields (document ID, source key,
 assigned source type/classification/trust level, a content-hash prefix, and
 the result status per item) - never full document text. Phase 12C's
-`POST /v1/rag/query` writes one audit event per call recording only a
-query hash/length, retrieval/accepted/rejected counts, per-stage reason
-codes, provenance trust-level categories, DLP finding categories and
-count, per-stage latency, and provider metadata - never the raw query,
-full retrieved chunks, full provider output, or any detected secret
-value.
+`POST /v1/rag/query` commits exactly one terminal audit event per
+request that reaches the service, recording only a query hash/length,
+retrieval/accepted/rejected counts, per-stage reason codes, provenance
+trust-level categories, DLP finding categories and count, per-stage
+latency, and provider metadata - never the raw query, full retrieved
+chunks, full provider output, or any detected secret value. This covers
+every controlled outcome, including two paths fixed by a Code X final
+re-audit that previously bypassed it: a configured `top_k` policy
+rejection (audited via `audit_top_k_rejected` immediately before the
+HTTP 400, before any pipeline stage runs) and a response-construction
+failure (the pipeline's own computed outcome is deliberately not
+committed until `app/api/routes.py` confirms the API response object was
+built successfully; on failure, a corrected
+`block`/`response_construction_failed` event is committed instead of the
+pipeline's original, no-longer-accurate one - see
+`app/services/rag_query.py::run_rag_query_uncommitted`/
+`commit_rag_query_audit`/`mark_response_construction_failed`).
+
+Phase 12C settings fail construction/startup when top-k relationships are
+contradictory, integer limits are non-positive or exceed hard ceilings, or
+boolean/integer environment values are malformed. Per-request telemetry uses
+stable stage IDs, safe reason codes, monotonic stage timings, provider-called
+state, DLP categories/counts, and retrieval/context counts. Phase 12E will
+aggregate these into p50/p95 and ablation metrics; the request path does not
+invent aggregate benchmark results.
 
 ## Not Production-Ready
 

@@ -4,8 +4,10 @@
     -> Input Guard
     -> SQLite BM25 Retrieval (server-side, Phase 12B)
     -> Provenance/Trust Guard
-    -> RAG Context Guard (per chunk, then a bounded aggregate pass)
-    -> Mock LLM Provider
+    -> RAG Context Guard (per chunk, then a bounded aggregate pass that
+       governs exactly what reaches the provider -- see
+       `_bound_chunks_for_aggregate`)
+    -> Mock LLM Provider (sanitized query only, inspected context only)
     -> Centralized DLP
     -> Output Guard
     -> Structured Audit
@@ -17,14 +19,19 @@ This is a **new, additive** pipeline behind `POST /v1/rag/query`
 caller-supplied `context_chunks` only and never calls this module.
 
 Every stop path below returns a `RagPipelineResult` rather than raising,
-except for the two retrieval-layer exceptions
-(`EmptySearchQueryError`, `FTS5UnavailableError`) which are allowed to
-propagate to the route, exactly like `POST /v1/retrieve` already does --
-see `app/api/routes.py`. All other unexpected exceptions from any guard
-stage are caught **inside** this module and mapped to a fail-closed
-`Decision.BLOCK` outcome for that stage, per this phase's "guard
-exceptions fail closed" requirement -- a bug in one guard degrades to a
-safe refusal, not an unhandled 500 and not an open pipeline.
+except for retrieval-layer exceptions (`EmptySearchQueryError`,
+`FTS5UnavailableError`, or any other unexpected retrieval failure), which
+are allowed to propagate to the route, exactly like `POST /v1/retrieve`
+already does -- see `app/api/routes.py`. **Every such propagating
+exception is still audited first** (Phase 12C Code X audit, Major #3):
+a safe terminal audit event is emitted before the exception is
+re-raised, so a retrieval or provider-factory failure is never silently
+un-audited just because it maps to an HTTP error instead of a 200
+response. All other unexpected exceptions from any guard stage are
+caught **inside** this module and mapped to a fail-closed `Decision.BLOCK`
+outcome for that stage, per this phase's "guard exceptions fail closed"
+requirement -- a bug in one guard degrades to a safe refusal, not an
+unhandled 500 and not an open pipeline.
 
 This module never reads or branches on `is_poisoned`, `expected_decision`,
 or any other benchmark-only ground-truth field -- `RetrievalHit` (Phase
@@ -33,6 +40,7 @@ do so.
 """
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import time
 import uuid
@@ -46,12 +54,18 @@ from app.guards.output_guard import evaluate_output
 from app.guards.provenance_guard import ProvenanceDecision, evaluate_provenance
 from app.guards.rag_guard import evaluate_rag_context
 from app.retrieval.base import Retriever
-from app.retrieval.models import RetrievalQuery
+from app.retrieval.models import RetrievalHit, RetrievalQuery
 from app.schemas.requests import RAGContextChunk
 from app.services.audit_logger import log_event
 from app.services.llm_provider import BaseLLMProvider, LLMProviderRequest, get_llm_provider
 
 _STOPPING_DECISIONS = (Decision.BLOCK, Decision.HUMAN_REVIEW)
+
+# The aggregate stage specifically fails closed on SANITIZE too, unlike
+# every other stage -- see _bound_chunks_for_aggregate's docstring and
+# the Major #2 fix note below for why a "sanitized aggregate" cannot be
+# safely honored.
+_AGGREGATE_STOPPING_DECISIONS = (Decision.BLOCK, Decision.HUMAN_REVIEW, Decision.SANITIZE)
 
 # Machine-readable stop-reason codes -- see module docstring's pipeline
 # diagram and this phase's "Fail-closed stop paths" requirement. Every
@@ -66,6 +80,16 @@ STOP_PROVIDER_FAILED = "provider_failed"
 STOP_DLP_FAILED = "dlp_failed"
 STOP_OUTPUT_BLOCKED = "output_blocked"
 STOP_INTERNAL_ERROR = "internal_error"
+STOP_RETRIEVAL_FAILED = "retrieval_failed"
+# Added per the Code X final re-audit (terminal audit coverage): both of
+# these are stop reasons for controlled failures that happen OUTSIDE
+# run_rag_query_uncommitted's own return paths -- a configured top_k
+# policy rejection (before the pipeline runs at all) and a response-
+# construction failure (after the pipeline has already computed an
+# outcome, but before that outcome was successfully turned into an API
+# response) -- see audit_top_k_rejected and mark_response_construction_failed.
+STOP_TOP_K_REJECTED = "top_k_rejected"
+STOP_RESPONSE_CONSTRUCTION_FAILED = "response_construction_failed"
 
 _ANSWER_INPUT_BLOCKED = (
     "Your query was blocked by the Input Guard and was not used for retrieval. "
@@ -90,31 +114,72 @@ _ANSWER_OUTPUT_BLOCKED = "The generated response was blocked by the Output Guard
 _ANSWER_INTERNAL_ERROR = "An unexpected internal error occurred while processing this query."
 
 _AGGREGATE_PER_CHUNK_EXCERPT_CHARS = 400
+_AGGREGATE_SEPARATOR = "\n\n"
 
 
 def _now_ms() -> float:
     return time.perf_counter() * 1000.0
 
 
-def _build_aggregate_text(chunks: list[RAGContextChunk], max_chars: int) -> str:
-    """Join bounded, normalized excerpts from the final accepted chunks
-    into one aggregate view, for the cross-chunk coordination check below
-    (Phase 12A audit resolution, Grok Critical 2 -- Phase 12C must
-    explicitly decide whether a lightweight aggregate check is
-    implemented; this is that decision, chosen over silently deferring
-    it). Bounded by `max_chars` total, not per chunk, so a large accepted
-    set cannot make this check unbounded."""
+def _with_total(latency_ms: dict[str, float], t_start: float) -> dict[str, float]:
+    """Add a `"total"` entry (wall-clock time across every stage that
+    actually ran) to a stage-timing dict, without mutating the caller's
+    dict in place."""
+    return {**latency_ms, "total": _now_ms() - t_start}
+
+
+def _bound_chunks_for_aggregate(
+    pairs: list[tuple[RetrievalHit, RAGContextChunk]], max_total_chars: int,
+) -> tuple[list[tuple[RetrievalHit, RAGContextChunk]], list[RetrievalHit], str]:
+    """Deterministically build the exact bounded chunk set that is both
+    (a) inspected by the aggregate RAG Context Guard pass and (b) sent to
+    the Mock LLM Provider -- the identical representation, so provider
+    context can never diverge from what was actually inspected.
+
+    **Fixed per the Phase 12C Code X audit (Major #2):** the previous
+    implementation inspected only bounded *excerpts* joined into a
+    throwaway string, then separately sent the FULL, untruncated original
+    chunk text to the provider regardless of what the aggregate check
+    saw -- an attacker could pad content past the excerpt boundary (each
+    chunk was excerpted at 400 chars for inspection, but the whole chunk
+    still reached the provider) and still have the uninspected material
+    reach the provider. Separator length between joined excerpts was also
+    excluded from the character budget, letting the true joined length
+    exceed the configured maximum.
+
+    Now: each chunk's text is truncated to at most
+    `_AGGREGATE_PER_CHUNK_EXCERPT_CHARS`, further bounded by its
+    remaining share of `max_total_chars`; the `"\\n\\n"` separator between
+    chunks is charged against that same total budget; once the budget is
+    exhausted, remaining chunks are excluded entirely (never partially
+    included) -- and this exact bounded/excluded outcome is what both the
+    aggregate inspector and the provider see, byte for byte.
+
+    Returns `(included, excluded, aggregate_text)`, where `included` is
+    the ordered list of (hit, bounded-and-possibly-truncated chunk) pairs
+    that fit the budget, `excluded` is the hits that did not (in original
+    order), and `aggregate_text` is exactly `included`'s chunk texts
+    joined by the separator -- never longer than `max_total_chars`.
+    """
+    included: list[tuple[RetrievalHit, RAGContextChunk]] = []
+    excluded: list[RetrievalHit] = []
     parts: list[str] = []
-    budget = max_chars
-    for chunk in chunks:
-        if budget <= 0:
-            break
-        excerpt = chunk.text[:_AGGREGATE_PER_CHUNK_EXCERPT_CHARS][:budget]
-        if not excerpt:
+    budget = max_total_chars
+    for hit, chunk in pairs:
+        separator_cost = len(_AGGREGATE_SEPARATOR) if parts else 0
+        available = budget - separator_cost
+        if available <= 0:
+            excluded.append(hit)
             continue
+        excerpt = chunk.text[:_AGGREGATE_PER_CHUNK_EXCERPT_CHARS][:available]
+        if not excerpt:
+            excluded.append(hit)
+            continue
+        included.append((hit, RAGContextChunk(doc_id=chunk.doc_id, text=excerpt, metadata=chunk.metadata)))
         parts.append(excerpt)
-        budget -= len(excerpt)
-    return "\n\n".join(parts)
+        budget -= separator_cost + len(excerpt)
+    aggregate_text = _AGGREGATE_SEPARATOR.join(parts)
+    return included, excluded, aggregate_text
 
 
 def _safe_rag_context_decision(chunks: list[RAGContextChunk]):
@@ -126,6 +191,81 @@ def _safe_rag_context_decision(chunks: list[RAGContextChunk]):
         return None, str(type(exc).__name__)
 
 
+def _audit_failure(
+    *,
+    request_id: str,
+    query: str,
+    stage_results: list[StageResult],
+    latency_ms: dict[str, float],
+    stop_reason: str,
+    input_decision=None,
+) -> None:
+    """Emit a safe terminal audit event for a controlled failure that is
+    about to propagate as an exception (retrieval or provider-factory
+    failures -- see the module docstring) rather than being returned as a
+    `RagPipelineResult`.
+
+    **Added per the Phase 12C Code X audit (Major #3):** these failures
+    previously propagated before any `_finalize`/`log_event` call ever
+    ran, so a retrieval or configuration failure produced no audit trail
+    at all, even though the request reached this service. Mirrors
+    `_finalize`'s safe-metadata shape without constructing a
+    `RagPipelineResult`, since the caller will re-raise, not return one,
+    for this path.
+    """
+    query_hash = hashlib.sha256(query.encode("utf-8")).hexdigest()[:16]
+    safe_metadata = {
+        "query_hash": query_hash,
+        "query_length": len(query),
+        "stop_reason": stop_reason,
+        "provider_called": False,
+        "error_category": stop_reason,
+        "stage_reason_codes": [
+            {"stage": sr.stage, "reason_code": sr.reason_code} for sr in stage_results
+        ],
+        "latency_ms": latency_ms,
+    }
+    log_event(
+        endpoint="/v1/rag/query",
+        request_id=request_id,
+        input_preview=None,
+        input_decision=input_decision,
+        rag_decision=None,
+        output_decision=None,
+        final_decision=Decision.BLOCK,
+        reasons=[sr.reason_code for sr in stage_results] or [stop_reason],
+        metadata=safe_metadata,
+        provider_metadata=None,
+    )
+
+
+@dataclasses.dataclass(frozen=True)
+class RagQueryAuditContext:
+    """The guard-decision objects and raw query needed to finish the
+    `/v1/rag/query` terminal audit event, kept OUT of `RagPipelineResult`
+    itself -- `RagPipelineResult` is safe to hand to `app/api/routes.py`
+    for building the public API response, but the objects here (e.g. the
+    full `GuardDecisionResponse`) are audit-log inputs, not response
+    fields, and the raw `query` in particular must never reach the API
+    response at all.
+
+    Not part of any public HTTP-facing contract. This exists specifically
+    so `run_rag_query_uncommitted` can hand back everything needed to
+    finish the audit event *later* (after `app/api/routes.py` confirms
+    the API response object itself was built successfully), instead of
+    committing the audit event immediately and unconditionally the way
+    `run_rag_query` (the simpler, direct-service-caller entry point)
+    still does. This is the "clear explicit internal contract" the Code
+    X final re-audit asked for, in preference to a public flag.
+    """
+
+    query: str
+    input_decision: object = None
+    rag_decision: object = None
+    output_decision: object = None
+    provider_metadata: dict | None = None
+
+
 def run_rag_query(
     *,
     query: str,
@@ -134,14 +274,120 @@ def run_rag_query(
     request_id: str | None = None,
     provider: BaseLLMProvider | None = None,
 ) -> RagPipelineResult:
-    """Run the full Phase 12C pipeline for one query.
+    """Run the full Phase 12C pipeline for one query and commit its
+    terminal audit event immediately.
 
-    Raises `app.retrieval.sqlite_bm25.EmptySearchQueryError` or
-    `FTS5UnavailableError` directly (not caught here) -- the caller
-    (`app/api/routes.py`) maps these to the same HTTP status codes
-    `POST /v1/retrieve` already uses for the same exceptions, per this
-    phase's "use existing API conventions" instruction. Every other stop
-    path returns a `RagPipelineResult` instead of raising.
+    This is the simple entry point for direct/service callers (this
+    project's own test suite included) that don't need to defer audit
+    commitment -- it always audits exactly once before returning,
+    matching this function's historical contract. `app/api/routes.py`
+    instead calls `run_rag_query_uncommitted` directly, so it can defer
+    the commit until the actual API response object has been built
+    successfully -- see that function's docstring and
+    `commit_rag_query_audit` for why (Code X final re-audit: a
+    response-construction failure must never leave behind an earlier,
+    now-inaccurate "success" audit event for the same request).
+    """
+    result, audit_ctx = run_rag_query_uncommitted(
+        query=query, top_k=top_k, retriever=retriever, request_id=request_id, provider=provider,
+    )
+    commit_rag_query_audit(result, audit_ctx)
+    return result
+
+
+def audit_top_k_rejected(*, request_id: str, query: str, configured_max_top_k: int) -> None:
+    """Emit exactly one safe terminal audit event for a `top_k` value
+    that exceeds the configured Phase 12C policy maximum (distinct from
+    Pydantic's static field ceiling, which FastAPI itself rejects with a
+    422 before any route code runs). This is rejected by
+    `app/api/routes.py` before `run_rag_query`/`run_rag_query_uncommitted`
+    is ever called, and therefore before any pipeline stage -- including
+    Input Guard -- executes.
+
+    **Fixed per the Code X final re-audit:** this specific HTTP 400 path
+    previously produced zero audit trail, since the route returned before
+    the pipeline (and its internal audit commit) ever ran. `log_event`
+    itself already fails safe (never raises, never exposes an exception)
+    on a sink failure -- see its own docstring -- so this function does
+    not need its own defensive wrapper around that call.
+    """
+    query_hash = hashlib.sha256(query.encode("utf-8")).hexdigest()[:16]
+    safe_metadata = {
+        "query_hash": query_hash,
+        "query_length": len(query),
+        "stop_reason": STOP_TOP_K_REJECTED,
+        "provider_called": False,
+        "error_category": STOP_TOP_K_REJECTED,
+        "configured_max_top_k": configured_max_top_k,
+    }
+    log_event(
+        endpoint="/v1/rag/query",
+        request_id=request_id,
+        input_preview=None,
+        input_decision=None,
+        rag_decision=None,
+        output_decision=None,
+        final_decision=Decision.BLOCK,
+        reasons=[STOP_TOP_K_REJECTED],
+        metadata=safe_metadata,
+        provider_metadata=None,
+    )
+
+
+def mark_response_construction_failed(result: RagPipelineResult) -> RagPipelineResult:
+    """Build a corrected copy of `result` for the one case where the
+    guard/retrieval pipeline computed successfully but the API response
+    object (`RagQueryResponse`) then failed to construct from it.
+
+    **Added per the Code X final re-audit:** `result`'s own
+    `final_decision`/`stop_reason` (e.g. "allowed") describe what the
+    *pipeline* computed, not what the *caller actually received* -- once
+    response construction has failed, the caller gets a generic 500, so
+    the terminal audit event must say so too, not the pipeline's original
+    (now inaccurate) outcome. `provider_called` is preserved from `result`
+    since it reflects what actually executed, not what the API layer
+    later did with it; `answer` is replaced with a fixed safe string so
+    the original provider text is never a factor in this corrected
+    record (it already wasn't logged either way -- see
+    `commit_rag_query_audit` -- but this keeps the whole object honest).
+    """
+    return dataclasses.replace(
+        result,
+        final_decision=Decision.BLOCK,
+        answer=_ANSWER_INTERNAL_ERROR,
+        stop_reason=STOP_RESPONSE_CONSTRUCTION_FAILED,
+        error_category=STOP_RESPONSE_CONSTRUCTION_FAILED,
+    )
+
+
+def run_rag_query_uncommitted(
+    *,
+    query: str,
+    top_k: int,
+    retriever: Retriever,
+    request_id: str | None = None,
+    provider: BaseLLMProvider | None = None,
+) -> tuple[RagPipelineResult, RagQueryAuditContext]:
+    """Run the full Phase 12C pipeline for one query and return
+    `(result, audit_ctx)` WITHOUT committing the terminal audit event --
+    the caller must call `commit_rag_query_audit(result, audit_ctx)`
+    itself once it knows what the caller-visible outcome actually is (see
+    `run_rag_query` for the simple immediate-commit alternative, and
+    `app/api/routes.py::rag_query` for the deferred-commit usage this was
+    added for).
+
+    May raise `app.retrieval.sqlite_bm25.EmptySearchQueryError`,
+    `FTS5UnavailableError`, or another unexpected retrieval exception --
+    the caller (`app/api/routes.py`) maps the first two to the same HTTP
+    status codes `POST /v1/retrieve` already uses for the identical
+    exceptions, per this phase's "use existing API conventions"
+    instruction, and any other exception to a generic safe 500. Every
+    such exception is audited (see `_audit_failure`) before it
+    propagates -- there is no response-construction step for these paths
+    to defer past (the route builds a plain `HTTPException` directly from
+    a fixed string, not from a `RagPipelineResult`), so committing
+    immediately here is already safe. Every other stop path returns a
+    `RagPipelineResult` instead of raising.
     """
     request_id = request_id or str(uuid.uuid4())
     t_start = _now_ms()
@@ -187,13 +433,31 @@ def run_rag_query(
             provider_metadata=None, query=query,
         )
 
+    # Effective (post-Input-Guard) query used for retrieval AND as the
+    # only prompt-shaped value ever handed to the provider (see step 6
+    # below and the Major #A fix note there) -- once SANITIZE has run,
+    # nothing derived from the raw `query` may reach the provider.
     effective_query = (
         (input_result.sanitized_text or "") if input_result.decision == Decision.SANITIZE else query
     )
 
     # -- 2. Retrieval (server-side only; may raise, see docstring) -----
     t0 = _now_ms()
-    retrieval_result = retriever.search(RetrievalQuery(query=effective_query, top_k=top_k))
+    try:
+        retrieval_result = retriever.search(RetrievalQuery(query=effective_query, top_k=top_k))
+    except Exception as exc:
+        stage_results.append(
+            StageResult(
+                stage="retrieval", decision=Decision.BLOCK, reason_code="retrieval_failed",
+                detail=type(exc).__name__,
+            )
+        )
+        _audit_failure(
+            request_id=request_id, query=query, stage_results=stage_results,
+            latency_ms=_with_total(latency_ms, t_start), stop_reason=STOP_RETRIEVAL_FAILED,
+            input_decision=input_result,
+        )
+        raise
     latency_ms["retrieval"] = _now_ms() - t0
     stage_results.append(
         StageResult(
@@ -216,18 +480,28 @@ def run_rag_query(
 
     # -- 3. Provenance/Trust Guard -------------------------------------
     t0 = _now_ms()
+    provenance_exception = False
     try:
         provenance_decisions: list[ProvenanceDecision] = evaluate_provenance(list(retrieval_result.hits))
     except Exception:  # noqa: BLE001 -- fail closed: reject every hit
+        provenance_exception = True
         provenance_decisions = [
             ProvenanceDecision(hit=hit, accepted=False, reason_code="provenance_guard_exception")
             for hit in retrieval_result.hits
         ]
     latency_ms["provenance_guard"] = _now_ms() - t0
     accepted_hits = [d.hit for d in provenance_decisions if d.accepted]
+    # Fixed per the Phase 12C Code X audit (Major #3): the stage-level
+    # reason_code previously said "provenance_evaluated" unconditionally,
+    # even when evaluate_provenance() had actually raised -- obscuring
+    # the real failure reason in the audit trail's own stage summary
+    # (the per-hit reason codes were correct; only this one aggregate
+    # stage-result line was misleading).
     stage_results.append(
         StageResult(
-            stage="provenance_guard", decision=None, reason_code="provenance_evaluated",
+            stage="provenance_guard",
+            decision=(Decision.BLOCK if provenance_exception else None),
+            reason_code=("provenance_guard_exception" if provenance_exception else "provenance_evaluated"),
             detail=f"accepted={len(accepted_hits)}/{len(provenance_decisions)}",
         )
     )
@@ -253,7 +527,7 @@ def run_rag_query(
     # can itself contain an underscore (e.g. Decision.LOG_ONLY == "log_only").
     t0 = _now_ms()
     context_outcomes: dict[str, tuple[bool, str, Decision]] = {}
-    final_chunks: list[RAGContextChunk] = []
+    passed_pairs: list[tuple[RetrievalHit, RAGContextChunk]] = []
     for hit in accepted_hits:
         candidate = RAGContextChunk(doc_id=hit.document_id, text=hit.text, metadata=dict(hit.metadata))
         result, exc_name = _safe_rag_context_decision([candidate])
@@ -287,10 +561,10 @@ def run_rag_query(
                 reason_code=f"context_guard_{result.decision.value}", detail=f"chunk_id={hit.chunk_id}",
             )
         )
-        final_chunks.append(effective_chunk)
+        passed_pairs.append((hit, effective_chunk))
     latency_ms["rag_context_guard"] = _now_ms() - t0
 
-    if not final_chunks:
+    if not passed_pairs:
         provenance_summaries = _summaries_from_provenance(provenance_decisions, context_outcomes, False)
         return _finalize(
             request_id=request_id, final_decision=Decision.BLOCK,
@@ -303,20 +577,58 @@ def run_rag_query(
             provider_metadata=None, query=query,
         )
 
-    # -- 5. Bounded aggregate cross-chunk inspection --------------------
+    # -- 5. Bounded aggregate inspection -- governs the EXACT provider ---
+    # -- context (see _bound_chunks_for_aggregate's docstring, Major #2) -
     t0 = _now_ms()
-    aggregate_text = _build_aggregate_text(final_chunks, settings.rag_max_aggregate_context_chars)
+    bounded_pairs, excluded_by_budget, aggregate_text = _bound_chunks_for_aggregate(
+        passed_pairs, settings.rag_max_aggregate_context_chars,
+    )
+    original_text_by_chunk_id = {hit.chunk_id: chunk.text for hit, chunk in passed_pairs}
+    for included_hit, bounded_chunk in bounded_pairs:
+        if bounded_chunk.text != original_text_by_chunk_id[included_hit.chunk_id]:
+            context_outcomes[included_hit.chunk_id] = (
+                True,
+                "aggregate_budget_truncated",
+                Decision.SANITIZE,
+            )
+    for excluded_hit in excluded_by_budget:
+        context_outcomes[excluded_hit.chunk_id] = (False, "aggregate_budget_exceeded", Decision.SANITIZE)
+
+    if not bounded_pairs:
+        # The entire per-chunk-accepted set was excluded by the aggregate
+        # character budget -- functionally identical to all_context_blocked
+        # (nothing reaches the provider), so it is reported the same way.
+        provenance_summaries = _summaries_from_provenance(provenance_decisions, context_outcomes, False)
+        return _finalize(
+            request_id=request_id, final_decision=Decision.BLOCK,
+            answer=_ANSWER_ALL_CONTEXT_BLOCKED, retrieved_count=len(retrieval_result.hits),
+            accepted_context_count=0, rejected_context_count=len(retrieval_result.hits),
+            provenance=provenance_summaries, stage_results=stage_results, redaction_count=0,
+            latency_ms=_with_total(latency_ms, t_start), stop_reason=STOP_ALL_CONTEXT_BLOCKED,
+            provider_called=False, error_category=None,
+            input_decision=input_result, rag_decision=None, output_decision=None,
+            provider_metadata=None, query=query,
+        )
+
     aggregate_result, aggregate_exc = _safe_rag_context_decision(
         [RAGContextChunk(doc_id="__aggregate__", text=aggregate_text, metadata={})]
     )
     latency_ms["aggregate_context_guard"] = _now_ms() - t0
     aggregate_decision = aggregate_result.decision if aggregate_result else Decision.BLOCK
-    aggregate_blocked = aggregate_exc is not None or aggregate_decision in _STOPPING_DECISIONS
+    # Fail closed on SANITIZE too, unlike every other stage: a sanitized
+    # *joined-and-truncated* blob has no safe, deterministic mapping back
+    # onto the individual RAGContextChunk objects the provider expects,
+    # so "sanitize the aggregate" cannot be honored without either
+    # fabricating a per-chunk split or silently sending the unsanitized
+    # originals anyway -- fail-closed was the chosen safe model (Phase
+    # 12C Code X audit, Major #2).
+    aggregate_blocked = aggregate_exc is not None or aggregate_decision in _AGGREGATE_STOPPING_DECISIONS
     stage_results.append(
         StageResult(
             stage="aggregate_context_guard",
             decision=aggregate_decision,
             reason_code=("aggregate_guard_exception" if aggregate_exc else f"aggregate_{aggregate_decision.value}"),
+            detail=f"aggregate_chars={len(aggregate_text)}",
         )
     )
 
@@ -333,20 +645,45 @@ def run_rag_query(
             provider_metadata=None, query=query,
         )
 
-    # -- 6. Mock LLM Provider (approved context only) -------------------
+    # The provider receives exactly the bounded/truncated chunks that
+    # were just inspected as `aggregate_text` -- never the original,
+    # untruncated chunk text (Major #2 fix).
+    final_chunks = [chunk for _hit, chunk in bounded_pairs]
+
+    # -- 6. Mock LLM Provider (sanitized query + inspected context only) -
     t0 = _now_ms()
-    active_provider = provider or get_llm_provider(settings.llm_provider)
+    provider_called = False
     try:
-        provider_result = active_provider.generate(
+        resolved_provider = provider or get_llm_provider(settings.llm_provider)
+        provider_called = True
+        provider_result = resolved_provider.generate(
             LLMProviderRequest(
-                prompt=query, sanitized_prompt=effective_query, context_chunks=final_chunks,
-                metadata={}, request_id=request_id,
+                # Fixed per the Phase 12C Code X audit (Major #A): both
+                # `prompt` and `sanitized_prompt` are now the SAME
+                # post-Input-Guard `effective_query` for this pipeline --
+                # the raw, pre-sanitization `query` is never placed in any
+                # provider-visible field. A provider implementation that
+                # reads `request.prompt` instead of `request.sanitized_prompt`
+                # can therefore never see text the Input Guard removed.
+                # This changes only this call site, not the shared
+                # `LLMProviderRequest` contract or app/services/gateway.py's
+                # own call (`/v1/gateway/chat` keeps its Phase 4-6
+                # behavior unchanged, per this phase's backward-
+                # compatibility requirement).
+                prompt=effective_query, sanitized_prompt=effective_query,
+                context_chunks=final_chunks, metadata={}, request_id=request_id,
             )
         )
     except Exception:  # noqa: BLE001 -- fail closed
+        provider_reason = (
+            "provider_exception" if provider_called else "provider_factory_exception"
+        )
+        provider_error_category = (
+            STOP_PROVIDER_FAILED if provider_called else "provider_factory_failed"
+        )
         provenance_summaries = _summaries_from_provenance(provenance_decisions, context_outcomes, False)
         stage_results.append(
-            StageResult(stage="provider", decision=Decision.BLOCK, reason_code="provider_exception")
+            StageResult(stage="provider", decision=Decision.BLOCK, reason_code=provider_reason)
         )
         return _finalize(
             request_id=request_id, final_decision=Decision.BLOCK,
@@ -355,7 +692,7 @@ def run_rag_query(
             rejected_context_count=len(retrieval_result.hits) - len(final_chunks),
             provenance=provenance_summaries, stage_results=stage_results, redaction_count=0,
             latency_ms=_with_total(latency_ms, t_start), stop_reason=STOP_PROVIDER_FAILED,
-            provider_called=True, error_category="provider_failed",
+            provider_called=provider_called, error_category=provider_error_category,
             input_decision=input_result, rag_decision=aggregate_result, output_decision=None,
             provider_metadata=None, query=query,
         )
@@ -387,10 +724,17 @@ def run_rag_query(
             provider_metadata=provider_metadata, query=query,
         )
     latency_ms["dlp"] = _now_ms() - t0
+    # Fixed per the Phase 12C Code X audit (Major #E): a DLP redaction is
+    # a security-relevant action, not a no-op -- it must be represented
+    # as Decision.SANITIZE and participate in final-decision severity,
+    # not silently vanish as an implicit "allow". `dlp_decision` folds
+    # into every `most_severe(...)` call below/after this point.
+    dlp_decision = Decision.SANITIZE if dlp_result.redaction_count > 0 else Decision.ALLOW
     stage_results.append(
         StageResult(
-            stage="dlp", decision=None, reason_code="dlp_completed",
-            detail=f"redaction_count={dlp_result.redaction_count}",
+            stage="dlp", decision=dlp_decision,
+            reason_code=("dlp_redacted" if dlp_result.redaction_count > 0 else "dlp_completed"),
+            detail=f"redaction_count={dlp_result.redaction_count} truncated={dlp_result.truncated}",
         )
     )
 
@@ -408,7 +752,8 @@ def run_rag_query(
         stage_results.append(StageResult(stage="output_guard", decision=decision, reason_code=reason))
         provenance_summaries = _summaries_from_provenance(provenance_decisions, context_outcomes, False)
         return _finalize(
-            request_id=request_id, final_decision=most_severe([input_result.decision, aggregate_decision, decision]),
+            request_id=request_id,
+            final_decision=most_severe([input_result.decision, aggregate_decision, dlp_decision, decision]),
             answer=_ANSWER_OUTPUT_BLOCKED, retrieved_count=len(retrieval_result.hits),
             accepted_context_count=len(final_chunks),
             rejected_context_count=len(retrieval_result.hits) - len(final_chunks),
@@ -418,6 +763,7 @@ def run_rag_query(
             provider_called=True, error_category=None,
             input_decision=input_result, rag_decision=aggregate_result, output_decision=output_result,
             provider_metadata=provider_metadata, query=query,
+            dlp_findings=dlp_result.findings,
         )
 
     stage_results.append(
@@ -432,7 +778,7 @@ def run_rag_query(
     # -- 9. Allowed: assemble the final safe result -----------------------
     per_chunk_decisions = [outcome[2] for outcome in context_outcomes.values() if outcome[0]]
     final_decision = most_severe(
-        [input_result.decision, aggregate_decision, output_result.decision, *per_chunk_decisions]
+        [input_result.decision, aggregate_decision, dlp_decision, output_result.decision, *per_chunk_decisions]
     )
     provenance_summaries = _summaries_from_provenance(provenance_decisions, context_outcomes, False)
 
@@ -470,7 +816,7 @@ def _summaries_from_provenance(
             elif aggregate_blocked:
                 status, reason_code = "rejected", "aggregate_context_blocked"
             else:
-                status, reason_code = "accepted", "allowed_source"
+                status, reason_code = "accepted", outcome[1]
         summaries.append(
             ProvenanceSummary(
                 document_id=hit.document_id, chunk_id=hit.chunk_id, title=hit.title,
@@ -503,7 +849,26 @@ def _finalize(
     provider_metadata: dict | None,
     query: str,
     dlp_findings: tuple = (),
-) -> RagPipelineResult:
+) -> tuple[RagPipelineResult, RagQueryAuditContext]:
+    """Build the typed `RagPipelineResult` plus the audit inputs needed
+    to describe it later, WITHOUT committing any audit event itself.
+
+    **Changed per the Code X final re-audit:** this used to call
+    `log_event(...)` directly and return only the `RagPipelineResult`,
+    which is exactly what let a response-construction failure in
+    `app/api/routes.py` leave behind an already-committed "success" audit
+    event for a request the caller actually received as a 500. Building
+    the result and committing the audit are now two separate steps --
+    see `run_rag_query` (commits immediately, for direct/service callers)
+    and `commit_rag_query_audit` (the extracted commit step,
+    called explicitly once the true caller-visible outcome is known).
+    """
+    dlp_categories: dict[str, int] = {}
+    for finding in dlp_findings:
+        dlp_categories[finding.category] = (
+            dlp_categories.get(finding.category, 0) + finding.count
+        )
+
     result = RagPipelineResult(
         request_id=request_id,
         final_decision=final_decision,
@@ -514,58 +879,68 @@ def _finalize(
         provenance=tuple(provenance),
         stage_results=tuple(stage_results),
         redaction_count=redaction_count,
+        dlp_finding_categories=dlp_categories,
         latency_ms=latency_ms,
         stop_reason=stop_reason,
         provider_called=provider_called,
         error_category=error_category,
     )
+    audit_ctx = RagQueryAuditContext(
+        query=query,
+        input_decision=input_decision,
+        rag_decision=rag_decision,
+        output_decision=output_decision,
+        provider_metadata=provider_metadata,
+    )
+    return result, audit_ctx
 
+
+def commit_rag_query_audit(result: RagPipelineResult, audit_ctx: RagQueryAuditContext) -> None:
+    """Emit exactly the one terminal `/v1/rag/query` audit event that
+    describes `result` -- the extracted, previously-inline logging body
+    of what `_finalize` used to do directly (see that function's
+    docstring for why it was split out).
+
+    Callers are responsible for calling this **exactly once** per
+    request, for whichever outcome is actually visible to the caller --
+    `run_rag_query` does so immediately; `app/api/routes.py` calls it
+    only after confirming the API response object was built successfully
+    (or with `mark_response_construction_failed(result)` if it was not).
+    """
     # Never log the raw query: it may contain sensitive enterprise content
     # pulled in by natural-language phrasing (unlike the other endpoints'
     # redacted-preview convention). Only a non-reversible hash + length.
-    query_hash = hashlib.sha256(query.encode("utf-8")).hexdigest()[:16]
+    query_hash = hashlib.sha256(audit_ctx.query.encode("utf-8")).hexdigest()[:16]
     provenance_categories: dict[str, int] = {}
-    for item in provenance:
+    for item in result.provenance:
         provenance_categories[item.trust_level] = provenance_categories.get(item.trust_level, 0) + 1
-    dlp_categories: dict[str, int] = {}
-    for finding in dlp_findings:
-        dlp_categories[finding.category] = dlp_categories.get(finding.category, 0) + finding.count
-
     safe_metadata = {
         "query_hash": query_hash,
-        "query_length": len(query),
-        "retrieved_count": retrieved_count,
-        "accepted_context_count": accepted_context_count,
-        "rejected_context_count": rejected_context_count,
-        "stop_reason": stop_reason,
-        "provider_called": provider_called,
-        "redaction_count": redaction_count,
-        "dlp_finding_categories": dlp_categories,
+        "query_length": len(audit_ctx.query),
+        "retrieved_count": result.retrieved_count,
+        "accepted_context_count": result.accepted_context_count,
+        "rejected_context_count": result.rejected_context_count,
+        "stop_reason": result.stop_reason,
+        "provider_called": result.provider_called,
+        "redaction_count": result.redaction_count,
+        "dlp_finding_categories": result.dlp_finding_categories,
         "provenance_trust_categories": provenance_categories,
         "stage_reason_codes": [
-            {"stage": sr.stage, "reason_code": sr.reason_code} for sr in stage_results
+            {"stage": sr.stage, "reason_code": sr.reason_code} for sr in result.stage_results
         ],
-        "latency_ms": latency_ms,
-        "error_category": error_category,
+        "latency_ms": result.latency_ms,
+        "error_category": result.error_category,
     }
 
     log_event(
         endpoint="/v1/rag/query",
-        request_id=request_id,
+        request_id=result.request_id,
         input_preview=None,
-        input_decision=input_decision,
-        rag_decision=rag_decision,
-        output_decision=output_decision,
-        final_decision=final_decision,
-        reasons=[sr.reason_code for sr in stage_results] or [stop_reason],
+        input_decision=audit_ctx.input_decision,
+        rag_decision=audit_ctx.rag_decision,
+        output_decision=audit_ctx.output_decision,
+        final_decision=result.final_decision,
+        reasons=[sr.reason_code for sr in result.stage_results] or [result.stop_reason],
         metadata=safe_metadata,
-        provider_metadata=provider_metadata,
+        provider_metadata=audit_ctx.provider_metadata,
     )
-    return result
-
-
-def _with_total(latency_ms: dict[str, float], t_start: float) -> dict[str, float]:
-    """Add a `"total"` entry (wall-clock time across every stage that
-    actually ran) to a stage-timing dict, without mutating the caller's
-    dict in place."""
-    return {**latency_ms, "total": _now_ms() - t_start}

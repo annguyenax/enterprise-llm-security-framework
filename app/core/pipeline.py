@@ -75,6 +75,7 @@ class RagPipelineResult:
     provenance: tuple[ProvenanceSummary, ...] = field(default_factory=tuple)
     stage_results: tuple[StageResult, ...] = field(default_factory=tuple)
     redaction_count: int = 0
+    dlp_finding_categories: dict[str, int] = field(default_factory=dict)
     latency_ms: dict[str, float] = field(default_factory=dict)
     stop_reason: str = "allowed"
     provider_called: bool = False

@@ -3,11 +3,16 @@
 pytest coverage for the gateway, dataset loader, rule-based guards, the
 Phase 12B retrieval foundation, and the Phase 12C end-to-end RAG pipeline.
 
-**Status: Phase 12C (In Review).** Phase 12B is post Code X audit and
-three rounds of independent re-audit resolution (see
-`docs/modernization-ai-reviews/phase-12b-audit-resolution.md`); Phase 12C
-is newly implemented and has not yet had an independent audit pass.
-**Neither phase is marked Done yet** — see `TASK_BOARD.md`. Coverage
+**Status: Phase 12C In Review — two rounds of Code X final re-audit each
+found and fixed one blocking terminal-audit-coverage gap (top_k rejection
+and response-construction failure not audited, then nested
+`ProvenanceItemResponse` construction not protected); ready for one final
+independent re-audit, not yet marked Done.** Phase 12B is post Code X
+audit and three rounds of independent re-audit resolution (see
+`docs/modernization-ai-reviews/phase-12b-audit-resolution.md`); Phase 12C's
+Gemini/Grok/Code X findings, the multidisciplinary resolution, and both
+subsequent Code X final re-audit fixes are all recorded in
+`docs/modernization-ai-reviews/phase-12c-audit-resolution.md`. Coverage
 includes the offline provider contract, bypass variants, targeted RAG
 sanitization, benign false positives, gateway ordering, severity
 aggregation, audit redaction, (Phase 12B) deterministic chunking, SQLite
@@ -20,9 +25,13 @@ centralized DLP redaction (plus consolidation-parity regression against
 the previously-duplicated `output_guard`/`audit_logger` patterns), the
 full end-to-end `POST /v1/rag/query` pipeline (stage order, every
 fail-closed stop path, the bounded multi-chunk aggregate check), and
-HTTP-level request/response coverage for that endpoint. **267 tests
-total** (82 pre-Phase-12B + 106 Phase 12B + 79 Phase 12C — see
-`docs/modernization-ai-reviews/phase-12b-audit-resolution.md` for the
+HTTP-level request/response coverage for that endpoint, including both
+terminal-audit-coverage fixes: configured `top_k` policy rejection and
+outer/nested response-construction failure (`ProvenanceItemResponse`,
+`StageResultResponse`) each now commit exactly one safe, accurate audit
+event, with the entire response tree built inside one protected block.
+**323 tests total** (82 pre-Phase-12B + 106 Phase 12B + 135 Phase 12C —
+see `docs/modernization-ai-reviews/phase-12b-audit-resolution.md` for the
 Phase 12B breakdown).
 
 ## Test Modules
@@ -46,9 +55,10 @@ Phase 12B breakdown).
 | `test_retrieval_routes.py` | **Phase 12B.** `POST /v1/documents/ingest` and `POST /v1/retrieve` request/response validation, top_k bounds, safe error responses, regression checks that `/health` and `/v1/gateway/chat` are byte-identical to their pre-Phase-12B behavior, and (audit fixes) HTTP-level elevated-trust-source rejection, safe storage-failure error mapping, and (final re-audit fixes) HTTP-level UTF-8 oversize and deep-nesting rejection, and a route-level list-of-list metadata-spoofing regression extended to cover all four reserved keys. An autouse module-scoped fixture gives this module its own fresh, isolated database file. |
 | `conftest.py` | **Phase 12B final re-audit fix.** Session-wide, non-behavioral pytest configuration: redirects `RETRIEVAL_DB_PATH` to a per-session temporary path before any test module in this directory is collected/imported, so the very first `app.main` import in the session (which eagerly creates the SQLite retrieval schema, per Minor #1) never touches the repository's `data/retrieval.db`. |
 | `test_provenance_guard.py` | **Phase 12C.** Deterministic Provenance/Trust Guard: allowed public/internal sources, unknown/malformed trust level, classification restriction, unknown source_type, mixed accepted/rejected batches, all-rejected batches, caller-metadata spoofing has no effect (decision reads only server-assigned hit fields), the allow-lists match `app/core/source_policy.py`'s real values, and acceptance does not imply content safety (trust does not bypass the RAG Context Guard). |
-| `test_dlp_guard.py` | **Phase 12C.** Centralized DLP: no-secret passthrough, single/multiple/repeated secret redaction, full private-key-block redaction, benign-identifier non-over-redaction, Vietnamese surrounding text preserved, bounded-input-size truncation, findings never carry the raw value, and consolidation-parity regression proving `app.guards.output_guard` and `app.services.audit_logger`'s redaction behavior is byte-identical after both were changed to import their patterns from this module instead of duplicating them. |
-| `test_rag_pipeline.py` | **Phase 12C.** Service-level `run_rag_query()` coverage (via a stub retriever test double plus two real-`SqliteBM25Retriever` end-to-end cases): full stage order, every fail-closed stop path (input blocked, no hits, all rejected by provenance, all/aggregate-blocked by the RAG Context Guard, provider failure, output blocked), guard-exception fail-closed behavior at every stage, rejected chunks never reaching the provider, DLP redaction before the Output Guard sees the text, no raw secret or raw query in the audit log, and the bounded aggregate check catching an instruction split across two otherwise-clean chunks. |
-| `test_rag_query_routes.py` | **Phase 12C.** HTTP-level `POST /v1/rag/query` coverage: strict-schema rejection of `context_chunks`/`trust_level`/`classification`/`source_type`/`is_poisoned`/`expected_decision`/`security_decision`/`document_id`/`chunk_id`, safe response shape (no full chunk text in provenance), safe error mapping (storage failure, empty-query 400, configured `top_k` maximum 400), unique request IDs, and regression checks that `/health`, `POST /v1/gateway/chat` (including with a matching ingested document present, to prove it never silently switches to retrieval), and `POST /v1/retrieve` are all unaffected. An autouse module-scoped fixture gives this module its own fresh, isolated database file. |
+| `test_dlp_guard.py` | **Phase 12C.** Centralized DLP: complete-prefix enforcement with no uninspected suffix, after/across-boundary credential and private-key cases, long-benign truncation, non-overlapping source-span counts, full shared audit redaction API, repeated secrets, benign counterexamples, and historical Output Guard parity. |
+| `test_rag_pipeline.py` | **Phase 12C.** Service-level `run_rag_query()` coverage: full stage order and stop paths; sanitized-only provider input; provider context byte-for-byte bounded by aggregate enforcement; aggregate SANITIZE fail-closed; per-chunk/global-budget and separator accounting; multilingual/zero-width split attacks; high-trust malicious content; benign authority/academic counterexamples; DLP SANITIZE telemetry; retrieval/provenance/context/aggregate/provider/DLP/output/audit-sink exception behavior; two real-SQLite end-to-end cases; and (Code X final re-audit) `top_k`-rejection audit, `run_rag_query_uncommitted`/`commit_rag_query_audit` deferred-commit behavior, `mark_response_construction_failed`'s corrected audit event, and an exact empty-sanitized-query (`sanitized_text=""`) regression. |
+| `test_rag_query_routes.py` | **Phase 12C.** HTTP-level strict schema, safe response/error mapping, no uninspected DLP tail, real-endpoint nested audit redaction for all detector families, response-construction safety, request IDs, backward compatibility for `/health`, `/v1/gateway/chat`, ingestion and retrieval, and (Code X final re-audit) exactly-one-safe-terminal-event coverage for both the configured `top_k` policy rejection and a forced `RagQueryResponse` construction failure, including audit-sink-failure behavior for each; and (Code X final terminal-audit re-audit) the same guarantee extended to nested response-model construction (`ProvenanceItemResponse`, `StageResultResponse`) — forced failure, combined with a broken audit sink, and the unaffected success path. |
+| `test_phase12c_config.py` | **Phase 12C audit resolution.** Direct and environment-driven validation for positive limits, top-k relationships, hard ceilings, malformed integers/booleans, contradictory values, valid boundaries, and backward-compatible direct `Settings(...)` construction. |
 
 ## Running
 

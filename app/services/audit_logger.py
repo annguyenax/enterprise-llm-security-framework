@@ -9,7 +9,7 @@ safety net (AGENT_RULES.md rule 5 — never persist real-looking secrets).
 from __future__ import annotations
 
 import json
-import re
+import logging
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,36 +17,30 @@ from typing import Any
 
 from app.core.config import settings
 from app.core.decisions import Decision
-from app.guards.dlp_guard import (
-    AWS_KEY_PATTERN,
-    FAKE_SECRET_PATTERN,
-    GITHUB_TOKEN_PATTERN,
-    OPENAI_KEY_PATTERN,
-    PRIVATE_KEY_BLOCK_PATTERN,
-)
+from app.guards.dlp_guard import redact_sensitive_text
 from app.schemas.responses import GuardDecisionResponse, RAGGuardResponse
 
 _WRITE_LOCK = threading.Lock()
-
-# Phase 12C centralization: these five patterns are now defined once in
-# app/guards/dlp_guard.py (per docs/modernization-v2-architecture.md §5)
-# instead of being redefined here. Same regex source and flags as before
-# this change -- see tests/test_dlp_guard.py's
-# test_audit_logger_redaction_unchanged_after_consolidation.
-_SECRET_PATTERNS: tuple[re.Pattern[str], ...] = (
-    FAKE_SECRET_PATTERN,
-    OPENAI_KEY_PATTERN,
-    AWS_KEY_PATTERN,
-    GITHUB_TOKEN_PATTERN,
-    PRIVATE_KEY_BLOCK_PATTERN,
-)
+_FALLBACK_LOGGER = logging.getLogger("app.audit.fallback")
 
 
 def _redact_secrets(text: str) -> str:
-    redacted = text
-    for pattern in _SECRET_PATTERNS:
-        redacted = pattern.sub("[REDACTED]", redacted)
-    return redacted
+    """Delegates to the single centralized, complete detector set.
+
+    **Fixed per the Phase 12C Code X audit (Critical #2):** this
+    previously imported five specific pattern constants directly from
+    `app/guards/dlp_guard.py` and applied them in a local tuple, which
+    silently omitted the bearer-token and secret-assignment detectors
+    added later in the same phase -- a caller could place
+    `Bearer <token>` or `password=...` in request metadata and have it
+    persisted verbatim in `audit.jsonl`. Calling the shared
+    `redact_sensitive_text()` function instead of re-listing individual
+    pattern constants means this call site can never again silently
+    drift out of sync with the centralized detector set -- there is
+    exactly one place (`dlp_guard._DETECTORS`) that defines what counts
+    as a secret, and this module no longer needs to know its contents.
+    """
+    return redact_sensitive_text(text)
 
 
 def _preview(text: str, max_len: int = 200) -> str:
@@ -91,7 +85,7 @@ def log_event(
     reasons: list[str],
     metadata: dict[str, Any],
     provider_metadata: dict[str, Any] | None = None,
-) -> None:
+) -> bool:
     """Append one JSONL audit event. No-op if ENABLE_AUDIT_LOG is false.
 
     Per FR7/NFR3 (docs/diagrams/architecture.md), every guard decision made
@@ -103,7 +97,7 @@ def log_event(
     logged context-chunk preview).
     """
     if not settings.enable_audit_log:
-        return
+        return True
 
     event = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -119,10 +113,32 @@ def log_event(
         "provider": _redact_value(provider_metadata),
     }
 
-    log_path = Path(settings.log_path)
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-
-    line = json.dumps(event, ensure_ascii=False)
-    with _WRITE_LOCK:
-        with log_path.open("a", encoding="utf-8") as f:
-            f.write(line + "\n")
+    # Audit-sink failure behavior (Phase 12C Code X audit, Major #3): a
+    # disk/permissions failure while writing the audit log must never
+    # propagate out of log_event and fail the caller's actual request --
+    # the response to the caller has either already been computed or is
+    # about to be, and losing one audit line is a strictly better outcome
+    # than a 500 caused solely by logging infrastructure. Attempted
+    # exactly once, not retried (a retry loop against a sink that is
+    # actually down would just block/spin), and the exception itself
+    # (which could include a filesystem path) is never included in any
+    # response or re-raised -- it is deliberately swallowed here, the one
+    # place this project intentionally does so.
+    try:
+        line = json.dumps(event, ensure_ascii=False)
+        log_path = Path(settings.log_path)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with _WRITE_LOCK:
+            with log_path.open("a", encoding="utf-8") as f:
+                f.write(line + "\n")
+        return True
+    except (OSError, TypeError, ValueError, RecursionError):
+        # One safe fallback signal only. Never include the exception,
+        # submitted metadata, query, provider output, or filesystem path.
+        _FALLBACK_LOGGER.error(
+            "audit_sink_failure endpoint=%s request_id=%s final_decision=%s",
+            endpoint,
+            request_id,
+            final_decision.value,
+        )
+        return False

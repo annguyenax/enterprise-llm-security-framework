@@ -66,6 +66,12 @@ uvicorn app.main:app --reload
 powershell -ExecutionPolicy Bypass -File scripts/smoke_test_rag_pipeline.ps1
 ```
 
+The Phase 12C multidisciplinary audit-resolution run repeated this script
+against a uniquely named temporary SQLite database and audit log, with the
+server started hidden and stopped immediately afterward; it passed. Boundary
+DLP and injected-provider scenarios remain deterministic pytest cases because
+the live Mock Provider intentionally emits only its fixed short response.
+
 No evaluation script calls an LLM API, vector database, or external service.
 `smoke_test_retrieval.ps1` and `smoke_test_rag_pipeline.ps1` use only
 Python's standard-library `sqlite3` and the offline Mock LLM Provider (via
