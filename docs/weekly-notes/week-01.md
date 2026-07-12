@@ -294,3 +294,256 @@ Phase 0 kickoff. Focus was entirely on scaffolding: repository structure, planni
   is not itself the go-ahead to implement - per `AGENT_RULES.md` rule 12,
   Phase 12B still requires a separate, explicit instruction before any
   `app/` code is written.
+
+## Phase 12B - SQLite FTS5/BM25 Retrieval Foundation (same week, 2026-07-11)
+
+- Implemented the retrieval foundation approved in Phase 12A, using only
+  Python's standard-library `sqlite3` (no new dependency, matching
+  `ADR-002-retrieval-engine.md`): `app/retrieval/models.py` (defensively
+  immutable records, metadata copied into `MappingProxyType`),
+  `app/retrieval/base.py` (`Retriever` protocol), `app/retrieval/sqlite_bm25.py`
+  (persistent schema, `bm25()`-ranked search, short-lived per-operation
+  connections only, explicit FTS5 capability check with **no fallback of
+  any kind**), `app/services/chunking.py` (deterministic paragraph-aware
+  chunking, distinct from and not replacing v1's `dataset_loader.py`
+  chunker), `app/core/source_policy.py` (server-controlled trust/
+  classification, unknown `source_key` rejected by documented choice), and
+  `app/services/ingestion.py` (atomic upsert orchestration, reserved
+  metadata-key stripping, one safe audit event per batch).
+- Added `POST /v1/documents/ingest` and `POST /v1/retrieve` to
+  `app/api/routes.py`. `POST /v1/gateway/chat` and every other Phase 0-11
+  endpoint are unchanged - confirmed via regression tests and a live
+  `curl` check producing byte-identical responses.
+- Query safety: user query text is tokenized into plain lexical terms,
+  each individually double-quoted before being joined into the FTS5
+  `MATCH` expression, so operators (`NEAR`, `AND`/`OR`/`NOT`, column
+  filters, wildcards) typed by a caller are treated as literal search
+  terms rather than executed as FTS5 query syntax - verified with a
+  parametrized adversarial test covering quotes, parentheses, wildcards,
+  a SQL-injection-shaped string, control characters, and a 5000-character
+  query.
+- Trust/provenance: verified end-to-end (not just by code review) that a
+  caller-supplied `trust_level: "trusted_internal"` inside a document's
+  free-form `metadata` is silently stripped and has no effect - the
+  document is stored with the real server-assigned policy value instead.
+  A top-level `trust_level` field (outside `metadata`) is rejected outright
+  by the request schema (`extra="forbid"`, HTTP 422).
+- Ingestion semantics verified live: re-ingesting identical content is a
+  no-op (`unchanged`); changed content atomically replaces all stale
+  chunks and FTS index rows in one transaction (`updated`, confirmed the
+  pre-update content is no longer retrievable while the new content is);
+  duplicate `external_id` within a batch is rejected per-item.
+- **Test suite grew from 82 to 151 tests** (69 new):
+  `tests/test_chunking.py` (14), `tests/test_sqlite_bm25.py` (31, including
+  a simulated FTS5-unavailable capability failure using a fake connection
+  object, since `sqlite3.Connection` is an immutable C type that cannot be
+  patched directly with `unittest.mock`), `tests/test_ingestion.py` (14),
+  `tests/test_retrieval_routes.py` (10). All 151 passed in a clean
+  project-local `.venv` (not the shared/global environment with the
+  documented `httpx2` issue).
+- Added `scripts/smoke_test_retrieval.ps1` (ingest, retrieve, update,
+  verify stale content gone) and ran it against a live local server on a
+  scratch `RETRIEVAL_DB_PATH` - passed.
+- **Backward-compatibility fix:** adding 9 new fields to `Settings`
+  (`app/core/config.py`) initially broke an existing test that constructs
+  `Settings(...)` directly without them. Fixed by giving every new field a
+  default value rather than modifying the pre-existing test -
+  `load_settings()` still passes every field explicitly from the
+  environment, so runtime behavior is unchanged.
+- No file under `app/guards/`, `app/services/gateway.py`,
+  `app/services/evaluation_runner.py`, `app/services/llm_provider.py`,
+  `datasets/`, `redteam/`, `reports/evaluation/`, `report-latex-template/`,
+  or `requirements.txt` was modified; no new dependency installed
+  (`sqlite3` is standard library). Runtime database files (`data/*.db`)
+  were already covered by `.gitignore` before this phase - no `.gitignore`
+  change was needed.
+- **Explicitly not implemented (by design):** no `POST /v1/rag/query` -
+  retrieval is not wired into any guard or the LLM provider yet, that is
+  Phase 12C; no vector/embedding retrieval (optional Phase 12F); no real
+  LLM call anywhere.
+- **Marked In Review, not Done** per `AGENT_RULES.md` rule 9/10 - this
+  session's verification is thorough (151/151 tests, live smoke test) but
+  the phase awaits an independent repeat of that verification and a
+  repository-wide security review before being declared Done. Phase 12C
+  does not start automatically and requires a separate, explicit
+  go-ahead.
+
+## Phase 12B Code X Audit Resolution (same week, 2026-07-11)
+
+- An independent Code X audit of implementation commit `6bfb714` returned
+  verdict REVISE: 0 Critical, 5 Major (all blocking), 4 Minor findings.
+  Every Major finding was independently re-verified against the actual
+  code before being accepted - none was accepted purely on the audit's
+  say-so, per this task's own explicit instruction not to assume the
+  audit is automatically correct.
+- All 5 Major findings fixed, each with a regression test reproducing the
+  exact scenario the audit demonstrated: (1) a public caller could claim
+  `source_key="synthetic_clean_corpus"` and be granted
+  `trust_level="trusted_internal"` - fixed by removing elevated-trust
+  policies from the table the public ingestion path resolves against;
+  (2) reserved metadata-key stripping only matched exact top-level keys,
+  so `{"nested": {"trust_level": "..."}}` or `{"Trust_Level": "..."}`
+  survived unmodified - fixed with recursive, case/whitespace-normalized,
+  depth-bounded sanitization plus an auditable stripped-key count (never
+  the stripped value); (3) re-ingesting identical text with a changed
+  title/metadata was wrongly reported `unchanged`, silently freezing
+  stale fields - fixed by widening the persistence-comparison fingerprint;
+  (4) environment-configured ingestion resource limits
+  (`RETRIEVAL_MAX_DOCUMENT_CHARS` etc.) were never actually wired into the
+  service, so they had no effect - fixed in `app/api/routes.py`; (5)
+  implicit AND term-combination meant one extra irrelevant query term
+  could zero out an otherwise-matching retrieval result, a genuine
+  false-negative/evasion primitive - FTS5 term joining changed from AND
+  to OR (`ADR-002-retrieval-engine.md` updated to document why).
+- Minor findings: eager FTS5 capability check at import time (was lazy,
+  first-request-only); safe generic error mapping for unexpected storage
+  failures (was leaking raw exception text toward the client); a test
+  cleanup fixture preventing `data/retrieval.db` from growing unbounded
+  across repeated test runs; and a partial fix for ID normalization
+  (whitespace + source_key case folded before dedup, but external_id case
+  deliberately left as-is, since a case-sensitive real-world ID scheme
+  could otherwise have two genuinely distinct documents silently merged -
+  a worse failure mode than the one being fixed, documented explicitly
+  rather than silently accepted).
+- 14 new regression tests added (83 Phase 12B tests total, up from 69);
+  full suite grew to **165/165 passing**. `scripts/smoke_test_retrieval.ps1`
+  needed updating too - its original "stale content gone" check
+  implicitly relied on the AND-only suppression semantics that finding
+  (5) removed, so it now asserts the actual invariant (no stale chunk
+  text in any returned hit) directly; re-verified against a live local
+  server after the fix.
+- Created `docs/modernization-ai-reviews/phase-12b-audit-resolution.md`
+  (full traceable record: every finding's decision/fix/regression-test/
+  rationale/residual-risk, the ingestion-atomicity and metadata-spoofing
+  and FTS5-query-safety decisions restated precisely, and a 12-point
+  acceptance-gate checklist - all PASS). No file under `app/guards/`,
+  `app/services/gateway.py`, `app/services/evaluation_runner.py`,
+  `app/services/llm_provider.py`, `datasets/`, `redteam/`,
+  `reports/evaluation/`, `report-latex-template/`, or `requirements.txt`
+  was modified; no new dependency installed; no runtime database tracked.
+- **Final recommendation: APPROVE PHASE 12B.** Phase 12C still requires a
+  separate, explicit go-ahead - audit approval is not itself that
+  go-ahead.
+
+## Phase 12B Code X Re-audit Resolution (same week, 2026-07-11)
+
+- An independent re-audit of the first-pass fix (commit `04f68dd`) found
+  that Major #2 (reserved metadata filtering) was only partially
+  resolved: a list-of-lists structure - the exact probe
+  `{"wrapper": [[{" TrUsT-LeVeL ": "trusted_internal", "is_poisoned": true, "expected_decision": "allow"}]]}` -
+  bypassed the recursive sanitization entirely, persisting unmodified
+  with `metadata_keys_stripped` wrongly reporting 0. The metadata-size
+  limit was also found to run after sanitization, letting a huge value
+  hidden under a reserved key bypass it. The `phase-12b-audit-resolution.md`
+  document's earlier claim of "recursive handling at any nesting depth"
+  was corrected in place rather than left standing.
+- Root cause: the first fix only recursed into a list element when that
+  element was itself a `dict`; `_metadata_depth` also never incremented
+  for list descent, so list nesting never tripped the depth safety net
+  regardless of how deep it went.
+- Fix: `app/services/ingestion.py`'s `_sanitize_metadata`/`_metadata_depth`
+  now recurse uniformly over every combination of dicts and lists; the
+  ingestion loop validates raw metadata JSON size and depth *before*
+  sanitizing, not after; `MAX_METADATA_DEPTH` raised 4->6 (a direct
+  consequence of counting list depth correctly - a realistic 5-container
+  structure needs a 6th unit of budget to reach its own leaf values).
+- Route-test database isolation was also completed properly this pass:
+  `tests/test_retrieval_routes.py` now swaps `app.api.routes`'s
+  `_retriever`/`_ingestion_service` singletons for instances pointed at a
+  pytest-managed temporary file for the whole module (restored at
+  teardown) instead of only cleaning up tracked documents afterward -
+  verified to leave zero test documents in `data/retrieval.db`.
+- 12 new regression tests added (95 Phase 12B tests, up from 83); full
+  suite grew to **177/177 passing**.
+- `README.md` and `app/README.md` corrected: both previously still
+  claimed FTS5 terms are joined with implicit AND (stale from before the
+  Major #5 OR fix); both now correctly state explicit server-generated OR,
+  and the metadata section now accurately describes recursive dict+list
+  handling and the raw-size-before-sanitization ordering.
+- No file under `app/guards/`, `app/services/gateway.py`,
+  `app/services/evaluation_runner.py`, `app/services/llm_provider.py`,
+  `datasets/`, `redteam/`, `reports/evaluation/`,
+  `report-latex-template/`, or `requirements.txt` was modified; no new
+  dependency installed; no runtime database tracked.
+- ~~**Final recommendation: APPROVE PHASE 12B**, this time based on a
+  verdict where the one remaining blocking finding is actually fixed and
+  regression-tested.~~ **Superseded** — a further independent re-audit
+  (below) found this fix still incomplete. Phase 12C still requires a
+  separate, explicit go-ahead, and remains additionally gated on Phase
+  12B actually reaching `Done`.
+
+## Phase 12B Final Metadata Re-audit Resolution (2026-07-12)
+
+- An independent final re-audit of the second-pass fix returned verdict
+  **REVISE**: 0 Critical, 1 remaining blocking Major finding (#2), all
+  other previously-resolved findings reconfirmed unaffected.
+- **Finding 1 (byte-vs-character size):** the raw-metadata size check
+  used `len(json.dumps(raw_metadata, ensure_ascii=False))` — a Python
+  *character* count, not a UTF-8 *byte* count. Multi-byte content
+  (Vietnamese text, emoji) was under-counted: the reviewer's example
+  serialized to 2,412 UTF-8 bytes but measured as only ~1,212 characters,
+  passing a nominal 2,000-character limit it should have failed against
+  an equivalent byte limit.
+- **Finding 2 (unbounded recursion):** neither `json.dumps(...)` nor the
+  recursive `_metadata_depth`/`_sanitize_metadata` helpers had any bound
+  checked before being called. A sufficiently deep structure (reviewer's
+  probe: ~900 nested lists) exceeded Python's recursion limit inside
+  `json.dumps` itself, raising an unhandled `RecursionError` instead of a
+  controlled rejection.
+- Fix: `app/services/ingestion.py` gained `_preflight_metadata()` — an
+  **iterative, explicit-stack-based** (never recursive) check validating
+  structure/type/cycle/depth *before* any `json.dumps` call or recursive
+  traversal runs, bounding traversal by loop iterations instead of the
+  Python call stack — and `_metadata_byte_size()`, measuring the real
+  UTF-8 encoded byte length of a deterministic serialization
+  (`ensure_ascii=False`, `sort_keys=True`, fixed separators).
+  `MAX_METADATA_JSON_CHARS` was renamed `MAX_METADATA_JSON_BYTES` (still
+  2000) to make the unit explicit. `ingest_batch`'s metadata handling was
+  reordered to: preflight → deterministic serialization → UTF-8
+  byte-size check → sanitize (now provably safe, since preflight already
+  bounds depth) → persist → audit. Defensive `RecursionError` catches
+  remain as a safety net only, since the preflight should make them
+  unreachable in practice.
+- Route-test database isolation residual completed: new `tests/conftest.py`
+  redirects `RETRIEVAL_DB_PATH` to a per-session temporary path before any
+  test module in the directory is collected/imported (pytest loads
+  `conftest.py` before importing sibling test modules), closing the gap
+  where the prior pass's module-scoped fixture could not prevent an
+  *earlier-collected* test file's `app.main` import from still creating
+  an empty, schema-only `data/retrieval.db` via `app/api/routes.py`'s
+  eager `_retriever.initialize()`. The prior documentation's claim that
+  route tests "genuinely no longer touch `data/retrieval.db` at all" was
+  accurate only about this one module's own test documents, not about
+  that eager-init side effect from a different test file — corrected in
+  place in `tests/test_retrieval_routes.py`'s docstring and the
+  audit-resolution document.
+- 11 new regression tests added (106 Phase 12B tests, up from 95): 9 in
+  `tests/test_ingestion.py` (UTF-8 byte accounting, exact/near-boundary
+  byte behavior, ~900-level nested-list rejection without a
+  `RecursionError`, deep mixed dict/list nesting, direct-Python
+  cyclic-metadata rejection at both the helper and service level,
+  non-cyclic shared-value handling, audit-log safety for both new
+  rejection paths) and 2 in `tests/test_retrieval_routes.py` (the same
+  two new rejection paths through the real HTTP route); the existing
+  route-level list-of-list regression was also extended to cover all four
+  reserved keys instead of two. Full suite grew to **188/188 passing**
+  (run with an explicit writable `--basetemp`, since the shared
+  environment's default Windows temp directory has a pre-existing,
+  unrelated permissions issue).
+- Documentation corrected in `README.md`, `app/README.md`,
+  `tests/README.md`, `TASK_BOARD.md`, this file, and
+  `docs/modernization-ai-reviews/phase-12b-audit-resolution.md`: the
+  metadata size limit is now described in UTF-8 bytes, not characters;
+  the iterative preflight is described as running before serialization
+  and sanitization; and the route-test database isolation overclaim is
+  removed.
+- No file under `app/guards/`, `app/services/gateway.py`,
+  `app/services/evaluation_runner.py`, `app/services/llm_provider.py`,
+  `datasets/`, `redteam/`, `reports/evaluation/`,
+  `report-latex-template/`, or `requirements.txt` was modified; no new
+  dependency installed; no runtime database tracked.
+- **Final recommendation: READY FOR FINAL RE-AUDIT, NOT DONE.** Per this
+  task's explicit instruction, Phase 12B is not marked `Done` — an
+  independent re-audit of this specific diff is required before the
+  phase can be closed. Phase 12C still requires a separate, explicit
+  go-ahead and is additionally gated on that re-audit returning PASS.

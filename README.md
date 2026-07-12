@@ -329,6 +329,122 @@ Phase 12B (the first phase that touches `app/`) requires a separate,
 explicit go-ahead — it does not start automatically from this plan or from
 audit approval.
 
+### Phase 12B Retrieval Foundation (In Review)
+
+Phase 12B implements the SQLite FTS5/BM25 retrieval foundation approved in
+Phase 12A: persistent local document ingestion, server-controlled
+provenance/trust, and lexical retrieval — using only Python's
+standard-library `sqlite3` (no new dependency). **Retrieval is not yet
+wired into the guarded gateway** — `POST /v1/rag/query` does not exist
+until Phase 12C, and `POST /v1/gateway/chat` is byte-identical to its
+Phase 0-11 behavior (regression-tested).
+
+**Database location:** `data/retrieval.db` by default (`RETRIEVAL_DB_PATH`
+env var to change it; already covered by `.gitignore`'s existing `data/`
+and `*.db` entries — no runtime database is ever committed).
+
+**Ingest documents** (server assigns trust/classification from a
+`source_key` allowlist — see `app/core/source_policy.py` — a caller can
+never set `trust_level`/`classification` directly, and any attempt via the
+free-form `metadata` field is silently stripped, at any nesting depth
+through any combination of dicts/lists, after an iterative
+structure/type/cycle/depth preflight bounds the metadata before any
+recursive handling runs; the configured size limit is enforced against
+the raw metadata's actual UTF-8 encoded byte length, not a character
+count):
+
+```powershell
+$body = @{
+    documents = @(
+        @{ external_id = "policy-001"; source_key = "api_upload"; title = "Security Policy"; text = "..." }
+    )
+} | ConvertTo-Json -Depth 5
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/v1/documents/ingest" -Method Post -Body $body -ContentType "application/json"
+```
+
+**Retrieve** (lexical/BM25 only, no guard pipeline):
+
+```powershell
+$body = @{ query = "warranty policy"; top_k = 5 } | ConvertTo-Json
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/v1/retrieve" -Method Post -Body $body -ContentType "application/json"
+```
+
+**Smoke test** (ingest, retrieve, update, verify stale content gone):
+
+```powershell
+$env:RETRIEVAL_DB_PATH = "$env:TEMP\smoke-retrieval.db"
+uvicorn app.main:app --reload
+# in a second shell:
+powershell -ExecutionPolicy Bypass -File scripts/smoke_test_retrieval.ps1
+```
+
+**Safe FTS5 query construction:** user query text is never concatenated
+raw into an FTS5 `MATCH` expression. Queries are tokenized into plain
+lexical terms, each individually double-quoted, and joined with an
+explicit, server-generated `OR` — so FTS5 operators (`NEAR`, `AND`/`OR`/`NOT`,
+column filters, wildcards) typed by a caller are treated as literal search
+terms, not executed as query syntax. Term combination uses `OR` (not
+implicit `AND`) so that one extra, otherwise-irrelevant query term cannot
+zero out an otherwise-matching result — `bm25()` ranking still rewards
+chunks matching more of the query's terms. SQL parameterization alone does
+not protect against FTS5 query-syntax manipulation (FTS5 `MATCH` has its
+own query language) — see `docs/decisions/ADR-002-retrieval-engine.md`.
+
+**Ingestion/upsert semantics:** canonical `document_id` is derived
+server-side from `source_key` + `external_id` (SHA-256-based, deterministic
+— never caller-supplied). Re-ingesting identical content is a no-op
+(`unchanged`); changed content atomically replaces all stale chunks and FTS
+index rows within one transaction (`updated`); a batch-level database
+failure rolls back the entire batch (`IngestionBatchError`) — no partial
+write is ever left behind. Duplicate `external_id` values within the same
+batch are rejected per-item, not the whole batch.
+
+**FTS5 capability policy:** an explicit capability check runs before
+retrieval is used. If FTS5 is unavailable in the local Python/SQLite build,
+the system raises a clear `FTS5UnavailableError` and serves **zero**
+retrieval-dependent requests — there is no fallback to `LIKE` search or any
+degraded scoring mode, at startup or at any later point. Any alternative
+retriever requires a future ADR.
+
+**Known limitations (not bugs):**
+- Lexical/keyword retrieval only — no semantic similarity, no embeddings,
+  no vector database (deferred to optional Phase 12F, its own future ADR).
+- No `POST /v1/rag/query` yet — retrieval is not connected to any guard or
+  the LLM provider. That is Phase 12C.
+- No real LLM call anywhere in this repository.
+- Not production-ready: no production claim, no real-world detection-rate
+  claim, evaluated only on synthetic content created during manual testing
+  (Phase 12B has no benchmark of its own — that is Phase 12D/12E).
+
+**Phase 12B is marked In Review, not Done**, pending an independent
+re-audit of the latest resolution pass returning PASS (this session
+verified 188/188 tests passing in a project-local `.venv`, but per
+`AGENT_RULES.md` rule 9/10 the phase is not declared `Done` until that
+independent verification is obtained).
+
+**Independent audit (Code X):** Phase 12B was independently audited after
+implementation; verdict REVISE with 5 blocking Major findings (no
+Critical), all resolved with regression tests. Two subsequent rounds of
+independent re-audit each found the previous pass's Major #2 fix
+(reserved-metadata filtering) still incomplete and required further
+correction — see
+[docs/modernization-ai-reviews/phase-12b-audit-resolution.md](docs/modernization-ai-reviews/phase-12b-audit-resolution.md)
+for the full three-round history. Notable fixes: the public ingestion
+endpoint could no longer be tricked into granting `trusted_internal`
+status by claiming a synthetic `source_key`; metadata-based trust
+spoofing now defeats nested/case/whitespace variants through any
+combination of dicts and lists; re-ingesting identical text with a
+changed title/metadata now correctly updates instead of silently
+no-op'ing; environment-configured ingestion limits are now actually wired
+to the service; retrieval no longer returns zero hits just because a
+query contains one extra irrelevant term (FTS5 term combination changed
+from AND to OR, see `ADR-002-retrieval-engine.md`); and (final re-audit
+round) the metadata size limit is now measured in actual UTF-8 bytes
+instead of Python characters, and a bounded, iterative
+(non-recursive) preflight now rejects pathologically deep or cyclic
+metadata with a controlled error instead of an unhandled
+`RecursionError`.
+
 Everything before Phase 4 was documentation/data only — Phase 0–3.1 produced scaffolding, research, architecture/threat-model docs, and the synthetic benchmark (`datasets/`, `redteam/`). See [PROJECT_PLAN.md](PROJECT_PLAN.md) for the full roadmap.
 
 ## License
