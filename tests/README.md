@@ -1,7 +1,8 @@
 # tests/
 
 pytest coverage for the gateway, dataset loader, rule-based guards, the
-Phase 12B retrieval foundation, and the Phase 12C end-to-end RAG pipeline.
+Phase 12B retrieval foundation, the Phase 12C end-to-end RAG pipeline, and
+the Phase 12D v2 benchmark artifacts (`datasets/v2/`).
 
 **Status: Phase 12C In Review — two rounds of Code X final re-audit each
 found and fixed one blocking terminal-audit-coverage gap (top_k rejection
@@ -59,12 +60,20 @@ Phase 12B breakdown).
 | `test_rag_pipeline.py` | **Phase 12C.** Service-level `run_rag_query()` coverage: full stage order and stop paths; sanitized-only provider input; provider context byte-for-byte bounded by aggregate enforcement; aggregate SANITIZE fail-closed; per-chunk/global-budget and separator accounting; multilingual/zero-width split attacks; high-trust malicious content; benign authority/academic counterexamples; DLP SANITIZE telemetry; retrieval/provenance/context/aggregate/provider/DLP/output/audit-sink exception behavior; two real-SQLite end-to-end cases; and (Code X final re-audit) `top_k`-rejection audit, `run_rag_query_uncommitted`/`commit_rag_query_audit` deferred-commit behavior, `mark_response_construction_failed`'s corrected audit event, and an exact empty-sanitized-query (`sanitized_text=""`) regression. |
 | `test_rag_query_routes.py` | **Phase 12C.** HTTP-level strict schema, safe response/error mapping, no uninspected DLP tail, real-endpoint nested audit redaction for all detector families, response-construction safety, request IDs, backward compatibility for `/health`, `/v1/gateway/chat`, ingestion and retrieval, and (Code X final re-audit) exactly-one-safe-terminal-event coverage for both the configured `top_k` policy rejection and a forced `RagQueryResponse` construction failure, including audit-sink-failure behavior for each; and (Code X final terminal-audit re-audit) the same guarantee extended to nested response-model construction (`ProvenanceItemResponse`, `StageResultResponse`) — forced failure, combined with a broken audit sink, and the unaffected success path. |
 | `test_phase12c_config.py` | **Phase 12C audit resolution.** Direct and environment-driven validation for positive limits, top-k relationships, hard ceilings, malformed integers/booleans, contradictory values, valid boundaries, and backward-compatible direct `Settings(...)` construction. |
+| `test_benchmark_v2_schema.py` | **Phase 12D, updated across two Code X audit-resolution rounds.** Corpus/case/label schema for `datasets/v2/`: required fields (case files include `evaluation_scope`; corpus carries no `expected_ingestion_status`; labels carry `expected_document_ingestion_status`/`template_id`/`semantic_group_id`/`translation_group_id`/`authoring_set`), no ground-truth field in the corpus, case files contain only execution inputs, label files carry the full ground-truth schema using real `Decision` values, every case has exactly one matching label, and (round 2) the non-runtime `datasets/v2/design/authoring-provenance.jsonl` artifact's own schema: required fields, valid `artifact_type`, `split`/`authoring_set` agreement, 64-char hex `normalized_text_hash`, coverage of every query and document, no duplicate `artifact_id`, no cross-split `semantic_group_id`/`translation_group_id` reuse, and confirmation none of its fields leak into the runtime case/corpus schema. |
+| `test_benchmark_v2_integrity.py` | **Phase 12D, updated across three Code X audit-resolution rounds and the resumed completion pass.** Real-data checks cover counts, distributions, taxonomy, mappings, IDs, contamination, provenance, v1 isolation, deterministic ordering, and runtime separation. Negative fixtures cover real EN/VI translations, reordered translations, provenance hash/group/identity/schema failures, v1 query/document copies, malformed corpus/case/label values, and guard independence. The completion pass adds an exact CLI rejection matrix for malformed types, rejects extra provenance records, cross-checks provenance identity fields against real artifacts, and verifies bilingual query-document source-group linkage. **Round 3 (malformed-value re-audit)** adds a parametrized matrix of `list`/`dict`/`bool`/`float` values across every corpus (17), case (17), label (26), and authoring-provenance (16) field (parameter-combination counts, verified from the `*_MALFORMED_FIELDS` arrays; 4 parametrized test functions producing 76 collected pytest cases, plus 9 single-case test functions) — each proven to produce a clean, type-first validation error rather than an unhandled `TypeError: unhashable type`; direct CLI-level reproductions of the two exact reported crashes (`expected_stop_reason=[]`, provenance `split=[]`); a combined multi-field malformed fixture proving aggregation without a crash; a non-object provenance record test (both direct-call and real JSONL-line CLI); a deterministic-error-order test; and a confirmation the real, unmutated candidate benchmark still passes end to end. |
+| `test_benchmark_v2_freeze.py` | **Phase 12D final freeze.** Candidate and FINAL manifest correctness covers all 9 policy-bearing files, SHA-256/size/path/order safety, mutation detection for all five artifact kinds, missing/new files, and deterministic restoration. Finalization tests prove candidate remains the default, FINAL requires the explicit `finalize` mode, repeated finalization is byte-identical, all covered artifacts remain unchanged, final verification succeeds, and mutation/incomplete-tree detection remains active. |
 
 ## Running
 
 ```powershell
 python -m pytest -q
 ```
+
+Final Phase 12D evidence: `255 passed` across the three benchmark modules;
+complete repository suite `578 passed, 1 warning`, with no ignored test
+module. The increase from 246/569 is exactly the nine explicit-finalization
+regressions in `test_benchmark_v2_freeze.py`.
 
 If the shared machine's default Windows temp directory has a pre-existing
 permissions issue (unrelated to this project), pass an explicit writable
