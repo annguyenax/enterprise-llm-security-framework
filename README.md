@@ -2,7 +2,7 @@
 
 **Xây dựng Hệ thống Bảo mật LLM Chống Tấn công Prompt Injection và Data Poisoning trong Môi trường Doanh nghiệp**
 
-> Status: **Phase 10 (v1 report track) In Review; Phase 12C of the v2 modernization wave is In Review, ready for one final independent Code X re-audit (not yet Done).** The lab-scale gateway, guards, offline mock provider, controlled v1 evaluation harness, and final v1 report content are integrated (Phase 0-10). The separate v2 wave has added SQLite FTS5/BM25 retrieval, server-controlled provenance, and a guarded end-to-end RAG pipeline. This is a university internship proof-of-concept (PoC), not a production system.
+> Status: **Phase 10 (v1 report track) In Review; Phase 12C of the v2 modernization wave is In Review, ready for one final independent Code X re-audit; Phase 12D (independent v2 benchmark design/generation/freeze) is IN REVIEW — technical and malformed-value verification are complete with no remaining Critical or blocking Major findings; the candidate (manifest still CANDIDATE) is ready for final documentation read-only verification before commit; Gemini academic and Grok red-team audits remain pending; Phase 12E has not started (not yet Done).** The lab-scale gateway, guards, offline mock provider, controlled v1 evaluation harness, and final v1 report content are integrated (Phase 0-10). The separate v2 wave has added SQLite FTS5/BM25 retrieval, server-controlled provenance, a guarded end-to-end RAG pipeline, and a candidate-frozen, deterministic 120-case v2 benchmark for a future Phase 12E evaluation. This is a university internship proof-of-concept (PoC), not a production system.
 
 ## Project Summary
 
@@ -551,8 +551,75 @@ for the full architecture: `run_rag_query_uncommitted`/
 [app/README.md](app/README.md) for the full stage-by-stage design and
 test breakdown. **Phase 12C is ready for one final independent Code X
 re-audit — not yet marked Done** (per `AGENT_RULES.md` rule 9/10, it is
-not declared complete until that re-audit returns PASS); this does not
-begin Phase 12D.
+not declared complete until that re-audit returns PASS).
+
+### Phase 12D Independent Benchmark V2 (In Review — three Code X audit rounds, all REVISE, all fixed; awaiting final read-only verification)
+
+Phase 12D produces a new, independently-governed benchmark for a future
+Phase 12E security evaluation — 120 cases across 23 scenario families
+(direct/indirect injection, low-trust/compromised-trusted-source content,
+multi-chunk coordination, aggregate-budget edges, zero-width/HTML
+concealment, Vietnamese/English/bilingual attacks, DLP/leakage mechanism
+cases, and benign false-positive traps), split 30 development / 30
+validation / 60 holdout, class-balanced 48 benign / 48 malicious / 16 mixed
+/ 8 neutral, backed by a 172-document synthetic corpus, under
+`datasets/v2/`. Generated deterministically by
+[scripts/build_v2_benchmark.py](scripts/build_v2_benchmark.py) (fixed seed,
+no network, no LLM calls, split-independent content banks per family, plus
+a non-runtime `datasets/v2/design/authoring-provenance.jsonl` artifact — one
+hashed record per generated query/document), checked by
+[scripts/validate_v2_benchmark.py](scripts/validate_v2_benchmark.py)
+(complete, **type-first** schema/enum/type validation — every field is
+confirmed to have the right Python type before any set/dict membership
+test, so a malformed `list`/`dict`/`bool` value is always a clean
+validation error, never an unhandled `TypeError` — counts, taxonomy
+coverage, referential integrity, exact class-distribution bounds, no
+duplicate/reused secrets, cross-split contamination/similarity checks, a
+benchmark-specific EN/VI bilingual-translation canonicalization check, an
+authoring-provenance hash cross-check, and v1-comparison against both
+queries and every referenced corpus document — all **guard-independent**,
+with an optional, explicitly opt-in, non-gating `--diagnose-current-guards`
+report against the real `input_guard`/`rag_guard` available separately),
+and frozen with a SHA-256 **candidate** manifest covering all 9
+policy-bearing artifacts (corpus/cases/labels/provenance/exemptions) by
+[scripts/freeze_v2_benchmark.py](scripts/freeze_v2_benchmark.py). Case
+inputs (including `evaluation_scope`) and ground-truth labels (including
+non-runtime authoring metadata) are held in strictly separate files; no file
+under `app/` reads either. Three independent Code X technical audit rounds
+(`docs/modernization-ai-reviews/codex-phase-12d-benchmark-audit.md`) all
+returned verdict **REVISE** — round 1 (2 Critical: guard-dependent
+validation, holdout template contamination; 3 Major: incomplete validator
+schema, incomplete label isolation, weak class balance), round 2 (found
+round 1's split-independence and validator-completeness fixes were only
+partial: no defense against an exact EN/VI translation using different
+self-declared group IDs, a `TypeError` crash on non-string corpus content, a
+v1-comparison check that never actually scanned corpus documents, and a
+candidate manifest missing the exemption/provenance policy files), and
+round 3 (found round 2's type-validation fix covered non-string scalars
+only — a `list`/`dict` value in an enum field, e.g. a label's
+`expected_stop_reason=[]` or an authoring-provenance entry's `split=[]`,
+still raised an unhandled `TypeError: unhashable type` from a bare
+`value in ALLOWED_SET` test performed before any type check) — all
+findings from all three rounds resolved; see
+[docs/modernization-ai-reviews/phase-12d-audit-resolution.md](docs/modernization-ai-reviews/phase-12d-audit-resolution.md).
+See [datasets/v2/README.md](datasets/v2/README.md) and
+[docs/benchmark-v2-methodology.md](docs/benchmark-v2-methodology.md) for the
+full design, taxonomy, contamination controls, and documented limitations
+(synthetic corpus, rule-based guard target, no real LLM, no semantic
+retrieval, residual paraphrase/encoding bypasses, benchmark-author/
+guard-author overlap, and the exact tested boundary of the bilingual
+translation-detection lexicon). Phase 12D produces benchmark artifacts
+only — no security evaluation, no ASR/FPR/FNR numbers, no ablation
+results; that is Phase 12E, which has not started. **Phase 12D is marked In
+Review, not Done**. The round 3 malformed-value fix pass independently ran
+the complete suite without ignored modules (`569 passed, 1 warning`, up from
+484) and added type-first validation helpers and a malformed-value
+regression matrix across every corpus/case/label/provenance field. The
+subsequent Code X read-only verification confirmed every implementation
+category RESOLVED (no Critical, no blocking Major issues) and required only
+a documentation alignment, which has been applied, leaving the candidate at
+**READY FOR FINAL DOCUMENTATION READ-ONLY VERIFICATION**, pending that
+final check followed by Gemini and Grok audits.
 
 Everything before Phase 4 was documentation/data only — Phase 0–3.1 produced scaffolding, research, architecture/threat-model docs, and the synthetic benchmark (`datasets/`, `redteam/`). See [PROJECT_PLAN.md](PROJECT_PLAN.md) for the full roadmap.
 

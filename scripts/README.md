@@ -21,6 +21,83 @@ python scripts/run_evaluation.py --comparison
 .\scripts\run_evaluation.ps1 -Comparison
 ```
 
+## Benchmark V2 (Phase 12D)
+
+- `build_v2_benchmark.py` deterministically generates `datasets/v2/`
+  (corpus, cases, labels, and a non-runtime `design/authoring-
+  provenance.jsonl`) from a fixed seed. No network access, no LLM calls,
+  no timestamp in generated content. Every scenario family draws its
+  development/validation/holdout content from three disjoint, independently
+  authored content banks (Code X Phase 12D audit fix — see
+  `docs/benchmark-v2-methodology.md` §10), never a shared template.
+  `normalize_for_fingerprint`/`normalized_text_hash` are the single
+  canonical text-normalization implementation, imported directly by
+  `validate_v2_benchmark.py` (same-directory script import) so a
+  provenance hash can never silently drift between generation and
+  validation. `--verify-determinism` builds twice in memory and fails if
+  the two outputs (including provenance) differ, without writing any file.
+- `validate_v2_benchmark.py` checks schemas, enums, complete field types
+  (no unhandled crash on a malformed value — Code X Phase 12D re-audit,
+  Major #1), exact counts, taxonomy-registry coverage, language coverage,
+  exact class-distribution bounds, referential integrity, case-label
+  mapping, duplicate IDs/`external_id`s, no orphan (unreferenced)
+  documents, normalized-duplicate queries, cross-split secret reuse,
+  cross-split content-fingerprint/similarity contamination, a
+  benchmark-specific EN/VI bilingual-translation canonicalization check
+  (`check_bilingual_contamination`, Code X Phase 12D re-audit, Critical
+  #1.B), an authoring-provenance hash cross-check
+  (`check_authoring_provenance`, Critical #1.A), v1-comparison
+  contamination against both queries and every referenced corpus document
+  (Critical #2 extension), source-key compatibility with
+  `app/core/source_policy.py`, and manifest structural safety.
+  Schema/type checks are a hard preflight before normalization, similarity,
+  reference, or provenance processing, and are **type-first**: every
+  enum/list/integer field is confirmed to have the right Python type
+  (rejecting a list, dict, number, or bool) *before* any set/dict
+  membership test or hash operation ever sees it (Code X Phase 12D
+  malformed-value re-audit — previously `expected_stop_reason=[]` and
+  authoring-provenance `split=[]` each raised an unhandled `TypeError:
+  unhashable type`; both are now a clean, aggregated validation error).
+  Reusable helpers (`validate_string_field`, `validate_string_enum`,
+  `validate_optional_string_enum`, `validate_string_list`,
+  `validate_integer_field`, `validate_json_safe_value`,
+  `safe_record_identifier`) enforce this ordering consistently across
+  every corpus/case/label/provenance/exemption field; `main()` keeps a
+  final, last-resort defensive exception boundary, but the type-first
+  helpers are the primary fix, not the boundary. **Guard-independent by
+  default** —
+  imports nothing from `app.guards.*`
+  and its exit code never depends on the current guard implementation
+  (Code X Phase 12D audit, Critical #1). An optional, explicitly opt-in,
+  non-gating diagnostic reports agreement/disagreement with the real
+  `app.guards.input_guard`/`app.guards.rag_guard` without affecting the
+  result: `--diagnose-current-guards` (`--include-holdout-diagnostic` to
+  also scope holdout).
+- `freeze_v2_benchmark.py` writes/verifies a SHA-256 **candidate** manifest
+  (`datasets/v2/manifests/benchmark-v2-manifest.json`, `"manifest_status":
+  "candidate"`) covering all 9 policy-bearing files: `corpus/`, `cases/`,
+  `labels/`, `design/` (the authoring-provenance artifact), and the
+  top-level `contamination-exemptions.json` (Code X Phase 12D re-audit --
+  every artifact that can change benchmark meaning or validation
+  exemptions is now integrity-bound, not only the generated corpus/case/
+  label files). Not a defensible final freeze until Code X, Gemini, and
+  Grok all pass. A fresh freeze fails closed if either required policy-bearing
+  file is missing.
+
+```powershell
+python scripts/build_v2_benchmark.py
+python scripts/build_v2_benchmark.py --verify-determinism
+python scripts/validate_v2_benchmark.py
+python scripts/validate_v2_benchmark.py --diagnose-current-guards
+python scripts/freeze_v2_benchmark.py freeze
+python scripts/freeze_v2_benchmark.py verify
+```
+
+See `datasets/v2/README.md` and `docs/benchmark-v2-methodology.md` for the
+full design. These three scripts are the only ones in this directory that
+read or write `datasets/v2/` — they produce benchmark *artifacts only*, run
+no evaluation, and modify no file under `app/`.
+
 ## Other Helpers
 
 - `run_dev.ps1` starts the local FastAPI application.
