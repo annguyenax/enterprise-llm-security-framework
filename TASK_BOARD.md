@@ -753,24 +753,24 @@ Full traceable resolution: `docs/modernization-ai-reviews/phase-12c-audit-resolu
 It also remains gated on Phase 12C actually reaching `Done` via an
 independent re-audit PASS, which has not yet occurred.
 
-## Phase 12D — Independent Benchmark V2 Design, Generation, Validation and Freeze — **Status: In Review**
+## Phase 12D — Independent Benchmark V2 Design, Generation, Validation and Freeze — **Status: Done**
 
 Produces a new, independently-governed benchmark for a future Phase 12E
 security evaluation — artifacts only; no guard rule modified, no evaluation
 run, no ASR/FPR/FNR computed, no ablation, Phase 12E not started.
 
-- **Structure:** `datasets/v2/{corpus,cases,labels,manifests}/` — 164
+- **Structure:** `datasets/v2/{corpus,cases,labels,design,manifests}/` — 172
   corpus documents, 120 cases (30 development / 30 validation / 60
   holdout) across 23 scenario families, 120 matching label records. Final
   path chosen as `datasets/v2/` rather than ADR-003's placeholder
   `redteam/v2/`; documented as an ADR-003 Implementation Note (see
   `docs/decisions/ADR-003-v2-benchmark.md`).
-- **Category balance:** 36 benign, 74 malicious, 6 mixed, 4 neutral.
+- **Category balance:** 48 benign, 48 malicious, 16 mixed, 8 neutral.
   Language distribution: 60 vi / 40 en / 20 bilingual (fixed deterministic
   rotation, not random).
 - **Input/label separation:** case files carry only execution inputs
   (`case_id, split, scenario_family, language, query, top_k,
-  relevant_document_ids`); label files carry all ground truth
+  relevant_document_ids, evaluation_scope`); label files carry all ground truth
   (`expected_final_decision` using the real `Decision` values, `expected_
   stop_reason` using the real `STOP_*` constants, etc.). No corpus document
   carries `is_poisoned`. No file under `app/` imports or reads
@@ -780,10 +780,10 @@ run, no ASR/FPR/FNR computed, no ablation, Phase 12E not started.
   `scripts/validate_v2_benchmark.py` (schemas, counts, coverage, referential
   integrity, no duplicate IDs, no normalized-duplicate queries, no
   cross-split secret reuse except the documented canonical canary, source-key
-  compatibility, no runtime/label coupling, and a cross-check against the
-  **real, currently-deployed** `app.guards.input_guard`/`app.guards.rag_guard`
-  functions), `scripts/freeze_v2_benchmark.py` (SHA-256 manifest, `freeze`/
-  `verify` modes).
+  compatibility and no runtime/label coupling). Its gating path is
+  guard-independent; an explicit non-gating diagnostic can compare against
+  the current guards. `scripts/freeze_v2_benchmark.py` provides deterministic
+  `freeze`/`finalize`/`verify` modes over the same nine artifacts.
 - **Bug found and fixed during authoring (self-caught, via the guard
   cross-check, before shipping):** one Vietnamese `direct_injection`
   variant used "thay vào đó" (Vietnamese for "instead") where
@@ -795,13 +795,14 @@ run, no ASR/FPR/FNR computed, no ablation, Phase 12E not started.
   `mixed_benign_malicious_retrieval` (which is intentionally one benign +
   one malicious document); fixed by adding a dedicated
   `_MIXED_ACCEPT_AND_REJECT_FAMILIES` check.
-- **Tests added:** `tests/test_benchmark_v2_schema.py` (16 tests),
+- **Initial implementation test baseline (superseded by final counts
+  below):** `tests/test_benchmark_v2_schema.py` (16 tests),
   `tests/test_benchmark_v2_integrity.py` (24 tests, including synthetic
   negative-path fixtures proving each check function actually rejects a
   broken input), `tests/test_benchmark_v2_freeze.py` (13 tests, including
   tamper-detection against a `tmp_path` copy of the tree) — **53 new tests,
   all passing.**
-- **Test evidence:** full suite **376 tests total** (323 pre-existing +
+- **Initial implementation evidence (superseded below):** full suite **376 tests total** (323 pre-existing +
   53 new), of which **299 passed** directly in this session (the remaining
   77, across 7 files, require `fastapi.testclient.TestClient`, blocked by
   this shared environment's documented `httpx`/`httpx2` issue — see the
@@ -1086,16 +1087,39 @@ manifest) then corrected:
   parameter combinations (verified from the actual arrays in
   `tests/test_benchmark_v2_integrity.py`; case 17 and provenance 16 were
   already correct) — previously documented as 16/25.
-- **Final recommendation: READY FOR FINAL DOCUMENTATION READ-ONLY
-  VERIFICATION.** Not APPROVE, not DONE. Phase 12D remains **In Review**;
-  the candidate manifest remains **CANDIDATE**.
+- **Historical recommendation before multidisciplinary closure
+  (superseded below): READY FOR FINAL DOCUMENTATION READ-ONLY
+  VERIFICATION.** At that point Phase 12D remained **In Review** and the
+  manifest remained **CANDIDATE**.
+
+### Phase 12D Multidisciplinary Audit Closure and Final Freeze — **Status: Done**
+
+- Code X final technical verification: **PASS**; Gemini final academic
+  audit: **PASS**; Grok final red-team coverage audit: **PASS**. Remaining
+  Critical issues: **None**. Remaining blocking Major issues: **None**.
+- Gemini's artifact-access limitation is recorded in the adjudication and
+  covered by the complementary Code X/Grok artifact inspections. Its
+  non-blocking statistical finding is accepted for Phase 12E: percentage
+  metrics are limited to aggregate or adequately supported, predeclared
+  high-level attack groups; individual-family results are descriptive.
+- Grok's budget-exact Vietnamese split, trusted-source authority/canary,
+  and homoglyph/benign-trigger probes are deferred to Phase 12E. Advanced
+  semantic coordination and complex-identifier over-redaction remain
+  future work, not hidden Phase 12D omissions.
+- `scripts/freeze_v2_benchmark.py finalize` produced the deterministic
+  **FINAL** manifest over the same nine audited artifacts. Their SHA-256
+  values and sizes are unchanged; any later payload, label, provenance, or
+  exemption change requires a new benchmark version and fresh audits.
+- Final verification: focused Phase 12D suite **255 passed**; full
+  repository suite **578 passed, 1 warning**; six-file Python compile,
+  guard-independent validator, deterministic rebuild, FINAL manifest
+  verification, and temporary-copy mutation detection all passed.
+  Phase 12D is **DONE**; Phase 12E has not started.
 
 **Next phase:** Phase 12E — Benchmark V2 Evaluation and Ablation. Per
 `AGENT_RULES.md` rule 12, Phase 12E does not start automatically and
 requires a separate, explicit go-ahead; per this task's own explicit
-instruction, this session stops here and does not begin Phase 12E work. It
-also remains gated on Phase 12D actually reaching `Done` via the
-multidisciplinary audit above, which has not yet occurred.
+instruction, this session stops here and does not begin Phase 12E work.
 
 ## Notes
 

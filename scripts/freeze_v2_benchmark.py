@@ -2,17 +2,21 @@
 """Freeze the Phase 12D v2 benchmark: write a SHA-256 manifest
 (`datasets/v2/manifests/benchmark-v2-manifest.json`) and verify it.
 
-**Candidate freeze only (Code X Phase 12D audit, required-fixes item 7):**
-every manifest this script writes carries `"manifest_status": "candidate"`
-and every CLI message below says CANDIDATE explicitly. This is not yet a
-defensible final freeze -- it becomes one only after Code X, Gemini, and
-Grok all pass and a final regeneration is performed after all accepted
-audit fixes land. Any artifact change (this whole Phase 12D fix pass
-included) makes the previous manifest an obsolete candidate; re-run
-`freeze` after any content change, never treat an old manifest as still
-valid.
+**Candidate by default, final only by explicit `finalize` (Code X Phase
+12D audit, required-fixes item 7):** the default `freeze` mode writes
+`"manifest_status": "candidate"` and says CANDIDATE explicitly in every
+CLI message. The separate, explicit `finalize` mode writes
+`"manifest_status": "final"` over exactly the same nine artifacts with
+exactly the same deterministic hashing -- it exists to be run exactly
+once, after Code X, Gemini, and Grok have all returned PASS against the
+committed artifacts (which occurred at commit 4e10a2e; see
+`docs/modernization-ai-reviews/phase-12d-audit-resolution.md`). Any
+artifact change after finalization makes the manifest stale and
+invalidates the audits that blessed it: the content must then be treated
+as a new benchmark version (v3) per ADR-003's Rule of Freezing, never
+silently re-finalized.
 
-Two modes:
+Three modes:
 
 - `freeze` (default): computes a SHA-256 digest for every artifact file
   under `datasets/v2/corpus/`, `datasets/v2/cases/`, `datasets/v2/labels/`,
@@ -27,12 +31,19 @@ Two modes:
   covered -- a mutated exemption file or authoring-provenance entry fails
   `verify` exactly like a mutated corpus/case/label file.
 
+- `finalize`: identical to `freeze` in every deterministic respect (same
+  nine files, same SHA-256/size/path entries, same sorted order, no
+  timestamp, no absolute path, manifest never hashes itself) except the
+  written `manifest_status` is `"final"`. A final manifest is only ever
+  emitted through this explicit mode -- `freeze` can never produce one.
+
 - `verify`: recomputes the same digests and compares them against an
   existing manifest, failing loudly (non-zero exit) if anything differs
-  -- added file, removed file, or changed content. This is the same
-  check `docs/decisions/ADR-003-v2-benchmark.md` requires a future Phase
-  12E evaluation/ablation runner to perform at the start of every run
-  before producing any report.
+  -- added file, removed file, or changed content. Works identically for
+  a candidate or final manifest (the comparison is per-file content, not
+  status). This is the same check `docs/decisions/ADR-003-v2-benchmark.md`
+  requires a future Phase 12E evaluation/ablation runner to perform at
+  the start of every run before producing any report.
 
 No timestamp is embedded in the manifest content, so `freeze` run twice
 against an unchanged tree produces a byte-identical manifest file --
@@ -93,7 +104,7 @@ def _sha256_of(path: Path) -> str:
     return digest.hexdigest()
 
 
-def build_manifest() -> dict:
+def build_manifest(status: str = "candidate") -> dict:
     entries = []
     for path in _iter_artifact_files():
         rel = path.relative_to(OUT_DIR).as_posix()
@@ -108,7 +119,7 @@ def build_manifest() -> dict:
     return {
         "manifest_version": 1,
         "benchmark_version": "v2",
-        "manifest_status": "candidate",
+        "manifest_status": status,
         "file_count": len(entries),
         "files": entries,
     }
@@ -118,20 +129,31 @@ def _missing_required_artifacts() -> list[str]:
     return [rel for rel in REQUIRED_ARTIFACT_PATHS if not (OUT_DIR / rel).is_file()]
 
 
-def cmd_freeze() -> int:
+def cmd_freeze(status: str = "candidate") -> int:
     missing = _missing_required_artifacts()
     if missing:
         print("FAIL: required candidate artifact(s) missing:", file=sys.stderr)
         for rel in missing:
             print(f"  - {rel}", file=sys.stderr)
         return 1
-    manifest = build_manifest()
+    manifest = build_manifest(status=status)
     MANIFEST_PATH.parent.mkdir(parents=True, exist_ok=True)
     with MANIFEST_PATH.open("w", encoding="utf-8", newline="\n") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2, sort_keys=True)
         f.write("\n")
-    print(f"Froze {manifest['file_count']} artifact file(s) into {MANIFEST_PATH} (CANDIDATE FREEZE -- not yet final).")
+    if status == "final":
+        print(f"Froze {manifest['file_count']} artifact file(s) into {MANIFEST_PATH} "
+              "(FINAL FREEZE -- all Phase 12D audits passed; any later artifact change requires a new benchmark version).")
+    else:
+        print(f"Froze {manifest['file_count']} artifact file(s) into {MANIFEST_PATH} (CANDIDATE FREEZE -- not yet final).")
     return 0
+
+
+def cmd_finalize() -> int:
+    """Explicit finalization: only this mode may emit
+    `"manifest_status": "final"`. Deterministic and repeatable -- running
+    it twice against an unchanged tree produces a byte-identical file."""
+    return cmd_freeze(status="final")
 
 
 def cmd_verify() -> int:
@@ -165,19 +187,24 @@ def cmd_verify() -> int:
             print(f"  - {err}", file=sys.stderr)
         return 1
 
-    print(f"OK: {len(frozen_by_path)} file(s) verified against the frozen CANDIDATE manifest, no drift detected.")
+    status = frozen.get("manifest_status", "candidate")
+    print(f"OK: {len(frozen_by_path)} file(s) verified against the frozen {str(status).upper()} manifest, no drift detected.")
     return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "mode", nargs="?", default="freeze", choices=["freeze", "verify"],
-        help="'freeze' (default) writes the manifest; 'verify' checks the tree against an existing manifest.",
+        "mode", nargs="?", default="freeze", choices=["freeze", "finalize", "verify"],
+        help="'freeze' (default) writes a CANDIDATE manifest; 'finalize' writes the FINAL manifest "
+             "(only after every Phase 12D audit has passed); 'verify' checks the tree against an "
+             "existing manifest of either status.",
     )
     args = parser.parse_args(argv)
     if args.mode == "freeze":
         return cmd_freeze()
+    if args.mode == "finalize":
+        return cmd_finalize()
     return cmd_verify()
 
 

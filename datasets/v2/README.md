@@ -1,15 +1,12 @@
 # Benchmark V2
 
-**Status: IN REVIEW** (Phase 12D — artifacts only; candidate freeze, not yet
-audited to completion, not yet used by any evaluation). Three Code X audit
-rounds so far, all verdict REVISE; this candidate reflects the third fix
-pass (malformed-value/type-first validation hardening) — see
-`docs/modernization-ai-reviews/phase-12d-audit-resolution.md`. The round 3
-implementation was confirmed RESOLVED across every category by the Code X
-malformed-value verification (no Critical, no blocking Major issues); a
-documentation-only alignment pass then corrected three inaccuracies that
-verification flagged, leaving the candidate **READY FOR FINAL DOCUMENTATION
-READ-ONLY VERIFICATION**, not approved or Done.
+**Status: DONE** (Phase 12D artifacts only; FINAL freeze, not yet used by any
+evaluation). After three Code X fix rounds, Code X final technical
+verification, Gemini final academic audit, and Grok final red-team coverage
+audit all returned PASS against commit `4e10a2e`; no Critical or blocking
+Major issue remains. The same nine audited artifacts were then finalized
+without changing their bytes — see
+`docs/modernization-ai-reviews/phase-12d-audit-resolution.md`.
 See `docs/benchmark-v2-methodology.md` for the full design rationale,
 taxonomy, contamination controls, and limitations, and
 `docs/decisions/ADR-003-v2-benchmark.md` for the governing split/freeze
@@ -39,7 +36,7 @@ corpus/documents.jsonl            172 ingestible documents (no ground truth)
 cases/{development,validation,holdout}.jsonl   120 execution-only inputs (incl. evaluation_scope)
 labels/{development,validation,holdout}.jsonl  120 ground-truth + authoring-metadata records
 design/authoring-provenance.jsonl              292 non-runtime provenance records (1 per query + 1 per document)
-manifests/benchmark-v2-manifest.json           SHA-256 CANDIDATE freeze manifest (9 files covered)
+manifests/benchmark-v2-manifest.json           SHA-256 FINAL freeze manifest (9 files covered)
 contamination-exemptions.json                  optional, rationale-required similarity exemptions (currently empty)
 ```
 
@@ -50,7 +47,7 @@ file under `app/` ever imports or reads `cases/`, `labels/`, or `design/`.
 `design/authoring-provenance.jsonl` is independently cross-checked against
 the real case/document text (hash-verified, not merely present) by
 `scripts/validate_v2_benchmark.py::check_authoring_provenance`, and is
-integrity-bound by the candidate manifest exactly like the generated
+integrity-bound by the final manifest exactly like the generated
 corpus/case/label files.
 
 Every field on every corpus/case/label/provenance record is validated
@@ -67,8 +64,9 @@ python scripts/build_v2_benchmark.py                  # build (deterministic)
 python scripts/build_v2_benchmark.py --verify-determinism  # build twice, compare, no files written
 python scripts/validate_v2_benchmark.py                # schema/integrity/contamination checks (guard-independent)
 python scripts/validate_v2_benchmark.py --diagnose-current-guards  # optional, NON-GATING guard-agreement report
-python scripts/freeze_v2_benchmark.py freeze            # write the SHA-256 CANDIDATE manifest
-python scripts/freeze_v2_benchmark.py verify             # check the tree against the frozen CANDIDATE manifest
+python scripts/freeze_v2_benchmark.py freeze            # authoring-time CANDIDATE manifest
+python scripts/freeze_v2_benchmark.py finalize          # explicit audit-gated FINAL manifest
+python scripts/freeze_v2_benchmark.py verify             # check the tree against the frozen FINAL manifest
 ```
 
 `validate_v2_benchmark.py`'s default (gating) path imports nothing from

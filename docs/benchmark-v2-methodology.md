@@ -1,15 +1,14 @@
 # Benchmark V2 Methodology
 
 **Phase:** 12D — Independent Benchmark V2 Design, Generation, Validation and Freeze
-**Status:** IN REVIEW (not Done — see "Readiness for multidisciplinary audit" below)
+**Status:** DONE — Code X, Gemini, and Grok final audits PASS
 **Governing decision:** `docs/decisions/ADR-003-v2-benchmark.md`
 **Scope:** This document describes benchmark *artifacts only*. It produces no
 security evaluation results, no ASR/FPR/FNR numbers, and no ablation output —
 that is Phase 12E's job, which has not started.
-**Manifest status:** CANDIDATE FREEZE only (see §14/§14a) — Phase 12D has
-been through two Code X audit rounds, both verdict REVISE (see §17 for the
-full history); this document reflects the second fix pass. It is not a
-defensible final freeze until Code X, Gemini, and Grok all pass.
+**Manifest status:** FINAL (see §14/§14a) — the same nine artifacts reviewed
+at commit `4e10a2e` were finalized only after Code X, Gemini, and Grok all
+returned PASS. Phase 12E has not started and no evaluation metric is claimed.
 
 ## 1. Research purpose
 
@@ -52,7 +51,7 @@ datasets/v2/
   labels/development.jsonl          -- 30 ground-truth records
   labels/validation.jsonl           -- 30 ground-truth records
   labels/holdout.jsonl              -- 60 ground-truth records
-  manifests/benchmark-v2-manifest.json  -- SHA-256 CANDIDATE freeze manifest
+  manifests/benchmark-v2-manifest.json  -- SHA-256 FINAL freeze manifest
   contamination-exemptions.json     -- optional, rationale-required exemption list (currently empty)
 ```
 
@@ -588,7 +587,7 @@ for the real, regenerated corpus (see §11a for the measured statistics).
   empty or missing `rationale` is itself a validation error
   (`_exemption_errors`); an applied exemption is never silent — see
   `test_contamination_exemption_with_rationale_suppresses_the_specific_pair`.
-  This file is now itself integrity-bound by the candidate manifest (§14a).
+  This file is now itself integrity-bound by the final manifest (§14a).
 
 ### 11a. Measured contamination statistics (after the Code X re-audit fix)
 
@@ -888,10 +887,13 @@ python scripts/validate_v2_benchmark.py
 # Optional, non-gating: report agreement/disagreement with the CURRENT guard implementation
 python scripts/validate_v2_benchmark.py --diagnose-current-guards
 
-# Freeze: write datasets/v2/manifests/benchmark-v2-manifest.json (CANDIDATE FREEZE only)
+# Authoring-time freeze: write a CANDIDATE manifest
 python scripts/freeze_v2_benchmark.py freeze
 
-# Verify the current tree against the frozen CANDIDATE manifest (Phase 12E must run this first)
+# Audit-gated finalization: write the FINAL manifest explicitly
+python scripts/freeze_v2_benchmark.py finalize
+
+# Verify the current tree against the frozen FINAL manifest (Phase 12E must run this first)
 python scripts/freeze_v2_benchmark.py verify
 ```
 
@@ -901,7 +903,7 @@ python scripts/freeze_v2_benchmark.py verify
 {
   "manifest_version": 1,
   "benchmark_version": "v2",
-  "manifest_status": "candidate",
+  "manifest_status": "final",
   "file_count": 9,
   "files": [
     {"path": "cases/development.jsonl", "size_bytes": 12345, "sha256": "..."},
@@ -915,7 +917,9 @@ machine-specific), sorted by path, with a 64-character lowercase hex SHA-256
 digest per file. The manifest file itself is excluded from its own hash set
 (`manifests/` is not scanned). No timestamp field exists in the manifest, so
 `freeze` run twice against an unchanged tree produces a byte-identical
-manifest file.
+manifest file. The default `freeze` command continues to emit a candidate
+manifest; only the explicit `finalize` command emits `manifest_status=final`.
+Both modes cover the same nine paths and are deterministic.
 
 ### 14a. Manifest scope now covers every validation-policy artifact (Code X Phase 12D RE-AUDIT)
 
@@ -1029,10 +1033,10 @@ failure without treating the holdout split as contaminated and regenerating
 it (ADR-003's "Rule of Freezing"). None of that runner exists yet — Phase 12D
 produces artifacts only.
 
-## 17. Readiness for multidisciplinary audit
+## 17. Multidisciplinary audit closure
 
-Phase 12D is marked **IN REVIEW**, not Done, across three Code X audit
-rounds so far:
+Before final closure, Phase 12D deliberately remained **IN REVIEW**, not
+Done, throughout three Code X audit rounds:
 
 - **Round 1** (`docs/modernization-ai-reviews/codex-phase-12d-benchmark-
   audit.md`): verdict REVISE, 2 Critical + 3 Major. Fixed: guard-
@@ -1064,17 +1068,27 @@ rounds so far:
   guard added to every downstream check function that builds a set/dict
   from a validated field: §12b.
 
-Recommended status: **READY FOR FINAL DOCUMENTATION READ-ONLY
-VERIFICATION** — not APPROVE, not DONE. The round 3 fix pass completed
-the full unignored suite (569 passed, 1 warning, up from 484) and final
-candidate checks; the subsequent Code X malformed-value verification
-found no Critical and no blocking Major issue (implementation RESOLVED
-across every category) and required only a documentation alignment,
-which has been applied. Phase 12D becomes Done only after: maintainer
-verification, GitHub Copilot working-tree review, Code X independent
-technical re-audit, Gemini Pro academic methodology review, and Grok
-red-team coverage review all pass — consistent with the pattern already
-established for Phase 12C
-(`docs/modernization-ai-reviews/phase-12c-audit-resolution.md`). Gemini
-and Grok review the committed candidate only after Code X's technical
-blockers are resolved, per this fix pass's own instructions.
+All final gates have now passed against commit `4e10a2e`: Code X final
+technical verification **PASS**, Gemini final academic audit **PASS**, and
+Grok final red-team coverage audit **PASS**. Remaining Critical issues:
+**None**. Remaining blocking Major issues: **None**. The manifest was then
+produced through the explicit `finalize` path and covers the same nine
+byte-identical artifacts as the audited candidate.
+
+Final validation recorded **255 passed** across the three Phase 12D test
+modules and **578 passed, 1 warning** across the complete repository suite.
+The validator, six-file compile check, deterministic rebuild, FINAL manifest
+verification, and mutation check against a temporary copy all passed.
+
+Gemini's non-blocking statistical observation is accepted as a binding
+Phase 12E reporting rule: percentage metrics may be reported at aggregate
+or predeclared high-level grouped-family levels only when the group has
+adequate support; individual-family outcomes are descriptive or qualitative.
+Grok's recommended adversarial probes remain deferred to Phase 12E, and its
+semantic-coordination and benign-over-redaction observations remain future
+work. These points constrain future evaluation and do not require benchmark
+regeneration.
+
+**Final status: Phase 12D DONE; manifest FINAL; Phase 12E not started.** Any
+later change to one of the nine frozen artifacts creates a new benchmark
+version and requires fresh integrity checks and multidisciplinary review.

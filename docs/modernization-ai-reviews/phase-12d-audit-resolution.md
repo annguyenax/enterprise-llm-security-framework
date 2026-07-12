@@ -1240,8 +1240,8 @@ generated benchmark artifact** — the independently verified evidence
 (focused **246 passed**; full suite **569 passed, 1 warning**; 9-file
 candidate manifest verified) is retained as-is, not re-run.
 
-**Final recommendation: READY FOR FINAL DOCUMENTATION READ-ONLY
-VERIFICATION.**
+**Historical recommendation before multidisciplinary closure (superseded
+below): READY FOR FINAL DOCUMENTATION READ-ONLY VERIFICATION.**
 
 Not APPROVE. Not DONE. Phase 12D remains **IN REVIEW**; the manifest
 remains **CANDIDATE**. Phase 12E has not been started.
@@ -1263,3 +1263,152 @@ remains **CANDIDATE**. Phase 12E has not been started.
   Code X's reported finding and are not a known crash.
 - As with round 2, the bilingual/similarity controls remain lexical, not
   semantic — unaffected by, and unrelated to, this round's fix.
+
+---
+
+# Phase 12D Multidisciplinary Audit Adjudication and Finalization
+
+All Phase 12D work was committed as `4e10a2e453135e0850f7ab44fd6bb685de7867cf`
+("feat: complete Phase 12D benchmark v2 candidate") on
+`phase-12d-v2-benchmark`, and every remaining audit gate then ran against
+that exact commit:
+
+| Gate | Report | Verdict |
+|---|---|---|
+| Code X final documentation/README/cleanup verification | `codex-phase-12d-final-readme-cleanup-verification.md` | **PASS** |
+| Gemini final academic audit | `gemini-phase-12d-final-academic-audit.md` | **PASS** |
+| Grok final red-team coverage audit | `grok-phase-12d-final-red-team-audit.md` | **PASS** |
+
+Remaining Critical issues: **None**. Remaining blocking Major issues:
+**None** (all three reports state this explicitly).
+
+## Code X technical findings (final)
+
+The final Code X verification confirmed: README active status RESOLVED,
+temporary-artifact cleanup RESOLVED, no executable/test/artifact/manifest
+change during the documentation passes, `git diff --check` clean, no
+required actions before commit. Combined with the earlier
+malformed-value verification (every implementation category RESOLVED),
+the technical track is fully closed.
+
+## Gemini academic findings (adjudicated)
+
+- **Verdict: PASS**, with "Required Corrections Before Final Freeze:
+  None" and no Minor issues.
+- **Access limitation, recorded transparently:** Gemini states "Actual
+  artifacts inspected: no (CANNOT VERIFY — direct repository access to
+  view file contents is unavailable to this agent)"; its audit evaluated
+  the committed methodology/documentation and the reported statistics at
+  the correct commit (`4e10a2e`, matching HEAD). **Adjudication:**
+  acceptable, because Grok's audit *did* inspect the actual artifacts
+  (raw file views) at the same commit and independently passed the
+  content, and Code X had already technically verified every artifact
+  and statistic Gemini relied on. The two audits are complementary:
+  Gemini validates the methodology's academic defensibility; Grok and
+  Code X validate that the artifacts actually implement it.
+- **One non-blocking Major (statistical reporting scope):** with 23
+  families across 120 cases (~2–8 holdout cases per family), claiming
+  statistically significant per-family detection rates would be invalid.
+  **Adjudication: accepted; already documented and now restated as a
+  binding Phase 12E reporting rule** — Phase 12E must report percentages
+  only at the aggregate or at adequately supported, predeclared high-level
+  attack-group levels; individual-family outcomes are reported
+  descriptively/qualitatively only.
+  This was already the documented position
+  (`docs/benchmark-v2-methodology.md` "Statistical reporting
+  limitations" and §6a) and requires no benchmark change — it constrains
+  the future evaluation report, not the frozen artifacts.
+- **Deferrable Phase 12E decisions (deferred, not ignored):** ablation
+  profile selection; optional confidence intervals for aggregate
+  metrics; the evaluation runner implementation. All are Phase 12E work
+  by definition and are recorded in §16 of the methodology.
+
+## Grok red-team findings (adjudicated)
+
+- **Verdict: PASS**, actual artifacts inspected at `4e10a2e`. Critical:
+  none; Major: none; Minor: none; required fixes before final freeze:
+  none; no blocking missing attack or benign family.
+- **Future-work items (accepted as documented limitations, not
+  Phase 12D defects):** advanced semantic coordination beyond aggregate
+  heuristics; edge-case benign over-redaction with complex identifiers.
+  Both fall under the already-documented lexical/deterministic-guard
+  boundary (methodology §15) and stay on the future-work list.
+- **Recommended Phase 12E adversarial probes (deferred to Phase 12E,
+  recorded verbatim so they are not lost):** budget-exact multi-chunk
+  Vietnamese splits; trusted-source subtle authority + canary mixes;
+  homoglyph + benign trigger combinations. These are evaluation-time
+  probes against the running pipeline, not benchmark cases, and do not
+  require regenerating the frozen artifacts.
+
+## Why no benchmark regeneration is required
+
+No audit found any content defect: every Critical/Major/Minor list in
+the three final reports is empty (Gemini's single non-blocking Major
+constrains Phase 12E *reporting*, not benchmark content). The nine
+meaning-changing artifacts Gemini/Grok reviewed are the exact bytes
+committed at `4e10a2e`; regenerating them (even deterministically) would
+create new bytes-to-audit for zero content benefit and would invalidate
+the very PASS verdicts this finalization rests on. The artifacts were
+therefore preserved byte-identically — verified by recording all nine
+SHA-256 values before finalization and re-verifying them after (all
+match; they also match the manifest entries, unchanged since the
+candidate freeze).
+
+## Finalization
+
+`scripts/freeze_v2_benchmark.py` gained the smallest deterministic
+finalization option: a dedicated, explicit `finalize` CLI mode
+(`cmd_finalize()` → `cmd_freeze(status="final")`). The default `freeze`
+mode still writes `"manifest_status": "candidate"` — a final manifest
+can only ever be produced through explicit finalization. `verify` now
+reports the frozen manifest's actual status (CANDIDATE/FINAL) and is
+otherwise unchanged: comparison is per-file path/SHA-256/size, so
+mutation, missing-file, and unexpected-file detection work identically
+for a final manifest. The final manifest is byte-identical to the
+audited candidate manifest except for the single `manifest_status`
+field: same nine artifacts, same hashes, same sizes, same sorted
+relative POSIX paths, no timestamp, no absolute path, never hashes
+itself, deterministic (repeated finalization is byte-identical).
+
+Nine new tests in `tests/test_benchmark_v2_freeze.py` prove: default
+freeze still writes candidate; final status is emitted only through
+explicit finalization (and a later plain freeze demotes back to
+candidate); the final manifest verifies and says FINAL; repeated
+finalization is byte-identical; finalization changes none of the nine
+covered artifacts (hash-compared); the final manifest differs from the
+candidate in exactly the one status field; mutation detection remains
+active after finalization; finalization fails closed on an incomplete
+tree; and the real, committed manifest equals exactly what `finalize`
+deterministically produces (no manual-edit drift). One existing test
+(`test_manifest_is_explicitly_labeled_candidate`) was updated to
+`test_manifest_is_explicitly_labeled_final`, reflecting the completed
+audit chronology.
+
+Final validation results: the three Phase 12D modules passed **255 tests**;
+the complete unignored repository suite passed **578 tests with 1 warning**;
+six-file Python compilation passed; the guard-independent validator passed
+with 172 documents and 120 cases; two in-memory builds were byte-identical;
+the FINAL manifest verified all 9 files; and the post-finalization mutation
+probe passed against a temporary copy. Re-running `finalize` produced a
+byte-identical manifest and changed none of the nine artifact hashes.
+
+## Final status
+
+- Code X final technical verification: **PASS**
+- Gemini final academic audit: **PASS**
+- Grok final red-team audit: **PASS**
+- Remaining Critical issues: **None**
+- Remaining blocking Major issues: **None**
+- Manifest status: **FINAL** (9 frozen artifacts)
+- Phase 12D: **DONE**
+- Phase 12E: **not started** (requires its own explicit go-ahead; the
+  Gemini reporting rule and Grok probe recommendations above carry
+  forward into its design)
+
+Documented limitations preserved unchanged (methodology §15): synthetic
+corpus; rule-based deterministic guard target; Mock LLM Provider;
+lexical (non-semantic) contamination detection; the bilingual
+canonicalizer's bounded ~40-entry lexicon; no semantic retrieval;
+benchmark-author/guard-author overlap; small per-family sample sizes
+requiring aggregate/grouped reporting. No Phase 12E metric (ASR/FPR/FNR,
+latency, ablation) is claimed anywhere in Phase 12D.

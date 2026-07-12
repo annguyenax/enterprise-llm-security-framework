@@ -73,16 +73,19 @@ python scripts/run_evaluation.py --comparison
   `app.guards.input_guard`/`app.guards.rag_guard` without affecting the
   result: `--diagnose-current-guards` (`--include-holdout-diagnostic` to
   also scope holdout).
-- `freeze_v2_benchmark.py` writes/verifies a SHA-256 **candidate** manifest
-  (`datasets/v2/manifests/benchmark-v2-manifest.json`, `"manifest_status":
-  "candidate"`) covering all 9 policy-bearing files: `corpus/`, `cases/`,
+- `freeze_v2_benchmark.py` writes/verifies a SHA-256 manifest covering all
+  9 policy-bearing files: `corpus/`, `cases/`,
   `labels/`, `design/` (the authoring-provenance artifact), and the
   top-level `contamination-exemptions.json` (Code X Phase 12D re-audit --
   every artifact that can change benchmark meaning or validation
   exemptions is now integrity-bound, not only the generated corpus/case/
-  label files). Not a defensible final freeze until Code X, Gemini, and
-  Grok all pass. A fresh freeze fails closed if either required policy-bearing
-  file is missing.
+  label files). `freeze` remains the authoring-time candidate path;
+  `finalize` is the explicit audit-gated path and is the only CLI mode that
+  writes `"manifest_status": "final"`. Both are deterministic, use the same
+  paths/hashes/sizes, include no timestamp or absolute path, and fail closed
+  if a required policy artifact is missing. `verify` accepts either status
+  and reports the status actually frozen. The repository manifest is FINAL
+  after Code X, Gemini, and Grok all returned PASS.
 
 ```powershell
 python scripts/build_v2_benchmark.py
@@ -90,6 +93,7 @@ python scripts/build_v2_benchmark.py --verify-determinism
 python scripts/validate_v2_benchmark.py
 python scripts/validate_v2_benchmark.py --diagnose-current-guards
 python scripts/freeze_v2_benchmark.py freeze
+python scripts/freeze_v2_benchmark.py finalize
 python scripts/freeze_v2_benchmark.py verify
 ```
 

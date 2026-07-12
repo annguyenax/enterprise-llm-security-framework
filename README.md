@@ -2,7 +2,7 @@
 
 **Xây dựng Hệ thống Bảo mật LLM Chống Tấn công Prompt Injection và Data Poisoning trong Môi trường Doanh nghiệp**
 
-> Status: **Phase 10 (v1 report track) In Review; Phase 12C of the v2 modernization wave is In Review, ready for one final independent Code X re-audit; Phase 12D (independent v2 benchmark design/generation/freeze) is IN REVIEW — technical and malformed-value verification are complete with no remaining Critical or blocking Major findings; the candidate (manifest still CANDIDATE) is ready for final documentation read-only verification before commit; Gemini academic and Grok red-team audits remain pending; Phase 12E has not started (not yet Done).** The lab-scale gateway, guards, offline mock provider, controlled v1 evaluation harness, and final v1 report content are integrated (Phase 0-10). The separate v2 wave has added SQLite FTS5/BM25 retrieval, server-controlled provenance, a guarded end-to-end RAG pipeline, and a candidate-frozen, deterministic 120-case v2 benchmark for a future Phase 12E evaluation. This is a university internship proof-of-concept (PoC), not a production system.
+> Status: **Phase 10 (v1 report track) In Review; Phase 12C of the v2 modernization wave is In Review, ready for one final independent Code X re-audit; Phase 12D (independent v2 benchmark design/generation/freeze) is DONE — Code X final technical verification PASS, Gemini final academic audit PASS, Grok final red-team audit PASS, no remaining Critical or blocking Major findings; the 9-artifact benchmark manifest is FINAL; Phase 12E (evaluation) has not started.** The lab-scale gateway, guards, offline mock provider, controlled v1 evaluation harness, and final v1 report content are integrated (Phase 0-10). The separate v2 wave has added SQLite FTS5/BM25 retrieval, server-controlled provenance, a guarded end-to-end RAG pipeline, and a final-frozen, deterministic 120-case v2 benchmark for a future Phase 12E evaluation. This is a university internship proof-of-concept (PoC), not a production system.
 
 ## Project Summary
 
@@ -553,7 +553,7 @@ test breakdown. **Phase 12C is ready for one final independent Code X
 re-audit — not yet marked Done** (per `AGENT_RULES.md` rule 9/10, it is
 not declared complete until that re-audit returns PASS).
 
-### Phase 12D Independent Benchmark V2 (In Review — three Code X audit rounds, all REVISE, all fixed; awaiting final read-only verification)
+### Phase 12D Independent Benchmark V2 (DONE — Code X, Gemini, and Grok final audits all PASS; manifest FINAL)
 
 Phase 12D produces a new, independently-governed benchmark for a future
 Phase 12E security evaluation — 120 cases across 23 scenario families
@@ -610,16 +610,22 @@ retrieval, residual paraphrase/encoding bypasses, benchmark-author/
 guard-author overlap, and the exact tested boundary of the bilingual
 translation-detection lexicon). Phase 12D produces benchmark artifacts
 only — no security evaluation, no ASR/FPR/FNR numbers, no ablation
-results; that is Phase 12E, which has not started. **Phase 12D is marked In
-Review, not Done**. The round 3 malformed-value fix pass independently ran
-the complete suite without ignored modules (`569 passed, 1 warning`, up from
-484) and added type-first validation helpers and a malformed-value
-regression matrix across every corpus/case/label/provenance field. The
-subsequent Code X read-only verification confirmed every implementation
-category RESOLVED (no Critical, no blocking Major issues) and required only
-a documentation alignment, which has been applied, leaving the candidate at
-**READY FOR FINAL DOCUMENTATION READ-ONLY VERIFICATION**, pending that
-final check followed by Gemini and Grok audits.
+results; that is Phase 12E, which has not started. **Phase 12D is DONE**:
+after the three fix rounds, the committed candidate (commit `4e10a2e`)
+passed all remaining multidisciplinary gates — Code X final technical
+verification **PASS**, Gemini final academic audit **PASS**, Grok final
+red-team coverage audit **PASS**, with no remaining Critical or blocking
+Major findings — and the 9-artifact manifest was then finalized via the
+freeze script's explicit `finalize` mode (`"manifest_status": "final"`;
+the nine audited artifacts remained byte-identical, verified by SHA-256
+before and after). Final verification completed with **255 focused Phase
+12D tests passed** and **578 repository tests passed, 1 warning**. Per
+Gemini's accepted (non-blocking) finding, Phase
+12E must report percentage metrics only at the aggregate and at
+predeclared high-level attack-group levels with adequate support;
+individual-family outcomes are descriptive only. Any
+future change to the frozen artifacts is a new benchmark version (v3)
+requiring fresh audits, per ADR-003's Rule of Freezing.
 
 Everything before Phase 4 was documentation/data only — Phase 0–3.1 produced scaffolding, research, architecture/threat-model docs, and the synthetic benchmark (`datasets/`, `redteam/`). See [PROJECT_PLAN.md](PROJECT_PLAN.md) for the full roadmap.
 

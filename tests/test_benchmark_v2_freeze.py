@@ -72,12 +72,15 @@ def test_manifest_exists_and_is_valid_json():
     assert manifest["file_count"] == len(manifest["files"])
 
 
-def test_manifest_is_explicitly_labeled_candidate():
-    """Code X Phase 12D audit, required-fixes item 7: the manifest must
-    remain labeled CANDIDATE FREEZE until Code X, Gemini, and Grok all
-    pass and a final regeneration occurs after all accepted fixes."""
+def test_manifest_is_explicitly_labeled_final():
+    """Code X Phase 12D audit, required-fixes item 7: the manifest stayed
+    labeled CANDIDATE until Code X, Gemini, and Grok all returned PASS
+    against the committed artifacts (commit 4e10a2e — see
+    docs/modernization-ai-reviews/phase-12d-audit-resolution.md). All
+    three have passed, so the real, committed manifest is now the
+    explicit FINAL freeze, emitted via the dedicated `finalize` mode."""
     manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
-    assert manifest["manifest_status"] == "candidate"
+    assert manifest["manifest_status"] == "final"
 
 
 def test_freeze_cli_output_says_candidate(tmp_benchmark_dir, freeze_mod, capsys):
@@ -347,3 +350,118 @@ def test_deterministic_rebuild_restores_candidate_verification_with_policy_artif
 
     exemptions_path.write_text(original, encoding="utf-8", newline="")
     assert freeze_mod.cmd_verify() == 0
+
+
+# ---------------------------------------------------------------------------
+# Phase 12D finalization (all multidisciplinary audits passed): explicit
+# `finalize` mode emits the FINAL manifest; the default `freeze` mode still
+# emits only a CANDIDATE manifest.
+# ---------------------------------------------------------------------------
+
+
+def test_default_freeze_still_writes_candidate_status(tmp_benchmark_dir, freeze_mod):
+    """Candidate manifests remain supported: the default mode's output is
+    unchanged by the finalization feature."""
+    assert freeze_mod.main([]) == 0
+    manifest = json.loads(
+        (tmp_benchmark_dir / "manifests" / "benchmark-v2-manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["manifest_status"] == "candidate"
+
+
+def test_final_manifest_is_emitted_only_through_explicit_finalization(tmp_benchmark_dir, freeze_mod):
+    """`freeze` (default or explicit) can never produce a final manifest;
+    only the dedicated `finalize` mode writes manifest_status=final."""
+    manifest_path = tmp_benchmark_dir / "manifests" / "benchmark-v2-manifest.json"
+
+    assert freeze_mod.main(["freeze"]) == 0
+    assert json.loads(manifest_path.read_text(encoding="utf-8"))["manifest_status"] == "candidate"
+
+    assert freeze_mod.main(["finalize"]) == 0
+    assert json.loads(manifest_path.read_text(encoding="utf-8"))["manifest_status"] == "final"
+
+    # and a subsequent plain freeze demotes it back to candidate — final
+    # status never leaks into the default path.
+    assert freeze_mod.main(["freeze"]) == 0
+    assert json.loads(manifest_path.read_text(encoding="utf-8"))["manifest_status"] == "candidate"
+
+
+def test_final_manifest_verifies_and_says_final(tmp_benchmark_dir, freeze_mod, capsys):
+    assert freeze_mod.cmd_finalize() == 0
+    capsys.readouterr()
+    assert freeze_mod.cmd_verify() == 0
+    captured = capsys.readouterr()
+    assert "FINAL" in captured.out
+
+
+def test_repeated_finalization_is_byte_identical(tmp_benchmark_dir, freeze_mod):
+    manifest_path = tmp_benchmark_dir / "manifests" / "benchmark-v2-manifest.json"
+    assert freeze_mod.cmd_finalize() == 0
+    first = manifest_path.read_bytes()
+    assert freeze_mod.cmd_finalize() == 0
+    second = manifest_path.read_bytes()
+    assert first == second
+
+
+def test_finalization_does_not_change_any_covered_artifact(tmp_benchmark_dir, freeze_mod):
+    """Finalization only rewrites the manifest; every one of the nine
+    covered artifacts must remain byte-identical (hash-verified), since
+    changing any of them would invalidate the audits that blessed them."""
+    covered = [
+        "corpus/documents.jsonl",
+        "cases/development.jsonl", "cases/validation.jsonl", "cases/holdout.jsonl",
+        "labels/development.jsonl", "labels/validation.jsonl", "labels/holdout.jsonl",
+        "design/authoring-provenance.jsonl",
+        "contamination-exemptions.json",
+    ]
+    before = {rel: _sha256_of(tmp_benchmark_dir / rel) for rel in covered}
+    assert freeze_mod.cmd_finalize() == 0
+    after = {rel: _sha256_of(tmp_benchmark_dir / rel) for rel in covered}
+    assert before == after
+
+
+def test_final_manifest_covers_same_nine_artifacts_with_same_hashes(tmp_benchmark_dir, freeze_mod):
+    """The final manifest differs from the candidate manifest in exactly
+    one field: manifest_status. Paths, hashes, sizes, order, and count
+    are identical."""
+    manifest_path = tmp_benchmark_dir / "manifests" / "benchmark-v2-manifest.json"
+    assert freeze_mod.cmd_freeze() == 0
+    candidate = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert freeze_mod.cmd_finalize() == 0
+    final = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    assert final["manifest_status"] == "final"
+    assert candidate["manifest_status"] == "candidate"
+    for key in ("manifest_version", "benchmark_version", "file_count", "files"):
+        assert final[key] == candidate[key]
+    assert final["file_count"] == 9
+
+
+def test_mutation_detection_remains_active_after_finalization(tmp_benchmark_dir, freeze_mod, capsys):
+    assert freeze_mod.cmd_finalize() == 0
+    target = tmp_benchmark_dir / "labels" / "holdout.jsonl"
+    with target.open("a", encoding="utf-8") as f:
+        f.write('{"case_id": "TAMPERED-AFTER-FINALIZE"}\n')
+
+    result = freeze_mod.cmd_verify()
+    captured = capsys.readouterr()
+    assert result == 1
+    assert "labels/holdout.jsonl" in captured.err
+
+
+def test_finalize_refuses_incomplete_tree(tmp_benchmark_dir, freeze_mod, capsys):
+    """Finalization fails closed on a tree missing a required artifact,
+    exactly like a candidate freeze."""
+    (tmp_benchmark_dir / "design" / "authoring-provenance.jsonl").unlink()
+    result = freeze_mod.cmd_finalize()
+    captured = capsys.readouterr()
+    assert result == 1
+    assert "required candidate artifact(s) missing" in captured.err
+
+
+def test_real_committed_final_manifest_matches_finalize_output(freeze_mod):
+    """The real, committed manifest must be exactly what `finalize`
+    would deterministically produce right now — no manual edit drift."""
+    expected = freeze_mod.build_manifest(status="final")
+    actual = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    assert actual == expected

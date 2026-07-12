@@ -1186,6 +1186,35 @@ then corrected:
 - The corpus/label malformed-value parameter counts were corrected from
   16/25 to the actual **17/26** (case 17 and provenance 16 were already
   correct) in every document repeating them.
-- **Final recommendation: READY FOR FINAL DOCUMENTATION READ-ONLY
-  VERIFICATION.** Not APPROVE, not DONE. Phase 12D remains In Review; the
-  candidate manifest remains CANDIDATE. Phase 12E was not started.
+- **Historical recommendation before multidisciplinary closure
+  (superseded below): READY FOR FINAL DOCUMENTATION READ-ONLY
+  VERIFICATION.** At that point Phase 12D remained In Review, the candidate
+  manifest remained CANDIDATE, and Phase 12E had not started.
+
+## Phase 12D — Multidisciplinary Audit Closure and Final Freeze (2026-07-12)
+
+- Verified the actual final reports at commit `4e10a2e`: Code X technical
+  **PASS**, Gemini academic **PASS**, and Grok red-team coverage **PASS**;
+  no Critical or blocking Major finding remains.
+- Recorded Gemini's direct-artifact access limitation and accepted its
+  non-blocking reporting constraint: Phase 12E percentages are limited to
+  aggregate or adequately supported, predeclared high-level attack groups;
+  individual-family outcomes remain descriptive. Ablation profiles,
+  confidence intervals, and the evaluation runner remain Phase 12E work.
+- Preserved Grok's three Phase 12E probe recommendations (budget-exact
+  Vietnamese multi-chunk splits, trusted-source authority/canary mixes,
+  homoglyph plus benign triggers) and its semantic-coordination/
+  over-redaction future-work observations without changing benchmark data.
+- Added the explicit deterministic `finalize` mode to
+  `scripts/freeze_v2_benchmark.py`. The default `freeze` mode remains
+  CANDIDATE; only `finalize` emits FINAL. Both cover the same nine relative
+  POSIX paths with the same SHA-256 values and sizes, no timestamp, no
+  absolute path, and no self-hash.
+- Finalized `datasets/v2/manifests/benchmark-v2-manifest.json`; all nine
+  audited artifacts remained byte-identical before and after. Any later
+  artifact change requires a new benchmark version and fresh audits.
+- Final validation: focused Phase 12D suite **255 passed**; full repository
+  suite **578 passed, 1 warning**; six-file compile, validator (172
+  documents/120 cases), deterministic rebuild, FINAL manifest verify, and
+  mutation detection against a temporary copy all passed.
+- **Final status: Phase 12D DONE; manifest FINAL; Phase 12E not started.**
