@@ -47,8 +47,24 @@ revoke và tạo lại** — chưa xác nhận đã làm.
 
 ## Q-005 — Phase 12C còn treo một vòng Code X re-audit
 
-**Trạng thái:** Chưa làm
+**Trạng thái:** ĐÃ ĐIỀU TRA — audit request soạn sẵn, chờ bạn chạy Code X
 
-Phase 12C (RAG security pipeline) vẫn ở In Review, chờ một vòng Code X re-audit
-cuối. Phase 12D đã Done nhưng 12C thì chưa — cần đóng nốt trước khi bắt đầu 12E,
-vì 12E đánh giá chính pipeline của 12C.
+**Đây là blocker duy nhất còn lại trước Phase 12E.**
+
+Điều tra (2026-07-13) cho thấy:
+
+- Code X audit cuối trả **REVISE** với finding: nested `ProvenanceItemResponse`
+  dựng ngoài block bảo vệ.
+- **Fix ĐÃ triển khai** ở commit `56b749a`, kèm 5 regression test
+  (`test_nested_*`, `test_response_construction_failure_*` trong
+  `tests/test_rag_query_routes.py`).
+- Xác minh trực tiếp trong code: `app/api/routes.py:349-401` — cả ba model
+  response giờ dựng trong **một block `try` duy nhất**, audit commit **sau khi**
+  toàn bộ cây response dựng xong.
+- **`app/` KHÔNG thay đổi** kể từ commit merge `ad555c9`
+  (`git log ad555c9..HEAD -- app/` trống).
+- **Nhưng chưa có báo cáo Code X re-audit nào xác nhận PASS** → 12C vẫn In Review.
+
+**Việc cần làm:** dán khối prompt trong
+`handoffs/phase-12c-final-reaudit.md` vào Code X. Không cần Gemini/Grok audit
+lại vì code họ đã xem không đổi.
