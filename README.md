@@ -2,7 +2,7 @@
 
 **Xây dựng Hệ thống Bảo mật LLM Chống Tấn công Prompt Injection và Data Poisoning trong Môi trường Doanh nghiệp**
 
-> Status: **Phase 10 (v1 report track) In Review; Phase 12C of the v2 modernization wave is In Review, ready for one final independent Code X re-audit; Phase 12D (independent v2 benchmark design/generation/freeze) is DONE — Code X final technical verification PASS, Gemini final academic audit PASS, Grok final red-team audit PASS, no remaining Critical or blocking Major findings; the 9-artifact benchmark manifest is FINAL; Phase 12E (evaluation) has not started.** The lab-scale gateway, guards, offline mock provider, controlled v1 evaluation harness, and final v1 report content are integrated (Phase 0-10). The separate v2 wave has added SQLite FTS5/BM25 retrieval, server-controlled provenance, a guarded end-to-end RAG pipeline, and a final-frozen, deterministic 120-case v2 benchmark for a future Phase 12E evaluation. This is a university internship proof-of-concept (PoC), not a production system.
+> Status: **Phase 10 (v1 report track) In Review; Phase 12C (end-to-end RAG security pipeline) is DONE — final independent Code X re-audit PASS, no remaining Critical or blocking Major findings; Phase 12D (independent v2 benchmark design/generation/freeze) is DONE — Code X final technical verification PASS, Gemini final academic audit PASS, Grok final red-team audit PASS, and the 9-artifact benchmark manifest is FINAL; Phase 12E (evaluation) has not started.** The lab-scale gateway, guards, offline mock provider, controlled v1 evaluation harness, and final v1 report content are integrated (Phase 0-10). The separate v2 wave has added SQLite FTS5/BM25 retrieval, server-controlled provenance, a guarded end-to-end RAG pipeline, and a final-frozen, deterministic 120-case v2 benchmark for a future Phase 12E evaluation. This is a university internship proof-of-concept (PoC), not a production system.
 
 ## Project Summary
 
@@ -446,7 +446,7 @@ instead of Python characters, and a bounded, iterative
 metadata with a controlled error instead of an unhandled
 `RecursionError`.
 
-### Phase 12C End-to-End RAG Security Pipeline (In Review)
+### Phase 12C End-to-End RAG Security Pipeline (DONE — final Code X re-audit PASS)
 
 Phase 12C adds `POST /v1/rag/query`: Input Guard → server-side retrieval
 (Phase 12B) → Provenance/Trust Guard → RAG Context Guard (per chunk, then
@@ -549,9 +549,23 @@ for the full architecture: `run_rag_query_uncommitted`/
 `mark_response_construction_failed`). The validated suite now contains
 319 passing tests; see [tests/README.md](tests/README.md) and
 [app/README.md](app/README.md) for the full stage-by-stage design and
-test breakdown. **Phase 12C is ready for one final independent Code X
-re-audit — not yet marked Done** (per `AGENT_RULES.md` rule 9/10, it is
-not declared complete until that re-audit returns PASS).
+test breakdown. **Phase 12C is DONE.** The final independent Code X
+re-audit returned **PASS** at HEAD `9fed074` against the Phase 12C
+implementation baseline `ad555c9` (final implementation commit `56b749a`),
+with **no remaining Critical and no remaining blocking Major findings** and
+no required actions before closure. Code X independently inspected the code
+and executed the tests: focused Phase 12C suite **172 passed, 1 warning**;
+targeted Critical/Major probes **24 passed, 1 warning**; full repository
+suite **578 passed, 0 failed, 0 skipped, 1 warning**; `compileall` PASS.
+The previously blocking finding — nested `ProvenanceItemResponse`
+construction outside the protected response/audit boundary — is confirmed
+RESOLVED: every nested response model is now built inside one protected
+`try` block, and the success audit is committed only after the complete
+typed response tree exists. Three Minor findings (regression-count wording,
+optional non-finite-`retrieval_score` schema hardening, and pre-existing
+ignored `__pycache__` directories) were adjudicated as non-blocking and are
+recorded in
+[phase-12c-audit-resolution.md](docs/modernization-ai-reviews/phase-12c-audit-resolution.md).
 
 ### Phase 12D Independent Benchmark V2 (DONE — Code X, Gemini, and Grok final audits all PASS; manifest FINAL)
 

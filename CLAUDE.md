@@ -17,9 +17,12 @@ poisoning. **PoC học thuật, KHÔNG phải production**, dữ liệu tổng h
 
 ## Trạng thái hiện tại (2026-07-13)
 
+- Phase 12C (RAG pipeline): **DONE** — Code X final re-audit PASS
 - Phase 12D (Benchmark V2): **DONE** — manifest FINAL, 3 gate audit đều PASS
-- Phase 12C (RAG pipeline): **In Review** — còn 1 vòng Code X re-audit
 - Phase 12E (Evaluation): **CHƯA BẮT ĐẦU** — cần go-ahead riêng
+
+Cả hai phase chặn 12E đều đã đóng. 12E vẫn cần go-ahead riêng (AGENT_RULES
+rule 12).
 
 ## Lệnh
 

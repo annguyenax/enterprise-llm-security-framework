@@ -12,9 +12,40 @@
 | 0–10 | Gateway, guards, mock provider, v1 evaluation, báo cáo LaTeX | Done (Phase 10 In Review) |
 | 12A | Kế hoạch hiện đại hoá v2 | Done |
 | 12B | SQLite FTS5/BM25 retrieval foundation | Done |
-| 12C | End-to-end RAG security pipeline | **In Review** — chờ 1 vòng Code X re-audit cuối |
+| 12C | End-to-end RAG security pipeline | **DONE** — Code X final re-audit PASS |
 | 12D | Benchmark V2 (thiết kế / sinh / freeze) | **DONE** — manifest FINAL |
-| 12E | Đánh giá + ablation trên benchmark v2 | **CHƯA BẮT ĐẦU** |
+| 12E | Đánh giá + ablation trên benchmark v2 | **CHƯA BẮT ĐẦU** — cần go-ahead riêng |
+
+**Cả hai phase chặn 12E (12C và 12D) đều đã đóng bằng audit độc lập PASS.**
+12E vẫn cần go-ahead riêng theo `AGENT_RULES.md` rule 12.
+
+## Phase 12C — đã đóng
+
+- **Code X final technical re-audit: PASS.**
+  Báo cáo: `docs/modernization-ai-reviews/codex-phase-12c-final-reaudit.md`
+- Reviewed HEAD: `9fed074481f46ce5e3ae2bfa20abcec3e36661fb`
+- Phase 12C implementation baseline: `ad555c95f01601b8eeeba92106b132ad88d7be00`
+- Final implementation commit: `56b749a47501ab9686503ca007c5197d8a6b47b0`
+- `app/` drift sau baseline: **không có**
+- Critical còn lại: **không có**. Blocking Major còn lại: **không có**.
+  Required actions before DONE: **không có**.
+- Code X **đã đọc code thật** và **tự chạy test** (không chỉ đọc số liệu ta báo).
+- Test: focused Phase 12C **172 passed, 1 warning**; targeted Critical/Major
+  probes **24 passed, 1 warning**; full suite **578 passed, 0 failed,
+  0 skipped, 1 warning**; `compileall` PASS.
+- Finding chặn trước đó (nested `ProvenanceItemResponse` dựng ngoài block bảo
+  vệ) — **RESOLVED**: mọi model response lồng nhau giờ dựng trong một block
+  `try` duy nhất; success audit chỉ commit sau khi toàn bộ cây response dựng
+  xong.
+- **3 Minor, đều non-blocking (ghi lại, không bỏ qua):**
+  1. Cách đếm regression test: **4 test nested-response mới**; con số 5 chỉ
+     đúng khi tính thêm regression outer-response atomicity trước đó. Handoff
+     của ta ghi "5" là thiếu chính xác.
+  2. `retrieval_score` phi hữu hạn sẽ serialize thành JSON `null` thay vì lỗi.
+     SQLite BM25 hiện chỉ sinh giá trị hữu hạn → đây là **schema hardening
+     tương lai (tuỳ chọn)**, không phải lỗi sống.
+  3. Thư mục `__pycache__` bị ignore có sẵn từ trước — không do audit tạo,
+     không track.
 
 ## Phase 12D — đã đóng
 

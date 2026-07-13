@@ -643,9 +643,110 @@ and `StageResultResponse`; if a future change adds another nested model
 to `RagQueryResponse`, it must be constructed inside this same protected
 block, not appended afterward.
 
-### Final recommendation
+### Final recommendation (superseded — the re-audit has since run; see below)
 
 **READY FOR ONE FINAL CODE X RE-AUDIT.** Not APPROVE, not DONE. Per this
 task's explicit instruction, Phase 12C remains **In Review** and is not
 marked `Done` until this specific diff receives an independent Code X
 re-audit returning PASS.
+
+---
+
+# Phase 12C Final Code X Re-Audit — PASS, Phase 12C CLOSED
+
+Report: `docs/modernization-ai-reviews/codex-phase-12c-final-reaudit.md`
+
+## Reviewed state
+
+| Item | Value |
+|---|---|
+| Branch | `phase-12-rag-v2` |
+| Reviewed HEAD | `9fed074481f46ce5e3ae2bfa20abcec3e36661fb` |
+| Phase 12C implementation baseline | `ad555c95f01601b8eeeba92106b132ad88d7be00` |
+| Final implementation commit | `56b749a47501ab9686503ca007c5197d8a6b47b0` |
+| Actual code inspected | **Yes** — routes, schemas, pipeline contracts, RAG service, provenance/context/DLP/output guards, provider, audit logger, config, tests, audit history, README, task board |
+| Tests independently executed | **Yes** — focused, targeted security probes, full unignored suite, compile checks, manifest verification |
+| `app/` drift after baseline | **None** (post-baseline executable additions belong only to Phase 12D scripts/tests) |
+
+## Verdict
+
+- **Final Verdict: PASS**
+- Critical Issues: **None**
+- Major Issues: **None**
+- Required Actions Before Phase 12C Can Be Marked DONE: **None**
+
+## Previous blocking finding — RESOLVED
+
+The nested `ProvenanceItemResponse` construction that previously occurred
+outside the protected response/audit boundary (allowing an unaudited HTTP 500
+*after* the provider had already executed) is confirmed fixed:
+`ProvenanceItemResponse`, `StageResultResponse`, and `RagQueryResponse` are all
+constructed inside one `try` block in `app/api/routes.py::rag_query`. The
+success audit is committed only after the complete typed tree exists. Code X
+independently confirmed: no false success audit is possible through either the
+outer or nested construction paths; no partial response can be returned; failure
+disclosure is a fixed request-ID-bearing HTTP 500 with no exception text,
+context, query, secret, or path leakage.
+
+## Security and pipeline invariants — all VERIFIED
+
+Sanitized-prompt-only · bounded-approved-context-only · aggregate inspection
+(exact provider context inspected, separator costs counted) · server-side
+provenance · trusted content still inspected · DLP complete-output coverage
+(uninspected suffixes dropped) · Output Guard `BLOCK` priority over DLP
+`SANITIZE` · audit redaction across nested values · no public guard-disable
+surface · no external network/provider drift (only the local Mock Provider).
+
+## Executed test evidence (Code X, independently run)
+
+| Check | Result |
+|---|---|
+| Focused Phase 12C suite | **172 passed, 1 warning** |
+| Targeted Critical/Major probes | **24 passed, 1 warning** |
+| Full repository suite (no `--ignore`) | **578 passed, 0 failed, 0 skipped, 1 warning** |
+| Compile (`python -m compileall -q app tests`) | **PASS** |
+| Repository modified by tests | No |
+| Tracked database files | None |
+
+The single warning is the pre-existing Starlette `TestClient`/`httpx`
+deprecation notice. No dependency was installed; `httpx2` is a typosquat and is
+never installed.
+
+## Minor findings — adjudicated, all non-blocking
+
+1. **Regression-test count wording.** The collaboration handoff
+   (`docs/ai-collaboration/handoffs/phase-12c-final-reaudit.md`) said "5
+   regression tests"; the authoritative resolution above correctly says **4
+   newly added** nested-response tests. Both are defensible: five is the total
+   only when the *earlier* outer-response atomicity regression
+   (`test_response_construction_failure_emits_exactly_one_corrected_audit_event`)
+   is counted alongside the four new nested-response tests. **Accepted:** the
+   handoff wording was imprecise, not the resolution. Recorded here rather than
+   silently corrected. Non-blocking.
+
+2. **Non-finite `retrieval_score` serializes as JSON `null`.** A defensive probe
+   showed a non-finite score would serialize to `null` rather than fail
+   validation. The current SQLite BM25 implementation emits only finite scores,
+   so this is **optional future schema hardening** (an explicit finite-float
+   constraint on the response model), not a live defect. **Accepted as
+   future work.** Does not block Phase 12C.
+
+3. **Pre-existing ignored `__pycache__` directories.** Present in the tree, not
+   created by the audit, not tracked by git, timestamps predate the audit.
+   **Accepted:** not a Phase 12C blocker, no action taken.
+
+## Deferrable recommendations (carried forward, not lost)
+
+Semantic/homoglyph resistance and trusted-internal ablation profiles remain
+inside the already-documented future evaluation scope. They do not block Phase
+12C closure and are candidates for the Phase 12E ablation design.
+
+## Final status
+
+- **Phase 12C: DONE**
+- Final Code X technical re-audit: **PASS**
+- Remaining Critical issues: **None**
+- Remaining blocking Major issues: **None**
+- Phase 12D: **DONE** (9-artifact manifest FINAL, all three audit gates PASS)
+- **Phase 12E: NOT STARTED** — requires a separate, explicit go-ahead per
+  `AGENT_RULES.md` rule 12.

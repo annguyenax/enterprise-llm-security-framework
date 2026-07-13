@@ -572,7 +572,7 @@ status (`In Review`, not `Done`) is unchanged by Phase 12C starting; both
 phases remain gated on their own independent audits before either is
 declared `Done`.
 
-## Phase 12C — RAG Query Service, Provenance, and Centralized DLP — **Status: In Review**
+## Phase 12C — RAG Query Service, Provenance, and Centralized DLP — **Status: DONE**
 
 | Task | Owner | Status |
 |---|---|---|
@@ -744,14 +744,60 @@ Full traceable resolution: `docs/modernization-ai-reviews/phase-12c-audit-resolu
   validation failures before `rag_query`'s function body runs, therefore
   outside the one-terminal-audit-event contract) is now explicitly
   documented rather than left implicit.
-- **Final recommendation: READY FOR ONE FINAL CODE X RE-AUDIT.** Not
-  APPROVE, not DONE. Per this task's explicit instruction, Phase 12C
-  remains **In Review** — an independent re-audit of this specific diff
-  is still required before the phase can be closed.
+- ~~**Final recommendation: READY FOR ONE FINAL CODE X RE-AUDIT.**~~
+  Superseded — the re-audit has since run and returned PASS (below).
 
-**Next phase:** Phase 12D — Benchmark v2 Generation and Freeze (see below).
-It also remains gated on Phase 12C actually reaching `Done` via an
-independent re-audit PASS, which has not yet occurred.
+### Phase 12C Final Code X Re-Audit — **Status: PASS · Phase 12C CLOSED**
+
+- **Final Code X technical re-audit: PASS.** Report:
+  `docs/modernization-ai-reviews/codex-phase-12c-final-reaudit.md`.
+- Reviewed HEAD: `9fed074481f46ce5e3ae2bfa20abcec3e36661fb` · Phase 12C
+  implementation baseline: `ad555c95f01601b8eeeba92106b132ad88d7be00` ·
+  final implementation commit: `56b749a47501ab9686503ca007c5197d8a6b47b0`.
+  `app/` drift after baseline: **none**.
+- Actual code inspected: **yes**. Tests independently executed: **yes**.
+- Remaining Critical issues: **None**. Remaining blocking Major issues:
+  **None**. Required actions before Phase 12C DONE: **None**.
+- **Previously blocking finding RESOLVED:** nested `ProvenanceItemResponse`
+  construction outside the protected response/audit boundary. All nested
+  response models (`ProvenanceItemResponse`, `StageResultResponse`) and the
+  outer `RagQueryResponse` are now built inside one protected `try` block;
+  the success audit commits only after the complete typed tree exists. No
+  false success audit, no partial response, no exception/context/query/
+  secret/path disclosure.
+- Security and pipeline invariants: **all VERIFIED** (sanitized-prompt-only,
+  bounded approved context, aggregate inspection, server-side provenance,
+  trusted content still inspected, DLP complete-output coverage, Output
+  Guard `BLOCK` priority, nested audit redaction, no public guard-disable
+  surface, no external provider drift).
+- **Executed evidence (Code X, independently run):** focused Phase 12C suite
+  **172 passed, 1 warning**; targeted Critical/Major probes **24 passed,
+  1 warning**; full repository suite **578 passed, 0 failed, 0 skipped,
+  1 warning**; `python -m compileall -q app tests` **PASS**. Repository not
+  modified by tests; no tracked database files. The single warning is the
+  pre-existing Starlette `TestClient`/`httpx` deprecation notice — `httpx2`
+  is a typosquat and was never installed.
+- **Three Minor findings, adjudicated non-blocking (not omitted):**
+  1. *Regression-test count wording.* The collaboration handoff said "5
+     regression tests"; the authoritative resolution correctly says **4
+     newly added** nested-response tests. Five is valid only when the
+     earlier outer-response atomicity regression is also counted. The
+     handoff wording was imprecise; recorded, not silently corrected.
+  2. *Non-finite `retrieval_score`.* A defensive probe showed it would
+     serialize as JSON `null` rather than fail. Current SQLite BM25 emits
+     only finite scores, so this is **optional future schema hardening**,
+     not a live defect. Does not block Phase 12C.
+  3. *Pre-existing ignored `__pycache__` directories.* Not created by the
+     audit, not tracked, timestamps predate it. Not a Phase 12C blocker.
+- Deferrable recommendations carried forward: semantic/homoglyph resistance
+  and trusted-internal ablation profiles stay within the documented future
+  evaluation scope (candidates for the Phase 12E ablation design).
+- **Phase 12C: DONE.** Phase 12D: **DONE**. **Phase 12E: NOT STARTED.**
+
+**Next phase:** Phase 12E — Benchmark V2 Evaluation and Ablation. Per
+`AGENT_RULES.md` rule 12, Phase 12E does not start automatically and
+requires a separate, explicit go-ahead. Both of its gating phases (12C and
+12D) have now reached `Done` via independent audit PASS.
 
 ## Phase 12D — Independent Benchmark V2 Design, Generation, Validation and Freeze — **Status: Done**
 

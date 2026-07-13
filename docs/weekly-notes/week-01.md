@@ -781,9 +781,59 @@ protected response-construction and terminal-audit block").
   validation failures before `rag_query`'s function body runs, therefore
   outside the one-terminal-audit-event contract) is now explicitly
   documented rather than left implicit.
-- **Final recommendation: READY FOR ONE FINAL CODE X RE-AUDIT.** Not
-  APPROVE, not DONE. Phase 12C remains In Review until an independent
-  re-audit of this specific diff returns PASS. Phase 12D was not started.
+- **Final recommendation (superseded — see the closure note below):** READY
+  FOR ONE FINAL CODE X RE-AUDIT. Not APPROVE, not DONE. Phase 12C remained
+  In Review until an independent re-audit of this specific diff returned
+  PASS. Phase 12D was not started.
+
+## Phase 12C — Final Code X Re-Audit: PASS, Phase 12C CLOSED (2026-07-13)
+
+The final independent Code X re-audit returned **PASS**, closing Phase 12C.
+Report: `docs/modernization-ai-reviews/codex-phase-12c-final-reaudit.md`.
+
+- **Reviewed HEAD** `9fed074481f46ce5e3ae2bfa20abcec3e36661fb` against the
+  **Phase 12C implementation baseline** `ad555c95f01601b8eeeba92106b132ad88d7be00`
+  (final implementation commit `56b749a47501ab9686503ca007c5197d8a6b47b0`).
+  `app/` had no drift after the baseline — post-baseline executable additions
+  belong only to Phase 12D scripts/tests.
+- Code X **inspected the actual code** and **independently executed the
+  tests** (not merely read our reported numbers).
+- **The previously blocking finding is RESOLVED.** The nested
+  `ProvenanceItemResponse` construction that used to sit outside the
+  protected response/audit boundary — allowing an unaudited HTTP 500 *after*
+  the provider had already run — is fixed: `ProvenanceItemResponse`,
+  `StageResultResponse`, and the outer `RagQueryResponse` are all built
+  inside one `try` block, and the success audit is committed only after the
+  complete typed response tree exists. Code X confirmed no false success
+  audit, no partial response, and safe failure disclosure (fixed
+  request-ID-bearing HTTP 500 with no exception text, context, query, secret,
+  or path leakage).
+- Every security/pipeline invariant re-verified: sanitized-prompt-only,
+  bounded approved context, aggregate inspection with separator accounting,
+  server-side provenance, trusted content still inspected, DLP
+  complete-output coverage, Output Guard `BLOCK` priority over DLP
+  `SANITIZE`, nested audit redaction, no public guard-disable surface, no
+  external provider drift.
+- **Executed evidence:** focused Phase 12C suite **172 passed, 1 warning**;
+  targeted Critical/Major probes **24 passed, 1 warning**; full repository
+  suite **578 passed, 0 failed, 0 skipped, 1 warning**; `compileall` PASS.
+  The one warning is the pre-existing Starlette/`httpx` deprecation notice;
+  `httpx2` remains a typosquat and was never installed.
+- **Critical: None. Blocking Major: None. Required actions before DONE: None.**
+- **Three Minor findings, adjudicated non-blocking and recorded rather than
+  quietly dropped:** (1) the collaboration handoff said "5 regression tests"
+  where the authoritative resolution correctly says **4 newly added**
+  nested-response tests — five counts the earlier outer-response atomicity
+  regression too; the handoff wording was the imprecise one. (2) A non-finite
+  `retrieval_score` would serialize as JSON `null` rather than fail — current
+  SQLite BM25 emits only finite scores, so this is optional future schema
+  hardening, not a live defect. (3) Pre-existing ignored `__pycache__`
+  directories predate the audit and are not tracked.
+- Deferrable recommendations carried into the Phase 12E ablation design:
+  semantic/homoglyph resistance and trusted-internal ablation profiles.
+- **Phase 12C: DONE. Phase 12D: DONE. Phase 12E: NOT STARTED** — both gating
+  phases have now closed via independent audit PASS, but 12E still requires
+  its own explicit go-ahead (`AGENT_RULES.md` rule 12).
 
 ## Phase 12D — Independent Benchmark V2 Design, Generation, Validation and Freeze (2026-07-12)
 
