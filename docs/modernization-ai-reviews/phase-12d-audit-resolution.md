@@ -1238,7 +1238,11 @@ document's own round-3 narrative, not by any implementation defect:
 This documentation-alignment pass changed **no code, no tests, and no
 generated benchmark artifact** — the independently verified evidence
 (focused **246 passed**; full suite **569 passed, 1 warning**; 9-file
-candidate manifest verified) is retained as-is, not re-run.
+candidate manifest verified) is retained as-is, not re-run. Those two
+counts are the state at commit `4e10a2e`, i.e. exactly what Code X,
+Gemini, and Grok audited; the finalization pass below adds 9 freeze
+tests and therefore reports higher counts, over the same nine unchanged
+artifacts.
 
 **Historical recommendation before multidisciplinary closure (superseded
 below): READY FOR FINAL DOCUMENTATION READ-ONLY VERIFICATION.**
@@ -1392,6 +1396,29 @@ the FINAL manifest verified all 9 files; and the post-finalization mutation
 probe passed against a temporary copy. Re-running `finalize` produced a
 byte-identical manifest and changed none of the nine artifact hashes.
 
+## Finalization evidence (executed)
+
+- Nine audited artifacts, SHA-256 recorded before finalization and
+  recomputed after: **all nine byte-identical** (and identical to the
+  entries the candidate manifest already carried, unchanged since the
+  audited commit).
+- `freeze_v2_benchmark.py finalize`: `Froze 9 artifact file(s) ... (FINAL
+  FREEZE)`.
+- `freeze_v2_benchmark.py verify`: `OK: 9 file(s) verified against the
+  frozen FINAL manifest, no drift detected.`
+- Manifest diff versus the audited candidate: exactly one line —
+  `"manifest_status": "candidate"` → `"final"`. All nine path/sha256/
+  size entries, the sort order, `file_count`, and `manifest_version` are
+  byte-identical.
+- Focused Phase 12D suite: **255 passed** (246 at the audited commit, plus
+  the 9 new finalization tests).
+- Full repository suite, no `--ignore`: **578 passed, 1 warning** (569 at
+  the audited commit, plus the same 9; the one warning remains
+  Starlette's pre-existing `httpx2` deprecation notice — `httpx2` is a
+  typosquat and is never installed, see `TASK_BOARD.md`).
+- `py_compile` on `scripts/freeze_v2_benchmark.py` and
+  `tests/test_benchmark_v2_freeze.py`: clean.
+
 ## Final status
 
 - Code X final technical verification: **PASS**
@@ -1399,6 +1426,8 @@ byte-identical manifest and changed none of the nine artifact hashes.
 - Grok final red-team audit: **PASS**
 - Remaining Critical issues: **None**
 - Remaining blocking Major issues: **None**
+- Phase 12D focused tests: **255 passed**
+- Full repository suite: **578 passed, 1 warning**
 - Manifest status: **FINAL** (9 frozen artifacts)
 - Phase 12D: **DONE**
 - Phase 12E: **not started** (requires its own explicit go-ahead; the

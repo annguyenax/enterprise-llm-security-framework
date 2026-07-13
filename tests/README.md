@@ -4,11 +4,16 @@ pytest coverage for the gateway, dataset loader, rule-based guards, the
 Phase 12B retrieval foundation, the Phase 12C end-to-end RAG pipeline, and
 the Phase 12D v2 benchmark artifacts (`datasets/v2/`).
 
-**Status: Phase 12C In Review — two rounds of Code X final re-audit each
-found and fixed one blocking terminal-audit-coverage gap (top_k rejection
-and response-construction failure not audited, then nested
-`ProvenanceItemResponse` construction not protected); ready for one final
-independent re-audit, not yet marked Done.** Phase 12B is post Code X
+**Status: Phase 12D DONE** — Code X final technical verification PASS,
+Gemini final academic audit PASS, and Grok final red-team coverage audit
+PASS, with no remaining Critical or blocking Major issue; the nine
+benchmark artifacts are under a FINAL SHA-256 freeze manifest (see
+`docs/modernization-ai-reviews/phase-12d-audit-resolution.md`). **Phase
+12C remains In Review** — two rounds of Code X final re-audit each found
+and fixed one blocking terminal-audit-coverage gap (top_k rejection and
+response-construction failure not audited, then nested
+`ProvenanceItemResponse` construction not protected); it is ready for one
+final independent re-audit, not yet marked Done. Phase 12B is post Code X
 audit and three rounds of independent re-audit resolution (see
 `docs/modernization-ai-reviews/phase-12b-audit-resolution.md`); Phase 12C's
 Gemini/Grok/Code X findings, the multidisciplinary resolution, and both
@@ -31,9 +36,11 @@ terminal-audit-coverage fixes: configured `top_k` policy rejection and
 outer/nested response-construction failure (`ProvenanceItemResponse`,
 `StageResultResponse`) each now commit exactly one safe, accurate audit
 event, with the entire response tree built inside one protected block.
-**323 tests total** (82 pre-Phase-12B + 106 Phase 12B + 135 Phase 12C —
-see `docs/modernization-ai-reviews/phase-12b-audit-resolution.md` for the
-Phase 12B breakdown).
+**578 tests total** (82 pre-Phase-12B + 106 Phase 12B + 135 Phase 12C +
+255 Phase 12D — see
+`docs/modernization-ai-reviews/phase-12b-audit-resolution.md` for the
+Phase 12B breakdown and `phase-12d-audit-resolution.md` for the Phase 12D
+one).
 
 ## Test Modules
 
