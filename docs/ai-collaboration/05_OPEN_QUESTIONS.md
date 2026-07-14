@@ -6,14 +6,16 @@ Câu hỏi chưa trả lời và việc đã hoãn lại. Không để chúng bi
 
 ## Q-001 — Ablation profile nào cho Phase 12E?
 
-**Trạng thái:** ĐÃ ADJUDICATE sau ba audit `REVISE`; master plan đã sửa, G0 vẫn
-chờ Code X/Gemini/Grok re-audit
+**Trạng thái:** **ĐÃ ĐÓNG — G0 PASS; master plan APPROVED FOR IMPLEMENTATION**
 
 Đề xuất 8 config: C0_all_on, C1_no_input, C2_no_provenance, C3_no_context,
 C4_no_dlp, C5_no_output, C6_none, C7_no_context_no_output. **Không** chạy toàn bộ
 2⁵=32 tổ hợp (cỡ mẫu không cho phép kết luận tương tác bậc cao). C0-C7 dùng một
 seam in-process; public HTTP luôn `ALL_ON`. Chưa được coi là approved cho tới khi
-ba re-audit PASS và người duy trì phê duyệt.
+ba re-audit PASS và người duy trì phê duyệt. Điều kiện đó đã hoàn thành trên
+plan commit `d82bac7828e2e54520e0aa29271e820a52ec6f47`: Code X, Gemini và Grok
+đều trả **PASS**, không còn Critical, blocking Major hoặc correction bắt buộc.
+Triển khai Phase 12E chưa bắt đầu; chưa có kết quả evaluation và chưa chạy holdout.
 
 ---
 
@@ -58,6 +60,6 @@ xác nhận nested response construction đã được bảo vệ, không còn C
 blocking Major và không có required action trước DONE. Báo cáo authoritative:
 `docs/modernization-ai-reviews/codex-phase-12c-final-reaudit.md`.
 
-Q-005 không còn chặn Phase 12E. Gate hiện tại là **G0 plan re-audit** sau khi cả
-ba audit kế hoạch Phase 12E ban đầu trả `REVISE`; xem
-`docs/modernization-ai-reviews/phase-12e-plan-audit-resolution.md`.
+Q-005 không còn chặn Phase 12E. G0 plan re-audit sau đó cũng đã đóng bằng triple
+**PASS**; xem `docs/modernization-ai-reviews/phase-12e-plan-audit-resolution.md`.
+Master plan đã được phê duyệt cho triển khai, nhưng implementation chưa bắt đầu.

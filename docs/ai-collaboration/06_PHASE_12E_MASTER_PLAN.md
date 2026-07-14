@@ -1,14 +1,15 @@
 # Phase 12E Master Plan — Ablation Evaluation of the RAG Security Pipeline
 
-> **Trạng thái: KẾ HOẠCH ĐÃ SỬA SAU AUDIT. G0 vẫn REVISE, chờ re-audit;
+> **Trạng thái: G0 PASS — MASTER PLAN APPROVED FOR IMPLEMENTATION;
 > Phase 12E CHƯA BẮT ĐẦU triển khai.**
-> Branch: `phase-12e-ablation-evaluation` · Audit-report baseline:
-> `c35bc7dea422c413623ed3e45360e618cecc156c`
+> Branch: `phase-12e-ablation-evaluation` · Audited plan commit:
+> `d82bac7828e2e54520e0aa29271e820a52ec6f47`
 >
-> Tài liệu này **không** là kết quả, **không** chứa số liệu đánh giá nào, và
-> **không** cho phép bắt đầu code. Nó phải qua 3 audit gate (Code X / Gemini /
-> Grok) và go-ahead riêng của người duy trì trước khi bất kỳ dòng code 12E nào
-> được viết (`AGENT_RULES.md` rule 12).
+> Code X, Gemini và Grok đã re-audit plan trên cùng commit và đều trả **PASS**;
+> không còn Critical, blocking Major hoặc correction bắt buộc trước triển khai.
+> Tài liệu này vẫn **không** phải kết quả evaluation và không xác nhận đã bắt đầu
+> code. Implementation cần task/go-ahead riêng (`AGENT_RULES.md` rule 12);
+> evaluation results hiện **NONE** và holdout executed **NO**.
 
 **Quy ước:** mọi chỗ ghi `VERIFY DURING IMPLEMENTATION` là điều **chưa được
 code hiện tại chứng minh**. Không được coi là đã hỗ trợ.
@@ -879,7 +880,7 @@ không được sửa route để nhận profile hay tạo bề mặt cấu hìn
 
 | Giai đoạn | Nội dung | Gate |
 |---|---|---|
-| **12E.0** | Kế hoạch sửa theo adjudication, re-audit và được duyệt | Code X + Gemini + Grok + người duy trì; **hiện REVISE** |
+| **12E.0** | Kế hoạch sửa theo adjudication, re-audit và được duyệt | **PASS** — triple re-audit trên `d82bac7828e2e54520e0aa29271e820a52ec6f47` |
 | **12E.1** | `GuardProfile` + tham số hoá pipeline + test chống bề mặt public | Code X |
 | **12E.2** | Runner + manifest gate + determinism check (chỉ development) | Code X |
 | **12E.3** | Analyzer + metric + result-integrity manifest + chốt/commit ánh xạ family→nhóm (chỉ validation) | Code X + Gemini |
@@ -915,9 +916,13 @@ Theo `01_AGENT_ROLES.md`:
 | G3 | Trước 12E.4 | **Người duy trì** | Phê duyệt tường minh chạy holdout |
 | G4 | Sau 12E.5 | Gemini + Grok | Báo cáo không vượt quá claim cho phép |
 
-**Trạng thái hiện tại:** ba audit G0 đầu tiên đều `REVISE`. Tài liệu đã được sửa
-và adjudicate, nhưng G0 vẫn **pending re-audit**. Không agent nào được tự đổi
-thành PASS hoặc bắt đầu 12E.1.
+**Trạng thái hiện tại:** G0 **PASS**. Plan commit
+`d82bac7828e2e54520e0aa29271e820a52ec6f47` đã nhận Code X technical **PASS**,
+Gemini academic **PASS** và Grok red-team **PASS**. Remaining Critical issues:
+**None**; remaining blocking Major issues: **None**; required corrections before
+implementation: **None**. Master plan được **APPROVED FOR IMPLEMENTATION**,
+nhưng Phase 12E implementation vẫn **NOT STARTED**, evaluation results **NONE**
+và holdout executed **NO**.
 
 ## 37. Tiêu chí chấp nhận
 

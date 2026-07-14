@@ -15,14 +15,16 @@ poisoning. **PoC học thuật, KHÔNG phải production**, dữ liệu tổng h
 2. `AGENT_RULES.md` — luật cứng của dự án
 3. `docs/ai-collaboration/01_AGENT_ROLES.md` — vai của bạn và giới hạn quyền
 
-## Trạng thái hiện tại (2026-07-13)
+## Trạng thái hiện tại (2026-07-14)
 
 - Phase 12C (RAG pipeline): **DONE** — Code X final re-audit PASS
 - Phase 12D (Benchmark V2): **DONE** — manifest FINAL, 3 gate audit đều PASS
-- Phase 12E (Evaluation): **CHƯA BẮT ĐẦU** — cần go-ahead riêng
+- Phase 12E (Evaluation): **G0 PASS — master plan APPROVED FOR IMPLEMENTATION; triển khai CHƯA BẮT ĐẦU**
 
-Cả hai phase chặn 12E đều đã đóng. 12E vẫn cần go-ahead riêng (AGENT_RULES
-rule 12).
+Cả hai phase chặn 12E đều đã đóng. Kế hoạch tại commit `d82bac7` đã qua
+Code X, Gemini và Grok với verdict PASS, không còn Critical hoặc blocking
+Major. Việc triển khai vẫn cần một task riêng (AGENT_RULES rule 12); kết quả
+đánh giá hiện là NONE và holdout chưa được thực thi.
 
 ## Lệnh
 

@@ -792,12 +792,14 @@ Full traceable resolution: `docs/modernization-ai-reviews/phase-12c-audit-resolu
 - Deferrable recommendations carried forward: semantic/homoglyph resistance
   and trusted-internal ablation profiles stay within the documented future
   evaluation scope (candidates for the Phase 12E ablation design).
-- **Phase 12C: DONE.** Phase 12D: **DONE**. **Phase 12E: NOT STARTED.**
+- **Phase 12C: DONE.** Phase 12D: **DONE**. **Phase 12E: G0 PASS; implementation NOT STARTED.**
 
 **Next phase:** Phase 12E — Benchmark V2 Evaluation and Ablation. Per
 `AGENT_RULES.md` rule 12, Phase 12E does not start automatically and
-requires a separate, explicit go-ahead. Both of its gating phases (12C and
-12D) have now reached `Done` via independent audit PASS.
+requires a separate, explicit implementation task. Both prerequisite phases
+(12C and 12D) are `Done`, and the Phase 12E G0 plan has independently passed
+Code X, Gemini, and Grok review at commit `d82bac7`; no implementation work
+has started.
 
 ## Phase 12D — Independent Benchmark V2 Design, Generation, Validation and Freeze — **Status: Done**
 
@@ -1160,12 +1162,28 @@ manifest) then corrected:
   repository suite **578 passed, 1 warning**; six-file Python compile,
   guard-independent validator, deterministic rebuild, FINAL manifest
   verification, and temporary-copy mutation detection all passed.
-  Phase 12D is **DONE**; Phase 12E has not started.
+  Phase 12D is **DONE**; Phase 12E implementation has not started.
 
 **Next phase:** Phase 12E — Benchmark V2 Evaluation and Ablation. Per
-`AGENT_RULES.md` rule 12, Phase 12E does not start automatically and
-requires a separate, explicit go-ahead; per this task's own explicit
-instruction, this session stops here and does not begin Phase 12E work.
+`AGENT_RULES.md` rule 12, implementation requires a separate, explicit task.
+The G0 planning gate has since passed, but no runner, analyzer, result, or
+holdout execution has begun.
+
+## Phase 12E — Benchmark V2 Evaluation and Ablation — **Status: G0 PASS; Implementation Not Started**
+
+- Audited master-plan commit:
+  `d82bac7828e2e54520e0aa29271e820a52ec6f47`.
+- Code X final technical verification: **PASS**.
+- Gemini final academic re-audit: **PASS**.
+- Grok final red-team re-audit: **PASS**.
+- Remaining Critical issues: **None**. Remaining blocking Major issues:
+  **None**. Required corrections before implementation: **None**.
+- Master plan: **APPROVED FOR IMPLEMENTATION**. Phase 12E implementation:
+  **NOT STARTED**. Evaluation results: **NONE**. Holdout executed: **NO**.
+- The approved limitations and deferred recommendations remain unchanged.
+  Implementation still requires a separate explicit task; this G0 closure
+  does not create or execute a runner, analyzer, configuration, result, or
+  evaluation output.
 
 ## Notes
 
