@@ -30,13 +30,20 @@ param(
 $ErrorActionPreference = "Continue"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $Python = Join-Path $RepoRoot ".venv\Scripts\python.exe"
-$BaseTemp = Join-Path $env:TEMP "pytest-verify-phase"
+$ExternalTempParent = Split-Path -Parent $RepoRoot
+$VerificationToken = "{0}-{1}" -f $PID, ([guid]::NewGuid().ToString("N").Substring(0, 8))
+$VerificationTempRoot = Join-Path $ExternalTempParent ".p12e-$VerificationToken"
+$FocusedBaseTemp = Join-Path $VerificationTempRoot "f"
+$FullBaseTemp = Join-Path $VerificationTempRoot "a"
+$FocusedCacheDir = Join-Path $VerificationTempRoot "cf"
+$FullCacheDir = Join-Path $VerificationTempRoot "ca"
+$env:PYTHONPYCACHEPREFIX = Join-Path $VerificationTempRoot "p"
 
-# Test module trọng tâm của phase hiện tại (Phase 12D). Cập nhật khi sang phase mới.
+# Test module trọng tâm của phase hiện tại (Phase 12E.2). Cập nhật khi sang phase mới.
 $FocusedModules = @(
-    "tests/test_benchmark_v2_schema.py",
-    "tests/test_benchmark_v2_integrity.py",
-    "tests/test_benchmark_v2_freeze.py"
+    "tests/test_guard_profile.py",
+    "tests/test_rag_pipeline.py",
+    "tests/test_v2_evaluation_runner.py"
 )
 
 # Đường dẫn KHÔNG được thay đổi ngoài scope (invariant check).
@@ -63,6 +70,13 @@ if (-not (Test-Path $Python)) {
     exit 1
 }
 
+try {
+    New-Item -ItemType Directory -Path $VerificationTempRoot -ErrorAction Stop | Out-Null
+} catch {
+    Write-Host "FAIL: khong the tao external verification temp root." -ForegroundColor Red
+    exit 1
+}
+
 Set-Location $RepoRoot
 
 # ---------------------------------------------------------------------------
@@ -81,14 +95,14 @@ if ($pyFiles.Count -eq 0) {
 Write-Section "2. Focused test suite"
 # ---------------------------------------------------------------------------
 $existing = $FocusedModules | Where-Object { Test-Path $_ }
-$out = & $Python -m pytest -q -p no:cacheprovider @existing --basetemp=$BaseTemp 2>&1 | Out-String
+$out = & $Python -m pytest -q -p no:cacheprovider @existing --basetemp=$FocusedBaseTemp -o "cache_dir=$FocusedCacheDir" 2>&1 | Out-String
 $focusedLine = ($out -split "`n" | Where-Object { $_ -match "\d+ passed|\d+ failed|error" } | Select-Object -Last 1).Trim()
 Record "focused_tests" ($LASTEXITCODE -eq 0) $focusedLine
 
 # ---------------------------------------------------------------------------
 if (-not $Focused) {
     Write-Section "3. Full repository suite (khong --ignore)"
-    $out = & $Python -m pytest -q -p no:cacheprovider --basetemp=$BaseTemp 2>&1 | Out-String
+    $out = & $Python -m pytest -q -p no:cacheprovider --basetemp=$FullBaseTemp -o "cache_dir=$FullCacheDir" 2>&1 | Out-String
     $fullLine = ($out -split "`n" | Where-Object { $_ -match "\d+ passed|\d+ failed|error" } | Select-Object -Last 1).Trim()
     Record "full_suite" ($LASTEXITCODE -eq 0) $fullLine
 } else {
@@ -187,6 +201,12 @@ Write-Host "### Untracked"
 Write-Host $untracked
 Write-Host ""
 Write-Host "=====================================================================" -ForegroundColor Yellow
+
+try {
+    Remove-Item -LiteralPath $VerificationTempRoot -Recurse -Force -ErrorAction Stop
+} catch {
+    Write-Warning "Khong the xoa external verification temp root: $VerificationTempRoot"
+}
 
 if ($failures.Count -gt 0) {
     Write-Host ""
