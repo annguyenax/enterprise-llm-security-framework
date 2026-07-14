@@ -9,19 +9,69 @@ full retrieved chunk text by default, or detected secret values). See
 `docs/modernization-v2-architecture.md` §1/§6 for the target pipeline
 shape this implements.
 
-**Scope note:** `docs/modernization-v2-architecture.md` §2 also names this
-module as the future home of `GuardProfile` (an ablation on/off
-configuration for guard layers). That is explicitly a **Phase 12E**
-concern ("target phase 12C (definition), 12E (used)") and is deliberately
-**not** implemented in this pass -- the current Phase 12C task scope asks
-only for a typed pipeline result, not the ablation harness. Recorded here
-so the omission is visible, not silent, per `AGENT_RULES.md` rule 12.
+Phase 12E.1 adds the internal-only `GuardProfile` value used to ablate
+individual guard layers through `run_rag_query_uncommitted`. It contains
+no retrieval, provider, bounds, audit, exception, Settings, environment,
+or HTTP controls; those remain always-on infrastructure.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass, field
 
 from app.core.decisions import Decision
+
+
+@dataclass(frozen=True)
+class GuardProfile:
+    """Immutable internal guard-stage selection for Phase 12E ablation.
+
+    Public request handling never constructs or selects this value. The
+    six booleans control only whether their corresponding guard function
+    is invoked; retrieval, provider execution, resource bounds, typed
+    construction, exception handling, and audit safety are deliberately
+    outside this contract.
+    """
+
+    input_guard: bool = True
+    provenance_guard: bool = True
+    rag_context_guard: bool = True
+    aggregate_context_guard: bool = True
+    dlp: bool = True
+    output_guard: bool = True
+
+    def __post_init__(self) -> None:
+        for name in (
+            "input_guard",
+            "provenance_guard",
+            "rag_context_guard",
+            "aggregate_context_guard",
+            "dlp",
+            "output_guard",
+        ):
+            if type(getattr(self, name)) is not bool:
+                raise TypeError(f"{name} must be a boolean")
+
+    @property
+    def profile_id(self) -> str:
+        """Return a deterministic identity derived only from all controls."""
+        canonical = json.dumps(
+            {
+                "aggregate_context_guard": self.aggregate_context_guard,
+                "dlp": self.dlp,
+                "input_guard": self.input_guard,
+                "output_guard": self.output_guard,
+                "provenance_guard": self.provenance_guard,
+                "rag_context_guard": self.rag_context_guard,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+ALL_ON = GuardProfile()
 
 
 @dataclass(frozen=True)

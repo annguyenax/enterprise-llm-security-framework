@@ -47,7 +47,7 @@ import uuid
 
 from app.core.config import settings
 from app.core.decisions import Decision, most_severe
-from app.core.pipeline import ProvenanceSummary, RagPipelineResult, StageResult
+from app.core.pipeline import ALL_ON, GuardProfile, ProvenanceSummary, RagPipelineResult, StageResult
 from app.guards.dlp_guard import DLPResult, scan_and_redact
 from app.guards.input_guard import evaluate_input
 from app.guards.output_guard import evaluate_output
@@ -126,6 +126,22 @@ def _with_total(latency_ms: dict[str, float], t_start: float) -> dict[str, float
     actually ran) to a stage-timing dict, without mutating the caller's
     dict in place."""
     return {**latency_ms, "total": _now_ms() - t_start}
+
+
+def _contain_provider_output(text: str, max_chars: int) -> tuple[str, bool]:
+    """Apply the always-on provider-output bound independently of DLP.
+
+    Phase 12C enforced this same cap inside `scan_and_redact`. Phase
+    12E.1 must preserve it even when DLP regex inspection is disabled,
+    so orchestration now applies the cap first and lets the DLP branch
+    inspect only that bounded value. The discarded suffix is never
+    returned, inspected, logged, or passed to Output Guard.
+    """
+    if not isinstance(text, str):
+        raise TypeError("provider output must be a string")
+    if type(max_chars) is not int or max_chars <= 0:
+        raise ValueError("max_chars must be a positive integer")
+    return text[:max_chars], len(text) > max_chars
 
 
 def _bound_chunks_for_aggregate(
@@ -367,6 +383,7 @@ def run_rag_query_uncommitted(
     retriever: Retriever,
     request_id: str | None = None,
     provider: BaseLLMProvider | None = None,
+    guard_profile: GuardProfile = ALL_ON,
 ) -> tuple[RagPipelineResult, RagQueryAuditContext]:
     """Run the full Phase 12C pipeline for one query and return
     `(result, audit_ctx)` WITHOUT committing the terminal audit event --
@@ -387,7 +404,10 @@ def run_rag_query_uncommitted(
     to defer past (the route builds a plain `HTTPException` directly from
     a fixed string, not from a `RagPipelineResult`), so committing
     immediately here is already safe. Every other stop path returns a
-    `RagPipelineResult` instead of raising.
+    `RagPipelineResult` instead of raising. `guard_profile` is the sole
+    internal ablation seam. Public routes omit it and therefore receive
+    immutable `ALL_ON`; it is never selected from HTTP, Settings, or the
+    environment.
     """
     request_id = request_id or str(uuid.uuid4())
     t_start = _now_ms()
@@ -395,51 +415,68 @@ def run_rag_query_uncommitted(
     stage_results: list[StageResult] = []
 
     # -- 1. Input Guard ----------------------------------------------
-    t0 = _now_ms()
-    try:
-        input_result = evaluate_input(query)
-    except Exception:  # noqa: BLE001 -- fail closed
+    input_result = None
+    if guard_profile.input_guard:
+        t0 = _now_ms()
+        try:
+            input_result = evaluate_input(query)
+        except Exception:  # noqa: BLE001 -- fail closed
+            stage_results.append(
+                StageResult(
+                    stage="input_guard", decision=Decision.BLOCK,
+                    reason_code="input_guard_exception",
+                )
+            )
+            return _finalize(
+                request_id=request_id, final_decision=Decision.BLOCK,
+                answer=_ANSWER_INTERNAL_ERROR, retrieved_count=0,
+                accepted_context_count=0, rejected_context_count=0,
+                provenance=[], stage_results=stage_results, redaction_count=0,
+                latency_ms=_with_total(latency_ms, t_start), stop_reason=STOP_INTERNAL_ERROR,
+                provider_called=False, error_category="input_guard_exception",
+                input_decision=None, rag_decision=None, output_decision=None,
+                provider_metadata=None, query=query,
+            )
+        latency_ms["input_guard"] = _now_ms() - t0
         stage_results.append(
             StageResult(
-                stage="input_guard", decision=Decision.BLOCK,
-                reason_code="input_guard_exception",
+                stage="input_guard", decision=input_result.decision,
+                reason_code="input_guard_decision",
             )
         )
-        return _finalize(
-            request_id=request_id, final_decision=Decision.BLOCK,
-            answer=_ANSWER_INTERNAL_ERROR, retrieved_count=0,
-            accepted_context_count=0, rejected_context_count=0,
-            provenance=[], stage_results=stage_results, redaction_count=0,
-            latency_ms=_with_total(latency_ms, t_start), stop_reason=STOP_INTERNAL_ERROR,
-            provider_called=False, error_category="input_guard_exception",
-            input_decision=None, rag_decision=None, output_decision=None,
-            provider_metadata=None, query=query,
-        )
-    latency_ms["input_guard"] = _now_ms() - t0
-    stage_results.append(
-        StageResult(stage="input_guard", decision=input_result.decision, reason_code="input_guard_decision")
-    )
 
-    if input_result.decision in _STOPPING_DECISIONS:
-        reasons = "; ".join(input_result.reasons) or "policy violation"
-        return _finalize(
-            request_id=request_id, final_decision=input_result.decision,
-            answer=_ANSWER_INPUT_BLOCKED.format(reasons=reasons), retrieved_count=0,
-            accepted_context_count=0, rejected_context_count=0,
-            provenance=[], stage_results=stage_results, redaction_count=0,
-            latency_ms=_with_total(latency_ms, t_start), stop_reason=STOP_INPUT_BLOCKED,
-            provider_called=False, error_category=None,
-            input_decision=input_result, rag_decision=None, output_decision=None,
-            provider_metadata=None, query=query,
-        )
+        if input_result.decision in _STOPPING_DECISIONS:
+            reasons = "; ".join(input_result.reasons) or "policy violation"
+            return _finalize(
+                request_id=request_id, final_decision=input_result.decision,
+                answer=_ANSWER_INPUT_BLOCKED.format(reasons=reasons), retrieved_count=0,
+                accepted_context_count=0, rejected_context_count=0,
+                provenance=[], stage_results=stage_results, redaction_count=0,
+                latency_ms=_with_total(latency_ms, t_start), stop_reason=STOP_INPUT_BLOCKED,
+                provider_called=False, error_category=None,
+                input_decision=input_result, rag_decision=None, output_decision=None,
+                provider_metadata=None, query=query,
+            )
 
-    # Effective (post-Input-Guard) query used for retrieval AND as the
-    # only prompt-shaped value ever handed to the provider (see step 6
-    # below and the Major #A fix note there) -- once SANITIZE has run,
-    # nothing derived from the raw `query` may reach the provider.
-    effective_query = (
-        (input_result.sanitized_text or "") if input_result.decision == Decision.SANITIZE else query
-    )
+        input_severity = input_result.decision
+        # Effective (post-Input-Guard) query used for retrieval AND as the
+        # only prompt-shaped value ever handed to the provider (see step 6
+        # below and the Major #A fix note there) -- once SANITIZE has run,
+        # nothing derived from the raw `query` may reach the provider.
+        effective_query = (
+            (input_result.sanitized_text or "")
+            if input_result.decision == Decision.SANITIZE
+            else query
+        )
+    else:
+        stage_results.append(
+            StageResult(
+                stage="input_guard", decision=None,
+                reason_code="input_guard_disabled_ablation",
+            )
+        )
+        input_severity = Decision.ALLOW
+        effective_query = query
 
     # -- 2. Retrieval (server-side only; may raise, see docstring) -----
     t0 = _now_ms()
@@ -479,32 +516,55 @@ def run_rag_query_uncommitted(
         )
 
     # -- 3. Provenance/Trust Guard -------------------------------------
-    t0 = _now_ms()
-    provenance_exception = False
-    try:
-        provenance_decisions: list[ProvenanceDecision] = evaluate_provenance(list(retrieval_result.hits))
-    except Exception:  # noqa: BLE001 -- fail closed: reject every hit
-        provenance_exception = True
+    if guard_profile.provenance_guard:
+        t0 = _now_ms()
+        provenance_exception = False
+        try:
+            provenance_decisions: list[ProvenanceDecision] = evaluate_provenance(
+                list(retrieval_result.hits)
+            )
+        except Exception:  # noqa: BLE001 -- fail closed: reject every hit
+            provenance_exception = True
+            provenance_decisions = [
+                ProvenanceDecision(
+                    hit=hit, accepted=False, reason_code="provenance_guard_exception"
+                )
+                for hit in retrieval_result.hits
+            ]
+        latency_ms["provenance_guard"] = _now_ms() - t0
+        accepted_hits = [d.hit for d in provenance_decisions if d.accepted]
+        # Fixed per the Phase 12C Code X audit (Major #3): the stage-level
+        # reason_code previously said "provenance_evaluated" unconditionally,
+        # even when evaluate_provenance() had actually raised -- obscuring
+        # the real failure reason in the audit trail's own stage summary.
+        stage_results.append(
+            StageResult(
+                stage="provenance_guard",
+                decision=(Decision.BLOCK if provenance_exception else None),
+                reason_code=(
+                    "provenance_guard_exception"
+                    if provenance_exception
+                    else "provenance_evaluated"
+                ),
+                detail=f"accepted={len(accepted_hits)}/{len(provenance_decisions)}",
+            )
+        )
+    else:
         provenance_decisions = [
-            ProvenanceDecision(hit=hit, accepted=False, reason_code="provenance_guard_exception")
+            ProvenanceDecision(
+                hit=hit,
+                accepted=True,
+                reason_code="provenance_guard_disabled_ablation",
+            )
             for hit in retrieval_result.hits
         ]
-    latency_ms["provenance_guard"] = _now_ms() - t0
-    accepted_hits = [d.hit for d in provenance_decisions if d.accepted]
-    # Fixed per the Phase 12C Code X audit (Major #3): the stage-level
-    # reason_code previously said "provenance_evaluated" unconditionally,
-    # even when evaluate_provenance() had actually raised -- obscuring
-    # the real failure reason in the audit trail's own stage summary
-    # (the per-hit reason codes were correct; only this one aggregate
-    # stage-result line was misleading).
-    stage_results.append(
-        StageResult(
-            stage="provenance_guard",
-            decision=(Decision.BLOCK if provenance_exception else None),
-            reason_code=("provenance_guard_exception" if provenance_exception else "provenance_evaluated"),
-            detail=f"accepted={len(accepted_hits)}/{len(provenance_decisions)}",
+        accepted_hits = [decision.hit for decision in provenance_decisions]
+        stage_results.append(
+            StageResult(
+                stage="provenance_guard", decision=None,
+                reason_code="provenance_guard_disabled_ablation",
+            )
         )
-    )
 
     if not accepted_hits:
         provenance_summaries = _summaries_from_provenance(provenance_decisions, {}, False)
@@ -525,44 +585,70 @@ def run_rag_query_uncommitted(
     # re-parsed out of reason_code later) so per-chunk severity can be
     # folded into final_decision without string-splitting a value that
     # can itself contain an underscore (e.g. Decision.LOG_ONLY == "log_only").
-    t0 = _now_ms()
     context_outcomes: dict[str, tuple[bool, str, Decision]] = {}
     passed_pairs: list[tuple[RetrievalHit, RAGContextChunk]] = []
-    for hit in accepted_hits:
-        candidate = RAGContextChunk(doc_id=hit.document_id, text=hit.text, metadata=dict(hit.metadata))
-        result, exc_name = _safe_rag_context_decision([candidate])
-        if result is None:
-            context_outcomes[hit.chunk_id] = (False, "context_guard_exception", Decision.BLOCK)
-            stage_results.append(
-                StageResult(
-                    stage="rag_context_guard", decision=Decision.BLOCK,
-                    reason_code="context_guard_exception", detail=f"chunk_id={hit.chunk_id}",
-                )
+    if guard_profile.rag_context_guard:
+        t0 = _now_ms()
+        for hit in accepted_hits:
+            candidate = RAGContextChunk(
+                doc_id=hit.document_id, text=hit.text, metadata=dict(hit.metadata)
             )
-            continue
-        if result.decision in _STOPPING_DECISIONS:
-            context_outcomes[hit.chunk_id] = (False, f"context_guard_{result.decision.value}", result.decision)
+            result, exc_name = _safe_rag_context_decision([candidate])
+            if result is None:
+                context_outcomes[hit.chunk_id] = (
+                    False, "context_guard_exception", Decision.BLOCK,
+                )
+                stage_results.append(
+                    StageResult(
+                        stage="rag_context_guard", decision=Decision.BLOCK,
+                        reason_code="context_guard_exception", detail=f"chunk_id={hit.chunk_id}",
+                    )
+                )
+                continue
+            if result.decision in _STOPPING_DECISIONS:
+                context_outcomes[hit.chunk_id] = (
+                    False, f"context_guard_{result.decision.value}", result.decision,
+                )
+                stage_results.append(
+                    StageResult(
+                        stage="rag_context_guard", decision=result.decision,
+                        reason_code=f"context_guard_{result.decision.value}",
+                        detail=f"chunk_id={hit.chunk_id}",
+                    )
+                )
+                continue
+            effective_chunk = (
+                result.sanitized_chunks[0]
+                if result.decision == Decision.SANITIZE and result.sanitized_chunks
+                else candidate
+            )
+            context_outcomes[hit.chunk_id] = (
+                True, f"context_guard_{result.decision.value}", result.decision,
+            )
             stage_results.append(
                 StageResult(
                     stage="rag_context_guard", decision=result.decision,
-                    reason_code=f"context_guard_{result.decision.value}", detail=f"chunk_id={hit.chunk_id}",
+                    reason_code=f"context_guard_{result.decision.value}",
+                    detail=f"chunk_id={hit.chunk_id}",
                 )
             )
-            continue
-        effective_chunk = (
-            result.sanitized_chunks[0]
-            if result.decision == Decision.SANITIZE and result.sanitized_chunks
-            else candidate
-        )
-        context_outcomes[hit.chunk_id] = (True, f"context_guard_{result.decision.value}", result.decision)
+            passed_pairs.append((hit, effective_chunk))
+        latency_ms["rag_context_guard"] = _now_ms() - t0
+    else:
         stage_results.append(
             StageResult(
-                stage="rag_context_guard", decision=result.decision,
-                reason_code=f"context_guard_{result.decision.value}", detail=f"chunk_id={hit.chunk_id}",
+                stage="rag_context_guard", decision=None,
+                reason_code="rag_context_guard_disabled_ablation",
             )
         )
-        passed_pairs.append((hit, effective_chunk))
-    latency_ms["rag_context_guard"] = _now_ms() - t0
+        for hit in accepted_hits:
+            candidate = RAGContextChunk(
+                doc_id=hit.document_id, text=hit.text, metadata=dict(hit.metadata)
+            )
+            context_outcomes[hit.chunk_id] = (
+                True, "rag_context_guard_disabled_ablation", Decision.ALLOW,
+            )
+            passed_pairs.append((hit, candidate))
 
     if not passed_pairs:
         provenance_summaries = _summaries_from_provenance(provenance_decisions, context_outcomes, False)
@@ -579,7 +665,7 @@ def run_rag_query_uncommitted(
 
     # -- 5. Bounded aggregate inspection -- governs the EXACT provider ---
     # -- context (see _bound_chunks_for_aggregate's docstring, Major #2) -
-    t0 = _now_ms()
+    aggregate_t0 = _now_ms() if guard_profile.aggregate_context_guard else None
     bounded_pairs, excluded_by_budget, aggregate_text = _bound_chunks_for_aggregate(
         passed_pairs, settings.rag_max_aggregate_context_chars,
     )
@@ -593,6 +679,14 @@ def run_rag_query_uncommitted(
             )
     for excluded_hit in excluded_by_budget:
         context_outcomes[excluded_hit.chunk_id] = (False, "aggregate_budget_exceeded", Decision.SANITIZE)
+
+    if not guard_profile.aggregate_context_guard:
+        stage_results.append(
+            StageResult(
+                stage="aggregate_context_guard", decision=None,
+                reason_code="aggregate_context_guard_disabled_ablation",
+            )
+        )
 
     if not bounded_pairs:
         # The entire per-chunk-accepted set was excluded by the aggregate
@@ -610,27 +704,35 @@ def run_rag_query_uncommitted(
             provider_metadata=None, query=query,
         )
 
-    aggregate_result, aggregate_exc = _safe_rag_context_decision(
-        [RAGContextChunk(doc_id="__aggregate__", text=aggregate_text, metadata={})]
-    )
-    latency_ms["aggregate_context_guard"] = _now_ms() - t0
-    aggregate_decision = aggregate_result.decision if aggregate_result else Decision.BLOCK
-    # Fail closed on SANITIZE too, unlike every other stage: a sanitized
-    # *joined-and-truncated* blob has no safe, deterministic mapping back
-    # onto the individual RAGContextChunk objects the provider expects,
-    # so "sanitize the aggregate" cannot be honored without either
-    # fabricating a per-chunk split or silently sending the unsanitized
-    # originals anyway -- fail-closed was the chosen safe model (Phase
-    # 12C Code X audit, Major #2).
-    aggregate_blocked = aggregate_exc is not None or aggregate_decision in _AGGREGATE_STOPPING_DECISIONS
-    stage_results.append(
-        StageResult(
-            stage="aggregate_context_guard",
-            decision=aggregate_decision,
-            reason_code=("aggregate_guard_exception" if aggregate_exc else f"aggregate_{aggregate_decision.value}"),
-            detail=f"aggregate_chars={len(aggregate_text)}",
+    aggregate_result = None
+    if guard_profile.aggregate_context_guard:
+        aggregate_result, aggregate_exc = _safe_rag_context_decision(
+            [RAGContextChunk(doc_id="__aggregate__", text=aggregate_text, metadata={})]
         )
-    )
+        latency_ms["aggregate_context_guard"] = _now_ms() - aggregate_t0
+        aggregate_decision = aggregate_result.decision if aggregate_result else Decision.BLOCK
+        # Fail closed on SANITIZE too, unlike every other stage: a sanitized
+        # *joined-and-truncated* blob has no safe, deterministic mapping back
+        # onto the individual RAGContextChunk objects the provider expects.
+        aggregate_blocked = (
+            aggregate_exc is not None
+            or aggregate_decision in _AGGREGATE_STOPPING_DECISIONS
+        )
+        stage_results.append(
+            StageResult(
+                stage="aggregate_context_guard",
+                decision=aggregate_decision,
+                reason_code=(
+                    "aggregate_guard_exception"
+                    if aggregate_exc
+                    else f"aggregate_{aggregate_decision.value}"
+                ),
+                detail=f"aggregate_chars={len(aggregate_text)}",
+            )
+        )
+    else:
+        aggregate_decision = Decision.ALLOW
+        aggregate_blocked = False
 
     if aggregate_blocked:
         provenance_summaries = _summaries_from_provenance(provenance_decisions, context_outcomes, True)
@@ -705,13 +807,27 @@ def run_rag_query_uncommitted(
         "is_mock": provider_result.is_mock,
     }
 
-    # -- 7. Centralized DLP (redact provider output) ---------------------
-    t0 = _now_ms()
+    # -- 7. Always-on output containment, then optional centralized DLP -
+    if not guard_profile.dlp:
+        stage_results.append(
+            StageResult(
+                stage="dlp", decision=None,
+                reason_code="dlp_disabled_ablation",
+            )
+        )
+
     try:
-        dlp_result: DLPResult = scan_and_redact(provider_result.text, max_chars=settings.dlp_max_inspect_chars)
-    except Exception:  # noqa: BLE001 -- fail closed: never return raw provider output
+        contained_output, output_truncated = _contain_provider_output(
+            provider_result.text, settings.dlp_max_inspect_chars,
+        )
+    except Exception:  # noqa: BLE001 -- fail closed on malformed provider output/config
         provenance_summaries = _summaries_from_provenance(provenance_decisions, context_outcomes, False)
-        stage_results.append(StageResult(stage="dlp", decision=Decision.BLOCK, reason_code="dlp_exception"))
+        stage_results.append(
+            StageResult(
+                stage="output_containment", decision=Decision.BLOCK,
+                reason_code="output_containment_exception",
+            )
+        )
         return _finalize(
             request_id=request_id, final_decision=Decision.BLOCK,
             answer=_ANSWER_DLP_FAILED, retrieved_count=len(retrieval_result.hits),
@@ -723,62 +839,127 @@ def run_rag_query_uncommitted(
             input_decision=input_result, rag_decision=aggregate_result, output_decision=None,
             provider_metadata=provider_metadata, query=query,
         )
-    latency_ms["dlp"] = _now_ms() - t0
-    # Fixed per the Phase 12C Code X audit (Major #E): a DLP redaction is
-    # a security-relevant action, not a no-op -- it must be represented
-    # as Decision.SANITIZE and participate in final-decision severity,
-    # not silently vanish as an implicit "allow". `dlp_decision` folds
-    # into every `most_severe(...)` call below/after this point.
-    dlp_decision = Decision.SANITIZE if dlp_result.redaction_count > 0 else Decision.ALLOW
-    stage_results.append(
-        StageResult(
-            stage="dlp", decision=dlp_decision,
-            reason_code=("dlp_redacted" if dlp_result.redaction_count > 0 else "dlp_completed"),
-            detail=f"redaction_count={dlp_result.redaction_count} truncated={dlp_result.truncated}",
+
+    if guard_profile.dlp:
+        t0 = _now_ms()
+        try:
+            dlp_result: DLPResult = scan_and_redact(
+                contained_output, max_chars=settings.dlp_max_inspect_chars,
+            )
+        except Exception:  # noqa: BLE001 -- fail closed: never return raw provider output
+            provenance_summaries = _summaries_from_provenance(
+                provenance_decisions, context_outcomes, False,
+            )
+            stage_results.append(
+                StageResult(stage="dlp", decision=Decision.BLOCK, reason_code="dlp_exception")
+            )
+            return _finalize(
+                request_id=request_id, final_decision=Decision.BLOCK,
+                answer=_ANSWER_DLP_FAILED, retrieved_count=len(retrieval_result.hits),
+                accepted_context_count=len(final_chunks),
+                rejected_context_count=len(retrieval_result.hits) - len(final_chunks),
+                provenance=provenance_summaries, stage_results=stage_results, redaction_count=0,
+                latency_ms=_with_total(latency_ms, t_start), stop_reason=STOP_DLP_FAILED,
+                provider_called=True, error_category="dlp_failed",
+                input_decision=input_result, rag_decision=aggregate_result, output_decision=None,
+                provider_metadata=provider_metadata, query=query,
+            )
+        if output_truncated and not dlp_result.truncated:
+            dlp_result = dataclasses.replace(dlp_result, truncated=True)
+        latency_ms["dlp"] = _now_ms() - t0
+        # A DLP redaction is a security-relevant SANITIZE decision and
+        # participates in final-decision severity.
+        dlp_decision = (
+            Decision.SANITIZE if dlp_result.redaction_count > 0 else Decision.ALLOW
         )
-    )
+        stage_results.append(
+            StageResult(
+                stage="dlp", decision=dlp_decision,
+                reason_code=(
+                    "dlp_redacted" if dlp_result.redaction_count > 0 else "dlp_completed"
+                ),
+                detail=(
+                    f"redaction_count={dlp_result.redaction_count} "
+                    f"truncated={dlp_result.truncated}"
+                ),
+            )
+        )
+    else:
+        dlp_result = DLPResult(
+            redacted_text=contained_output,
+            findings=(),
+            redaction_count=0,
+            truncated=output_truncated,
+        )
+        dlp_decision = Decision.ALLOW
 
     # -- 8. Output Guard (on redacted text) -------------------------------
-    t0 = _now_ms()
-    try:
-        output_result = evaluate_output(dlp_result.redacted_text)
-    except Exception:  # noqa: BLE001 -- fail closed
-        output_result = None
-    latency_ms["output_guard"] = _now_ms() - t0
+    output_result = None
+    if guard_profile.output_guard:
+        t0 = _now_ms()
+        try:
+            output_result = evaluate_output(dlp_result.redacted_text)
+        except Exception:  # noqa: BLE001 -- fail closed
+            output_result = None
+        latency_ms["output_guard"] = _now_ms() - t0
 
-    if output_result is None or output_result.decision in _STOPPING_DECISIONS:
-        decision = output_result.decision if output_result else Decision.BLOCK
-        reason = "output_guard_exception" if output_result is None else f"output_guard_{decision.value}"
-        stage_results.append(StageResult(stage="output_guard", decision=decision, reason_code=reason))
-        provenance_summaries = _summaries_from_provenance(provenance_decisions, context_outcomes, False)
-        return _finalize(
-            request_id=request_id,
-            final_decision=most_severe([input_result.decision, aggregate_decision, dlp_decision, decision]),
-            answer=_ANSWER_OUTPUT_BLOCKED, retrieved_count=len(retrieval_result.hits),
-            accepted_context_count=len(final_chunks),
-            rejected_context_count=len(retrieval_result.hits) - len(final_chunks),
-            provenance=provenance_summaries, stage_results=stage_results,
-            redaction_count=dlp_result.redaction_count,
-            latency_ms=_with_total(latency_ms, t_start), stop_reason=STOP_OUTPUT_BLOCKED,
-            provider_called=True, error_category=None,
-            input_decision=input_result, rag_decision=aggregate_result, output_decision=output_result,
-            provider_metadata=provider_metadata, query=query,
-            dlp_findings=dlp_result.findings,
+        if output_result is None or output_result.decision in _STOPPING_DECISIONS:
+            decision = output_result.decision if output_result else Decision.BLOCK
+            reason = (
+                "output_guard_exception"
+                if output_result is None
+                else f"output_guard_{decision.value}"
+            )
+            stage_results.append(
+                StageResult(stage="output_guard", decision=decision, reason_code=reason)
+            )
+            provenance_summaries = _summaries_from_provenance(
+                provenance_decisions, context_outcomes, False,
+            )
+            return _finalize(
+                request_id=request_id,
+                final_decision=most_severe(
+                    [input_severity, aggregate_decision, dlp_decision, decision]
+                ),
+                answer=_ANSWER_OUTPUT_BLOCKED, retrieved_count=len(retrieval_result.hits),
+                accepted_context_count=len(final_chunks),
+                rejected_context_count=len(retrieval_result.hits) - len(final_chunks),
+                provenance=provenance_summaries, stage_results=stage_results,
+                redaction_count=dlp_result.redaction_count,
+                latency_ms=_with_total(latency_ms, t_start), stop_reason=STOP_OUTPUT_BLOCKED,
+                provider_called=True, error_category=None,
+                input_decision=input_result, rag_decision=aggregate_result,
+                output_decision=output_result,
+                provider_metadata=provider_metadata, query=query,
+                dlp_findings=dlp_result.findings,
+            )
+
+        output_decision = output_result.decision
+        stage_results.append(
+            StageResult(
+                stage="output_guard", decision=output_decision,
+                reason_code=f"output_guard_{output_decision.value}",
+            )
         )
-
-    stage_results.append(
-        StageResult(stage="output_guard", decision=output_result.decision, reason_code=f"output_guard_{output_result.decision.value}")
-    )
-    final_text = (
-        output_result.sanitized_text
-        if output_result.decision == Decision.SANITIZE and output_result.sanitized_text
-        else dlp_result.redacted_text
-    )
+        final_text = (
+            output_result.sanitized_text
+            if output_result.decision == Decision.SANITIZE and output_result.sanitized_text
+            else dlp_result.redacted_text
+        )
+    else:
+        output_decision = Decision.ALLOW
+        final_text = dlp_result.redacted_text
+        stage_results.append(
+            StageResult(
+                stage="output_guard", decision=None,
+                reason_code="output_guard_disabled_ablation",
+            )
+        )
 
     # -- 9. Allowed: assemble the final safe result -----------------------
     per_chunk_decisions = [outcome[2] for outcome in context_outcomes.values() if outcome[0]]
     final_decision = most_severe(
-        [input_result.decision, aggregate_decision, dlp_decision, output_result.decision, *per_chunk_decisions]
+        [input_severity, aggregate_decision, dlp_decision, output_decision, *per_chunk_decisions]
     )
     provenance_summaries = _summaries_from_provenance(provenance_decisions, context_outcomes, False)
 
