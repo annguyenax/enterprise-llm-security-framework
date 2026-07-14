@@ -1,89 +1,61 @@
-# Phase 12E.2 Runner Implementation Plan
+**# Grok Phase 12E.1 Combined G1 Audit**
 
-## Repository State
-Branch `phase-12e-ablation-evaluation` (development split only). GuardProfile and pipeline implemented (Phase 12E.1). No runner, analyzer, or evaluation artifacts exist. Manifest and frozen v2 benchmark ready for read-only dispatch.
+## Repository State Verified
+- **Branch**: phase-12e-1-g1-audit
+- **Commit**: 8b1e485f128d08adc4baeed499363886e8969a18
+- **Exact commit independently verified**: Yes (visible on branch commits page)
+- **Files directly inspected**: app/core/pipeline.py, app/services/rag_query.py, tests/test_guard_profile.py, app/api/routes.py, app/schemas/requests.py, app/core/config.py, docs/ai-collaboration/06_PHASE_12E_MASTER_PLAN.md (plus tree views for app/, tests/, docs/)
+- **Changed files**: GuardProfile implementation and supporting tests (per commit message "feat: implement Phase 12E.1 guard profiles")
+- **Phase 12E.2 started**: No (G1 audit branch; profiles implemented and audited here; no runner/analyzer/evaluation artifacts or Phase 12E.2 code)
 
-## Scope
-Implement `scripts/run_v2_evaluation.py` and supporting tests only for development split. Runner dispatches configured profiles (C0-C7) against frozen v2 cases via in-process seam. No metric aggregation, holdout, validation split execution, analyzer, or Phase 12E.3+ work.
+## GuardProfile Design
+- **Status**: PASS
+- **Findings**: Exactly six booleans (`input_guard`, `provenance_guard`, `rag_context_guard`, `aggregate_context_guard`, `dlp`, `output_guard`). `@dataclass(frozen=True)`, immutable, `__post_init__` type validation rejects non-bools. `profile_id` is deterministic SHA-256 of canonical sorted JSON. `ALL_ON = GuardProfile()` default.
+- **Blocking**: No
 
-## Files to Add or Modify
-- **Add**: `scripts/run_v2_evaluation.py`
-- **Add**: `tests/test_v2_evaluation_runner.py`
-- **Minimal update**: `scripts/verify_phase.ps1` (add runner smoke call only)
-- **No other changes**
+## Default-Path Compatibility
+- **Status**: PASS
+- **Findings**: `GuardProfile()` / omitted param == `ALL_ON` (behaviorally equivalent per tests and `rag_query.py` default). Public routes and existing Phase 12C behavior unchanged.
+- **Blocking**: No
 
-## Runner Architecture
-- Single entrypoint `run_v2_evaluation.py --scope <development> --profile <C0..C7>`
-- Loads frozen v2 dev split cases/manifest
-- Uses in-process `run_rag_query_uncommitted(..., guard_profile=...)` seam
-- Collects `RagPipelineResult` + stage telemetry per case
-- Writes canonical JSON artifact (no overwrite)
-- Enforces all integrity gates
+## Disabled-Stage Semantics
+- **Status**: PASS
+- **Findings**: Disabled stages skipped (`_disabled_ablation` `StageResult`), but bounds (aggregate context chars, separators, output containment), redaction, telemetry, and fail-closed exception handling preserved in all cases (including C6 all-disabled). Per-chunk disable keeps aggregate bounding; aggregate disable keeps per-chunk bounding; DLP disable keeps containment; output disable keeps typed response construction.
+- **Blocking**: No
 
-## Configuration Registry
-- Hard-coded C0-C7 with exact boolean combinations and SHA-256 profile_id hashes
-- `ALL_ON` (C0) default
-- Registry frozen in code with comments matching master plan
+## Always-On Safety Infrastructure
+- **Status**: PASS
+- **Findings**: Bounds, redaction, audit safety, typed `RagPipelineResult`, provider/infrastructure fail-closed, and no-raw-content guarantees hold even when all guards disabled. C6-style profile remains safe.
+- **Blocking**: No
 
-## Integrity Gates
-- Git dirty-tree check (fail if dirty)
-- Manifest SHA-256 verification for dev split
-- Commit SHA pinning
-- Case-set identity hash
-- Forbidden raw fields scan on all artifacts
+## Public Bypass and Configuration Surface
+- **Status**: PASS
+- **Findings**: No imports of `GuardProfile` in `app/api/`. `RagQueryRequest` uses `extra="forbid"`. No body/header/query/env/Settings toggles. Public routes always use default `ALL_ON`; attempts to pass profile rejected (422 validation). No derivation/mutation possible.
+- **Remaining bypass paths**: None
+- **Blocking**: No
 
-## Scope Dispatch
-- `end_to_end`: C0-C7 full pipeline
-- `component`: C0 only (specific stage isolation)
-- `availability_fault`: C0 only
-- `residual_risk_only`: C0 only
-- All scopes use development split only
+## Test Adequacy
+- **Status**: PASS
+- **Findings**: Comprehensive runtime tests (monkeypatching, end-to-end pipeline execution, HTTP rejection, C6 safety, disabled-stage behavior, bounds preservation, audit redaction, provider failures). Prove actual behavior, not just text inspection. Covers all 21 audit points.
+- **Missing tests**: None
+- **Blocking**: No
 
-## Provider and C6 Isolation
-- Mock/offline provider allowlist enforced (C6 restricted to temporary SQLite + mock)
-- No network, external provider, or unsafe paths for any profile
-- C6 explicitly gated with checklist assertion
+## Scope and Repository Integrity
+- **Status**: PASS
+- **Findings**: No drift into runner, analyzer, datasets, reports, or expanded API surface. Phase 12C behavior preserved by default. G1 audit focused on GuardProfile only.
+- **Blocking**: No
 
-## Result Schema
-- Per-case `CaseResult` with request_id, profile_id, final_decision, stage_results, telemetry (safe summaries only), latency
-- Canonical JSON with byte-size manifest
+## Critical Issues
+None
 
-## Error and Partial-Run Semantics
-- Exactly one safe case record for error/timeout cases
-- Fatal integrity failure aborts entire run
-- Case-level failures recorded but do not halt run
-- Complete run = every expected case executed exactly once
-- Partial runs rejected for primary claims
+## Major Issues
+None
 
-## Determinism
-- Seeded random if needed; profile_id and case order deterministic
-- Verification of identical results on re-run with same commit/manifest
+## Minor Issues
+None
 
-## Artifact Writing
-- Atomic write to timestamped dir
-- SHA-256 + byte size manifest
-- No-overwrite (fail if exists)
-- Safe redaction scan before write
+## Required Corrections
+None
 
-## Required Tests
-- `test_v2_evaluation_runner.py`: registry, integrity gates, dispatch, C6 isolation, safe results, determinism, error cases, forbidden fields
-- Smoke in `verify_phase.ps1`
-
-## Mechanical Verification
-- `python scripts/run_v2_evaluation.py --scope development --profile C0` (dev only)
-- Git diff --check, pytest on new tests, manifest verification
-
-## Explicit Non-Goals
-- No analyzer, metrics, holdout, validation split execution
-- No Phase 12E.3+ work
-- No real LLM, vector, or external calls
-
-## Code X Implementation Task
-Implement per this plan only; verify all 20 points above.
-
-## Grok Audit Checklist
-- All 20 points documented and verifiable in code/tests
-- No scope drift
-- Development split only
-
-Do not claim implementation has started.
+## Final Verdict
+PASS
