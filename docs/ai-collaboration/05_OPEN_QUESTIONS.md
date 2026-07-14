@@ -6,10 +6,13 @@ Câu hỏi chưa trả lời và việc đã hoãn lại. Không để chúng bi
 
 ## Q-001 — Ablation profile nào cho Phase 12E?
 
-**Trạng thái:** Hoãn tới Phase 12E (Gemini nêu là "deferrable")
+**Trạng thái:** ĐÃ CÓ ĐỀ XUẤT trong master plan (`06_PHASE_12E_MASTER_PLAN.md` §5-6),
+chờ audit G0
 
-Cần chọn tổ hợp guard nào để bật/tắt. Ví dụ: Input Guard + Output Guard nhưng
-tắt Context Guard. Chưa quyết.
+Đề xuất 8 config: C0_all_on, C1_no_input, C2_no_provenance, C3_no_context,
+C4_no_dlp, C5_no_output, C6_none, C7_no_context_no_output. **Không** chạy toàn bộ
+2⁵=32 tổ hợp (cỡ mẫu không cho phép kết luận tương tác bậc cao). Chốt cuối sau
+khi Code X/Gemini/Grok audit kế hoạch.
 
 ---
 
