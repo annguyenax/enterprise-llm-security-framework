@@ -1,4 +1,4 @@
-"""Phase 12E.2 development-only runner integrity and safety tests."""
+"""Phase 12E.3 development/validation runner integrity and safety tests."""
 from __future__ import annotations
 
 import copy
@@ -246,7 +246,6 @@ def test_registry_rejects_name_boolean_mismatch():
 @pytest.mark.parametrize(
     "argv",
     [
-        ["--split", "validation", "--config", "C0_all_on"],
         ["--split", "holdout", "--config", "C0_all_on"],
         ["--split", "unknown", "--config", "C0_all_on"],
         ["--split", "development", "--config", "custom_profile"],
@@ -261,7 +260,7 @@ def test_registry_rejects_name_boolean_mismatch():
         ],
     ],
 )
-def test_cli_rejects_non_development_custom_profiles_and_external_providers(argv):
+def test_cli_rejects_holdout_custom_profiles_and_external_providers(argv):
     full = [
         *argv,
         "--output-root",
@@ -274,6 +273,24 @@ def test_cli_rejects_non_development_custom_profiles_and_external_providers(argv
     with pytest.raises(SystemExit) as exc:
         runner.build_parser().parse_args(full)
     assert exc.value.code == 2
+
+
+def test_cli_accepts_validation_as_a_supported_split():
+    args = runner.build_parser().parse_args(
+        [
+            "--split",
+            "validation",
+            "--config",
+            "C0_all_on",
+            "--output-root",
+            "safe-output",
+            "--expected-branch",
+            TEST_BRANCH,
+            "--expected-commit",
+            TEST_COMMIT,
+        ]
+    )
+    assert args.split == "validation"
 
 
 def test_preflight_rejects_dirty_tree_before_output_is_created(tmp_path):
@@ -300,6 +317,23 @@ def test_preflight_rejects_wrong_branch_or_commit_without_write(tmp_path, state)
 def test_preflight_rejects_invalid_expected_commit_before_write(tmp_path):
     request = dataclasses_replace(_request(tmp_path), expected_commit="short")
     with pytest.raises(runner.IntegrityError, match="full lowercase"):
+        runner.preflight(request, hooks=_hooks(tmp_path))
+    assert not request.output_root.exists()
+
+
+def test_holdout_preflight_rejects_before_manifest_loader_or_output(tmp_path, monkeypatch):
+    request = dataclasses_replace(_request(tmp_path), split="holdout")
+    monkeypatch.setattr(
+        runner,
+        "verify_frozen_manifest",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("manifest reached")),
+    )
+    monkeypatch.setattr(
+        runner,
+        "load_split_benchmark",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("loader reached")),
+    )
+    with pytest.raises(runner.IntegrityError, match="holdout is prohibited"):
         runner.preflight(request, hooks=_hooks(tmp_path))
     assert not request.output_root.exists()
 
@@ -412,6 +446,62 @@ def test_development_cases_load_in_stable_case_id_order():
     assert case_ids == tuple(sorted(case_ids))
     assert len(case_ids) == 30
     assert benchmark.labels_by_id["V2-DEV-0021"]["expected_provider_called"] is None
+
+
+def test_validation_cases_load_only_validation_in_stable_order():
+    benchmark = runner.load_split_benchmark(
+        runner.ROOT / "datasets" / "v2",
+        "validation",
+    )
+    case_ids = tuple(case["case_id"] for case in benchmark.cases)
+    assert len(case_ids) == 30
+    assert case_ids == tuple(sorted(case_ids))
+    assert all(case["split"] == "validation" for case in benchmark.cases)
+    assert set(case_ids) == set(benchmark.labels_by_id)
+
+
+def test_split_participates_in_experiment_and_record_identity(tmp_path):
+    development = runner.preflight(_request(tmp_path), hooks=_hooks(tmp_path))
+    validation = runner.preflight(
+        dataclasses_replace(_request(tmp_path), split="validation"),
+        hooks=_hooks(tmp_path),
+    )
+    assert development.experiment_id != validation.experiment_id
+
+    record = runner._case_completed_record(  # noqa: SLF001
+        case=_minimal_case(),
+        label=_minimal_label(),
+        config=runner.CONFIG_REGISTRY["C0_all_on"],
+        ordinal=0,
+        repository=_state(),
+        manifest=runner.ManifestIdentity("b" * 64, "final", 9),
+        split="validation",
+        outcome=runner.ScopeOutcome(
+            final_decision="allow",
+            stop_reason="allowed",
+            provider_called=True,
+            retrieved_count=0,
+            accepted_context_count=0,
+            rejected_context_count=0,
+            redaction_count=0,
+            dlp_finding_categories={},
+            stage_results=(),
+            pipeline_pre_audit_ms=1.0,
+            end_to_end_with_audit_ms=2.0,
+        ),
+    )
+    assert record["split"] == "validation"
+    output_path = runner._run_directory(  # noqa: SLF001
+        tmp_path,
+        {
+            "experiment_id": validation.experiment_id,
+            "provider_id": "mock",
+            "split": "validation",
+            "config_id": "C0_all_on",
+            "run_id": "validation-run",
+        },
+    )
+    assert "validation" in output_path.parts
 
 
 def test_expected_case_sets_are_config_and_scope_specific():
@@ -643,6 +733,7 @@ def test_case_exception_record_is_safe_and_fixed():
         ),
         repository=_state(),
         manifest=runner.ManifestIdentity("b" * 64, "final", 9),
+        split="development",
         timeout_seconds=30.0,
         timeout_recovery_check=lambda _case: None,
     )
@@ -669,6 +760,7 @@ def test_case_timeout_record_is_safe_and_fixed():
         ),
         repository=_state(),
         manifest=runner.ManifestIdentity("b" * 64, "final", 9),
+        split="development",
         timeout_seconds=30.0,
         timeout_recovery_check=lambda case: recovered.append(case["case_id"]),
     )
@@ -780,6 +872,7 @@ def test_case_errors_publish_only_a_partial_diagnostic_run(tmp_path, monkeypatch
             ordinal=kwargs["ordinal"],
             repository=kwargs["repository"],
             manifest=kwargs["manifest"],
+            split=kwargs["split"],
             status="error",
             error_category="case_execution_error",
         )
@@ -819,6 +912,7 @@ def test_non_deterministic_repetitions_abort_without_result(tmp_path, monkeypatc
             ordinal=kwargs["ordinal"],
             repository=kwargs["repository"],
             manifest=kwargs["manifest"],
+            split=kwargs["split"],
             outcome=outcome,
         )
 
@@ -916,7 +1010,7 @@ def test_c0_integration_dispatches_all_scopes_and_rejected_doc_is_not_retrieved(
     scopes = {scope: 0 for scope in runner.EVALUATION_SCOPES}
     for record in result["cases"]:
         scopes[record["evaluation_scope"]] += 1
-    assert scopes == runner.EXPECTED_DEVELOPMENT_SCOPE_COUNTS
+    assert scopes == runner.EXPECTED_SCOPE_COUNTS_BY_SPLIT["development"]
 
     component = next(record for record in result["cases"] if record["evaluation_scope"] == "component")
     assert component["actual_document_ingestion_status"] == "rejected"

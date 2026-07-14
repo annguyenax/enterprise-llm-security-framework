@@ -39,11 +39,12 @@ $FocusedCacheDir = Join-Path $VerificationTempRoot "cf"
 $FullCacheDir = Join-Path $VerificationTempRoot "ca"
 $env:PYTHONPYCACHEPREFIX = Join-Path $VerificationTempRoot "p"
 
-# Test module trọng tâm của phase hiện tại (Phase 12E.2). Cập nhật khi sang phase mới.
+# Test module trọng tâm của phase hiện tại (Phase 12E.3). Cập nhật khi sang phase mới.
 $FocusedModules = @(
     "tests/test_guard_profile.py",
     "tests/test_rag_pipeline.py",
-    "tests/test_v2_evaluation_runner.py"
+    "tests/test_v2_evaluation_runner.py",
+    "tests/test_v2_result_analyzer.py"
 )
 
 # Đường dẫn KHÔNG được thay đổi ngoài scope (invariant check).
