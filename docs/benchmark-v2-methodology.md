@@ -67,9 +67,12 @@ Case files (`cases/*.jsonl`) contain **only** execution inputs:
 relevant_document_ids, evaluation_scope`. `relevant_document_ids` is
 documentation metadata for this benchmark's own maintainers (used by the
 optional guard diagnostic and the integrity tests) — Phase 12E's evaluation
-runner is expected to call the real `POST /v1/rag/query` endpoint with only
-`query`/`top_k` and let real BM25 retrieval decide what comes back, never
-read `relevant_document_ids` to short-circuit retrieval. `evaluation_scope`
+runner must submit only `query`/`top_k` to the real RAG query service and let
+real BM25 retrieval decide what comes back, never read `relevant_document_ids`
+to short-circuit retrieval. The C0-C7 matrix uses the internal
+`run_rag_query_uncommitted(..., guard_profile=...)` seam defined by the Phase
+12E plan; public HTTP remains `ALL_ON` and may be checked only by a separate C0
+parity smoke. `evaluation_scope`
 (`end_to_end` / `component` / `availability_fault` / `residual_risk_only`) is
 execution-routing information, not an expected outcome — see §6a.
 
@@ -112,12 +115,13 @@ removed from the corpus schema** (Code X Phase 12D audit, Major #2 — it was
 an expected *outcome* stored outside `labels/`) and replaced by
 `expected_document_ingestion_status` in the corresponding label record.
 `ingestion_mode` is retained in the corpus — it describes execution routing
-only (which mechanism Phase 12E must use to attempt ingestion: the public
-route, an internal-only direct call, or "rejected" meaning the `source_key`
-itself is unregistered), not a ground-truth claim about whether that attempt
-succeeds. No corpus document carries `is_poisoned` or any other
-runtime-visible ground-truth field — malicious content lives in `content`
-itself (that is what is evaluated), never in a side-channel flag.
+only (which service/policy contract Phase 12E must use to attempt ingestion:
+the public-ingestion service contract, an evaluation-only internal policy
+call, or "rejected" meaning the `source_key` itself is unregistered), not a
+ground-truth claim about whether that attempt succeeds. No corpus document
+carries `is_poisoned` or any other runtime-visible ground-truth field —
+malicious content lives in `content` itself (that is what is evaluated), never
+in a side-channel flag.
 
 Enforced by both the validator (`check_schemas`, `check_no_runtime_label_
 coupling`) and dedicated tests (`test_benchmark_v2_schema.py`,
@@ -216,7 +220,7 @@ Every case declares how Phase 12E is expected to execute it:
 
 | `evaluation_scope` | Meaning | Families |
 |---|---|---|
-| `end_to_end` | Executed through the real, intended `POST /v1/rag/query` workflow | 20 of 23 families (104 of 120 cases) |
+| `end_to_end` | Executes the complete retrieval-to-output RAG service pipeline. Phase 12E C0-C7 uses one comparable in-process seam; optional C0 HTTP parity is separate | 20 of 23 families (104 of 120 cases) |
 | `component` | Requires a two-step ingestion-then-query workflow rather than one HTTP call | `provenance_denied_at_ingestion` (4 cases) |
 | `availability_fault` | Requires a deterministic policy-error setup (an out-of-policy `top_k`), not a content-based check | `availability_failure_case` (8 cases) |
 | `residual_risk_only` | Documents a known detection blind spot; must be excluded from expected-detection denominators, never counted as a false negative | `fragment_beyond_per_chunk_prefix` (4 cases) |
@@ -1025,12 +1029,20 @@ file, generated log, or Phase 12E output — none of which exist under
 
 Phase 12E, when it begins, is expected to: run `scripts/freeze_v2_benchmark.py
 verify` first and abort before producing any report if it fails (ADR-003's
-runtime-precondition requirement); execute cases via real HTTP requests to
-`POST /v1/rag/query` (never short-circuit retrieval using
-`relevant_document_ids`); read `labels/*.jsonl` only after receiving each
-response, to score it; never modify a guard rule in response to a holdout
-failure without treating the holdout split as contaminated and regenerating
-it (ADR-003's "Rule of Freezing"). None of that runner exists yet — Phase 12D
+runtime-precondition requirement); execute all C0-C7 ablation observations via
+the single internal `run_rag_query_uncommitted(..., guard_profile=...)` seam
+(never short-circuit retrieval using `relevant_document_ids`); read
+`labels/*.jsonl` only after receiving each actual result, to score it; and never
+modify a guard rule in response to a holdout failure without treating the
+holdout split as contaminated under ADR-003's Rule of Freezing.
+
+This Phase 12E-specific rule **supersedes this section's former HTTP-only wording
+for the ablation matrix**. The public `POST /v1/rag/query` endpoint remains
+permanently `ALL_ON`, exposes no profile field/header/environment setting, and
+is not an ablation executor. An optional C0 HTTP-versus-in-process parity smoke
+may be reported separately, never mixed into matrix effectiveness or latency.
+Consequently the matrix evaluates pipeline-layer behavior, not the FastAPI/
+Pydantic perimeter on every run. None of that runner exists yet — Phase 12D
 produces artifacts only.
 
 ## 17. Multidisciplinary audit closure

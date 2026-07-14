@@ -3,7 +3,7 @@
 > **Agent đọc file này ĐẦU TIÊN, trước khi làm bất cứ việc gì.**
 > Cập nhật sau mỗi phase gate. Không nhồi lịch sử chat — chỉ trạng thái hiện tại.
 
-**Cập nhật lần cuối:** 2026-07-13
+**Cập nhật lần cuối:** 2026-07-14
 
 ## Trạng thái phase
 
@@ -14,10 +14,32 @@
 | 12B | SQLite FTS5/BM25 retrieval foundation | Done |
 | 12C | End-to-end RAG security pipeline | **DONE** — Code X final re-audit PASS |
 | 12D | Benchmark V2 (thiết kế / sinh / freeze) | **DONE** — manifest FINAL |
-| 12E | Đánh giá + ablation trên benchmark v2 | **CHƯA BẮT ĐẦU** — cần go-ahead riêng |
+| 12E | Đánh giá + ablation trên benchmark v2 | **G0 PASS — APPROVED FOR IMPLEMENTATION; triển khai CHƯA BẮT ĐẦU** |
 
 **Cả hai phase chặn 12E (12C và 12D) đều đã đóng bằng audit độc lập PASS.**
-12E vẫn cần go-ahead riêng theo `AGENT_RULES.md` rule 12.
+G0 của Phase 12E cũng đã đóng bằng triple PASS trên plan commit
+`d82bac7828e2e54520e0aa29271e820a52ec6f47`. Việc triển khai không tự bắt đầu;
+vẫn cần một task/go-ahead triển khai riêng theo `AGENT_RULES.md` rule 12.
+
+## Phase 12E — trạng thái planning gate G0
+
+- Ba audit kế hoạch tại baseline `a5afcea` đều trả **REVISE**:
+  Code X technical · Gemini academic · Grok red-team.
+- Adjudication: `docs/modernization-ai-reviews/phase-12e-plan-audit-resolution.md`.
+- Master plan đã sửa về execution seam in-process duy nhất, thuật toán từng
+  `evaluation_scope`, hạ tầng safety luôn bật, C4/C5 provider caveat, safe stage
+  telemetry, case-error/partial policy, run/config/result integrity và C6 checklist.
+- Plan commit được audit: `d82bac7828e2e54520e0aa29271e820a52ec6f47`.
+- Code X final technical verification: **PASS**.
+- Gemini final academic re-audit: **PASS**.
+- Grok final red-team re-audit: **PASS**.
+- Remaining Critical issues: **None**. Remaining blocking Major issues:
+  **None**. Required corrections before implementation: **None**.
+- **G0 PASS. Master plan APPROVED FOR IMPLEMENTATION.**
+- Chưa có `GuardProfile`, runner, analyzer, test Phase 12E, result artifact hoặc
+  generated evaluation output nào.
+- Phase 12E implementation: **NOT STARTED**. Evaluation results: **NONE**.
+  Holdout executed: **NO**.
 
 ## Phase 12C — đã đóng
 

@@ -1,12 +1,15 @@
 # Phase 12E Master Plan — Ablation Evaluation of the RAG Security Pipeline
 
-> **Trạng thái: KẾ HOẠCH. Phase 12E CHƯA BẮT ĐẦU triển khai.**
-> Branch: `phase-12e-planning` · Base commit: `4654fc4bac8f578d09c178c6ffb58fe0b7446c4c`
+> **Trạng thái: G0 PASS — MASTER PLAN APPROVED FOR IMPLEMENTATION;
+> Phase 12E CHƯA BẮT ĐẦU triển khai.**
+> Branch: `phase-12e-ablation-evaluation` · Audited plan commit:
+> `d82bac7828e2e54520e0aa29271e820a52ec6f47`
 >
-> Tài liệu này **không** là kết quả, **không** chứa số liệu đánh giá nào, và
-> **không** cho phép bắt đầu code. Nó phải qua 3 audit gate (Code X / Gemini /
-> Grok) và go-ahead riêng của người duy trì trước khi bất kỳ dòng code 12E nào
-> được viết (`AGENT_RULES.md` rule 12).
+> Code X, Gemini và Grok đã re-audit plan trên cùng commit và đều trả **PASS**;
+> không còn Critical, blocking Major hoặc correction bắt buộc trước triển khai.
+> Tài liệu này vẫn **không** phải kết quả evaluation và không xác nhận đã bắt đầu
+> code. Implementation cần task/go-ahead riêng (`AGENT_RULES.md` rule 12);
+> evaluation results hiện **NONE** và holdout executed **NO**.
 
 **Quy ước:** mọi chỗ ghi `VERIFY DURING IMPLEMENTATION` là điều **chưa được
 code hiện tại chứng minh**. Không được coi là đã hỗ trợ.
@@ -50,8 +53,8 @@ thật; tối ưu hiệu năng; bất kỳ thay đổi nào lên 9 artifact đã
 
 ## 2. Câu hỏi nghiên cứu
 
-- **RQ1.** Mỗi lớp guard đóng góp bao nhiêu vào tỉ lệ chặn tấn công (attack
-  block rate) trên tập holdout?
+- **RQ1.** Mỗi lớp guard đóng góp bao nhiêu vào Allowed Outcome Match Rate
+  (AOMR) trên tập holdout, với attack-family results được tách riêng?
 - **RQ2.** Mỗi lớp guard gây ra bao nhiêu báo động giả trên case benign?
 - **RQ3.** Lớp nào là *cần thiết* (bỏ nó ra thì có tấn công lọt) và lớp nào chỉ
   *dư thừa* (bỏ ra không đổi kết quả) trên benchmark này?
@@ -64,7 +67,7 @@ thật; tối ưu hiệu năng; bất kỳ thay đổi nào lên 9 artifact đã
 - **H1.** Input Guard chặn phần lớn `direct_injection`, nhưng **không** chặn được
   `indirect_injection` (nội dung độc nằm trong document, không nằm trong query).
 - **H2.** RAG Context Guard là lớp *duy nhất* chặn được indirect injection ⇒ bỏ
-  nó ra sẽ làm rơi mạnh nhất attack block rate.
+  nó ra sẽ làm rơi mạnh nhất AOMR ở các attack family liên quan.
 - **H3.** Provenance Guard đóng góp chủ yếu ở family low-trust/compromised-source,
   gần như không đóng góp ở family khác.
 - **H4.** Tổng đóng góp của các lớp **không cộng tuyến tính** — có chồng lấn
@@ -77,8 +80,10 @@ không được vá thầm (ADR-003, Rule of Freezing).
 
 ## 4. Đơn vị phân tích
 
-**Một quan sát = một (case_id, config_id).** 120 case × N config. Case là đơn vị,
-không phải chunk hay stage. Mỗi quan sát sinh đúng một `RagPipelineResult`.
+Trong ma trận ablation chính, **một quan sát = một `(case_id, config_id)`** với
+`evaluation_scope=end_to_end`. Case là đơn vị, không phải alert, chunk hay stage.
+Mỗi quan sát chính sinh đúng một `RagPipelineResult`; các scope ngoài ma trận có
+hợp đồng kết quả riêng ở §11a và không bị ép giả dạng thành `RagPipelineResult`.
 
 ## 5. Cấu hình thí nghiệm
 
@@ -90,20 +95,24 @@ không phải chunk hay stage. Mỗi quan sát sinh đúng một `RagPipelineRes
 | `C3_no_context` | Tắt RAG Context Guard (cả per-chunk lẫn aggregate) | RQ1/RQ3, H2 |
 | `C4_no_dlp` | Tắt DLP | RQ1 (xem §15 — giới hạn nghiêm trọng) |
 | `C5_no_output` | Tắt Output Guard | RQ1/RQ3 |
-| `C6_none` | **No-guard baseline** — tắt toàn bộ guard | Mốc "không phòng thủ" |
+| `C6_none` | **Six-guard-off ablation baseline** — tắt sáu detector/guard stage, nhưng giữ hạ tầng an toàn §7a | Mốc không có sáu lớp guard được đo |
 
 **Tổ hợp (chỉ khi có biện minh học thuật):** `C7_no_context_no_output` — kiểm tra
 H4 (chồng lấn giữa hai lớp cùng thấy nội dung độc). Không chạy toàn bộ 2⁵=32 tổ
 hợp: cỡ mẫu không cho phép kết luận về tương tác bậc cao, và làm vậy chỉ tạo ảo
 giác chính xác.
 
-**`C6_none` chỉ được chạy khi thoả cả 4 điều kiện:**
+**`C6_none` chỉ được chạy khi thoả tất cả điều kiện:**
 1. Chạy **offline**, in-process, qua `run_rag_query_uncommitted(...)` — **không**
    qua HTTP server đang chạy.
 2. Dùng database SQLite **tạm thời riêng cho từng run**, không phải
    `data/retrieval.db`.
 3. Provider là Mock/double offline — không có provider thật.
-4. Cấu hình no-guard **không thể** đạt tới từ bất kỳ request HTTP nào (§8).
+4. Cấu hình six-guard-off **không thể** đạt tới từ bất kỳ request HTTP nào (§8).
+5. Aggregate budget, separator accounting, bounded retrieval/provider output,
+   typed construction, fail-closed exception mapping và audit redaction vẫn bật.
+6. Không ghi query, chunk, answer, canary hoặc secret thô vào log/artifact.
+7. Không thay đổi `Settings`, singleton route hoặc mặc định serving `ALL_ON`.
 
 ## 6. Ma trận ablation
 
@@ -121,7 +130,10 @@ giác chính xác.
 `retrieval` và `provider` **không phải guard** → không bao giờ tắt (tắt chúng thì
 không còn pipeline để đo).
 
-**Tổng số lần chạy pipeline:** 120 case × 8 config = **960**.
+**Ma trận chính:** 104 case `end_to_end` × 8 config = **832 quan sát** trên toàn
+bộ ba split. Đây là số quan sát case/config, **không** phải tổng số execution có
+warm-up và lặp latency. `component`, `availability_fault`, `residual_risk_only`,
+provider-double và HTTP parity đều báo cáo riêng, ngoài 832 quan sát này.
 
 ## 7. Thiết kế guard-toggle
 
@@ -157,24 +169,72 @@ ALL_ON = GuardProfile()   # mặc định của MỌI đường public
    telemetry không bị "mất stage" một cách âm thầm.
 4. **Không sửa logic bên trong bất kỳ guard nào.** Toggle chỉ quyết định *có gọi*
    guard đó hay không — không đổi cách nó phán quyết.
+5. Runner chỉ chấp nhận đúng tám profile có tên ở §5-6. Canonical JSON của toàn
+   bộ boolean + `config_id` được SHA-256 để tạo `config_hash`; profile tuỳ ý hoặc
+   tên/boolean không khớp phải bị từ chối trước khi chạy case.
 
-`VERIFY DURING IMPLEMENTATION`: liệu có thể bỏ qua RAG Context Guard mà vẫn giữ
-được ràng buộc aggregate-context-budget hay không. Hiện `_bound_chunks_for_aggregate`
-(`rag_query.py:131`) đứng riêng; cần xác minh tắt guard không vô tình bỏ luôn
-giới hạn kích thước context gửi provider.
+**Semantics pass-through bắt buộc khi stage bị tắt:**
 
-## 8. Tách biệt cấu hình phục vụ công khai và cấu hình đánh giá nội bộ
+| Stage tắt | Dữ liệu tiếp tục đi qua | Giá trị trung tính dùng nội bộ |
+|---|---|---|
+| Input Guard | Query thô đã qua type/length policy luôn là `effective_query` | Không có guard decision; severity trung tính `ALLOW` |
+| Provenance Guard | Chấp nhận các hit do retriever/server tạo, giữ nguyên provenance server-side | Một outcome accept nội bộ cho mỗi hit; không tin metadata do client cung cấp |
+| RAG Context Guard | Chunk server-retrieved đi tiếp không sanitize theo rule | Per-chunk severity trung tính `ALLOW` |
+| Aggregate Context Guard | Chỉ bỏ detector aggregate; **vẫn** chạy bounding + separator accounting | Severity trung tính `ALLOW` |
+| DLP | Dùng provider output đã qua **always-on output containment cap**, không regex-redact | Finding rỗng, redaction count 0, severity trung tính `ALLOW` |
+| Output Guard | Trả text sau DLP/containment, không gọi Output Guard | Severity trung tính `ALLOW` |
+
+Các giá trị trung tính chỉ giúp orchestration tính tiếp; artifact vẫn ghi stage
+`enabled=false`, `decision=null`, `reason_code="<stage>_disabled_ablation"`.
+`C6_none` vì vậy có thể kết thúc `ALLOW` khi không có lỗi hạ tầng, nhưng mọi lỗi
+không thuộc guard vẫn fail-closed theo §7a.
+
+## 7a. Hạ tầng an toàn không được ablate
+
+Các cơ chế sau **luôn bật ở C0-C7**, nằm ngoài `GuardProfile`:
+
+- aggregate context character budget và separator accounting qua
+  `_bound_chunks_for_aggregate`;
+- giới hạn query/`top_k`, bounded BM25 retrieval và giới hạn kích thước response;
+- output containment cap độc lập với việc DLP regex có bật hay không;
+- schema/type/dataclass construction safety và deterministic ordering;
+- fail-closed exception mapping, timeout handling và safe fixed error category;
+- audit redaction toàn bộ bằng canonical redaction API, safe audit fallback và
+  đúng một terminal audit attempt cho mỗi case đã bắt đầu;
+- cấm lưu query, retrieved text, generated answer, canary, secret, stack trace
+  hoặc absolute machine path;
+- SQLite tạm riêng cho run; Mock Provider hoặc scripted double offline đã duyệt;
+- manifest/commit/config gates và public serving mặc định `ALL_ON`.
+
+Tắt Context Guard **không** được tắt bounding. Tắt DLP **không** được tắt audit
+redaction hoặc output containment. Bất kỳ vi phạm nào là lỗi integrity cấp run,
+không phải một kết quả ablation hợp lệ.
+
+## 8. Một execution contract và tách biệt public/internal
 
 **Đây là ràng buộc bảo mật cứng.** Hiện tại **không có bất kỳ bề mặt nào cho phép
 client tắt guard** (`config.py` không có cờ nào; request schema `extra="forbid"`).
 Phase 12E **không được phá vỡ tính chất này**.
 
-| | Public serving | Internal evaluation |
+| | Public serving | C0-C7 ablation matrix |
 |---|---|---|
 | Đường vào | `POST /v1/rag/query` (HTTP) | `run_rag_query_uncommitted(...)` in-process |
 | Guard profile | **Luôn `ALL_ON`, hard-coded** | Tham số hàm |
 | Nguồn cấu hình | `Settings` (env) | Đối tượng Python truyền tay |
 | DB | `data/retrieval.db` | SQLite tạm, riêng từng run |
+
+**Hợp đồng so sánh duy nhất:** toàn bộ C0-C7 dùng cùng seam in-process
+`run_rag_query_uncommitted(..., guard_profile=...)`. Sau khi nhận result, runner
+phải gọi `commit_rag_query_audit(result, audit_ctx)` đúng một lần; audit failure
+không được thay kết quả gốc hoặc làm lộ dữ liệu. Không config nào trong ma trận
+được chạy qua HTTP.
+
+Có thể chạy một **C0 HTTP-versus-in-process parity smoke** để kiểm chứng decision/
+stop-reason ở `ALL_ON`. Đây là evidence riêng, không phải observation ablation,
+không đưa vào ABR/FPR/latency/marginal table, và không cho phép profile qua HTTP.
+Quy tắc này thay thế wording HTTP-only trước đây trong methodology cho **ma trận
+Phase 12E**. Giới hạn phải ghi trong báo cáo: thí nghiệm đo pipeline-layer behavior,
+không trực tiếp đo FastAPI/Pydantic perimeter trên mọi matrix run.
 
 **Test bắt buộc (Phase 12E phải thêm):**
 - Không có tên biến môi trường nào có thể đổi `GuardProfile`.
@@ -183,6 +243,9 @@ Phase 12E **không được phá vỡ tính chất này**.
 - `app/api/routes.py::rag_query` gọi pipeline **không truyền** `guard_profile`
   (⇒ luôn nhận `ALL_ON`).
 - Grep tĩnh: `GuardProfile` không xuất hiện trong `app/api/`.
+- Header hoặc query parameter lạ liên quan guard bị từ chối/không có tác dụng.
+- Không biến môi trường, `Settings`, singleton hoặc provider name nào ánh xạ
+  thành profile.
 
 ## 9. Chính sách split
 
@@ -196,8 +259,10 @@ Ba split, **vai trò tách bạch tuyệt đối**:
 
 ## 10. Quy tắc sử dụng development / validation / holdout
 
-1. **Holdout chỉ chạy một lần**, sau khi runner đã đóng băng trên
-   development+validation, và sau khi người duy trì phê duyệt.
+1. **Holdout chỉ có một complete/reportable run**, sau khi runner đã đóng băng
+   trên development+validation và người duy trì phê duyệt. Partial/interrupted
+   attempt phải được giữ + ghi quyết định; chỉ được retry cùng immutable code/
+   config/metric theo §25/§38, không được dùng để tuning.
 2. **Sau khi xem kết quả holdout, KHÔNG được sửa logic guard, không được sửa
    metric, không được sửa runner.** Bất kỳ sửa đổi nào sau đó ⇒ mọi số holdout
    trở nên vô hiệu và phải chạy lại trên một benchmark mới (v3).
@@ -217,18 +282,50 @@ Ba split, **vai trò tách bạch tuyệt đối**:
 5. Candidate do Hermes sinh **không bao giờ** trở thành ground truth tự động
    (§32).
 
+## 11a. Thuật toán thực thi theo `evaluation_scope`
+
+Runner dispatch **chỉ** theo field `evaluation_scope` đã freeze, không suy luận
+từ tên family. Trước mọi scope, runner verify commit/dirty/config/manifest rồi
+chuẩn bị corpus như sau:
+
+1. Tạo SQLite tạm duy nhất cho run và initialize FTS5 fail-closed.
+2. Đọc corpus theo thứ tự `document_id` ổn định.
+3. `ingestion_mode=public`: đi qua validation, source policy, chunking và
+   transactional storage của public ingestion service.
+4. `ingestion_mode=internal_only`: đi qua một evaluation-only loader gọi source
+   policy với quyền internal tường minh, nhưng dùng cùng validation/chunking/
+   storage; loader này không được import từ route hoặc nhận input HTTP.
+5. `ingestion_mode=rejected`: thực hiện rejection check theo source policy,
+   ghi outcome an toàn, và **không bao giờ** đưa document/chunk vào index.
+6. Đối chiếu ingestion outcome với label sau khi có actual result. Không dùng
+   `relevant_document_ids` để chọn, chèn hoặc ưu tiên retrieval hit.
+
+| Scope | Thực thi | Vị trí báo cáo/scoring |
+|---|---|---|
+| `end_to_end` | Với corpus đã chuẩn bị, chạy query qua seam in-process ở §8 cho đủ C0-C7, theo thứ tự `case_id`; score decision + stop reason bằng `allowed_*` | **Ma trận chính**; nguồn duy nhất của AOMR/ABR/FPR/marginal |
+| `component` | Chạy sequence ingestion bị policy từ chối, xác nhận document không được index, rồi query kiểm chứng không thể retrieve document đó | Ngoài ma trận, C0-only; component integrity/robustness table, không gọi là HTTP end-to-end hoặc attack detection |
+| `availability_fault` | Scope executor áp dụng đúng configured `top_k` policy trước pipeline, yêu cầu fail-closed `top_k_rejected`, provider không được gọi, audit an toàn vẫn được attempt | Ngoài ma trận, C0-only; availability/robustness table, không vào ABR/FPR |
+| `residual_risk_only` | Chạy C0-only để quan sát giới hạn đã khai báo; không sửa guard khi thấy kết quả | Ngoài ma trận; công bố case count/outcome mô tả, loại khỏi mọi detection/FPR/marginal denominator |
+
+Mỗi scope có expected-case set riêng và completeness check. Không được biến lỗi
+scope thành `allow`, bỏ qua case, hoặc trộn component/availability/residual vào
+832 observation của ma trận chính.
+
 ## 12. Metric và công thức chính xác
 
 Ký hiệu: với case $i$ và config $c$, gọi $d_{i,c}$ = `final_decision` thực tế,
 $s_{i,c}$ = `stop_reason` thực tế. Ground truth từ label: $A_i$ =
 `allowed_final_decisions` (tập), $S_i$ = `allowed_stop_reasons` (tập).
 
-**Định nghĩa "đúng" (correct):**
+**Định nghĩa benchmark outcome match (`correct`):**
 $$\text{correct}(i,c) = \mathbb{1}[\,d_{i,c} \in A_i \;\wedge\; s_{i,c} \in S_i\,]$$
 
 Dùng **tập cho phép** (`allowed_*`), không dùng giá trị đơn (`expected_*`) — vì
 label đã cố ý cho phép nhiều kết cục hợp lệ (ví dụ một tấn công có thể bị chặn ở
-Input Guard *hoặc* ở Context Guard, cả hai đều đúng).
+Input Guard *hoặc* ở Context Guard, cả hai đều đúng). Đây là **exact allowed-
+outcome agreement**, không phải detector alert và không mặc nhiên chứng minh
+attack đã thành công/thất bại ngoài benchmark. Mixed case có thể đúng với
+`final_decision=allow` khi context độc đã bị loại và context lành vẫn đi tiếp.
 
 **Chỉ tính trên `evaluation_scope`:**
 - `end_to_end` (104 case) → dùng cho mọi metric chính.
@@ -237,32 +334,75 @@ Input Guard *hoặc* ở Context Guard, cả hai đều đúng).
 - `residual_risk_only` (4) → **không tính vào detection metric**; báo cáo riêng
   như bằng chứng trung thực về giới hạn.
 
+Mọi phép chia có mẫu số 0 trả `null`, không trả 0 hoặc 1, và phải ghi `n=0`.
+Mọi metric là case-level; nhiều stage/rule kích hoạt không biến một case thành
+nhiều TP.
+
 ## 13. Metric phát hiện
 
-Trên tập $M$ = case `category ∈ {malicious, mixed}` và `evaluation_scope = end_to_end`:
+Trên tập $M$ = case `category ∈ {malicious, mixed}` và `evaluation_scope = end_to_end`;
+$B$ = case benign end-to-end được định nghĩa ở §14:
 
-$$\text{ABR}(c) = \frac{|\{i \in M : \text{correct}(i,c)\}|}{|M|} \quad \text{(Attack Block Rate)}$$
+$$\text{AOMR}(c) = \frac{|\{i \in M : \text{correct}(i,c)\}|}{|M|}$$
 
-$$\text{ASR}(c) = 1 - \text{ABR}(c) \quad \text{(Attack Success Rate)}$$
+**AOMR (Allowed Outcome Match Rate)** là tên chuẩn. Để tương thích tài liệu cũ,
+report có thể ghi `ABR (benchmark-specific alias of AOMR)`, nhưng không được hiểu
+ABR là tỷ lệ `decision==block` hoặc detection rate ngoài benchmark.
 
-Ở đây "chặn" nghĩa là **kết cục khớp ground truth**, không đơn thuần là
-`decision == block` — vì một số case đúng đắn phải `sanitize` chứ không `block`.
+$$\text{MismatchRate}(c)=1-\text{AOMR}(c)$$
+
+Nếu dùng tên `ASR_proxy`, phải viết đầy đủ: **controlled-benchmark allowed-
+outcome mismatch proxy**, không gọi đây là real attack success rate.
+
+Confusion counts thứ cấp được định nghĩa theo **outcome conformity**, không theo
+số alert:
+
+$$TP=|\{i\in M: correct(i,c)=1\}|,\quad FN=|\{i\in M: correct(i,c)=0\}|$$
+$$TN=|\{i\in B: correct(i,c)=1\}|,\quad FP=|\{i\in B: correct(i,c)=0\}|$$
+
+$$Recall=DetectionRate=\frac{TP}{TP+FN},\quad Precision=\frac{TP}{TP+FP}$$
+$$Specificity=\frac{TN}{TN+FP},\quad FPR=\frac{FP}{FP+TN}$$
+$$FNR=\frac{FN}{FN+TP},\quad F1=\frac{2TP}{2TP+FP+FN}$$
+
+Vì `Recall` theo định nghĩa này bằng AOMR trên $M$, report phải ưu tiên tên AOMR
+và giải thích construct; không dùng từ "semantic detection".
+
+Hai action-rate mô tả hành vi cuối, không thay thế correctness:
+
+$$BlockRate(c)=\frac{|\{i:d_{i,c}=block\}|}{N},\quad
+SanitizationRate(c)=\frac{|\{i:d_{i,c}=sanitize\}|}{N}$$
+
+`N` và scope phải ghi cạnh mỗi rate. Stage-level sanitize chỉ là telemetry,
+không được cộng thành nhiều case action.
 
 ## 14. Metric báo động giả
 
 Trên tập $B$ = case `category = benign` và `evaluation_scope = end_to_end`:
 
-$$\text{FPR}(c) = \frac{|\{i \in B : \neg\text{correct}(i,c)\}|}{|B|}$$
+$$\text{FPR}(c) = \frac{|\{i \in B : \neg\text{correct}(i,c)\}|}{|B|}
+=\frac{FP}{FP+TN}$$
 
 `neutral` (8 case) báo cáo riêng, không gộp vào FPR — chúng không phải benign
 theo nghĩa "phải được trả lời", mà là trung tính.
+
+**Coverage:**
+
+$$Coverage=\frac{\text{số expected case có đúng một record}}
+{\text{số expected case}}$$
+$$SuccessfulCoverage=\frac{\text{số expected case không có unexpected error}}
+{\text{số expected case}}$$
+
+Run `complete` đòi hỏi `Coverage=1`, `SuccessfulCoverage=1`, không duplicate,
+và mọi identity gate hợp lệ. Error-adjusted diagnostic giữ case lỗi với
+`correct=false`; primary comparison chỉ dùng run complete (§25).
 
 ## 15. Metric rò rỉ — GIỚI HẠN NGHIÊM TRỌNG, PHẢI KHAI BÁO
 
 **Mock Provider không bao giờ echo nội dung chunk** (`llm_provider.py:47-64`, chỉ
 phát ra số lượng chunk). ⇒ **Không một secret nào trong document có thể xuất hiện
 ở output của một live run.** ⇒ `redaction_count` sẽ **luôn bằng 0** với mọi
-config, kể cả `C4_no_dlp` và `C6_none`.
+config, kể cả `C4_no_dlp` và `C6_none`; output cố định này cũng không kích thích
+đầy đủ các rule output-only của Output Guard.
 
 **Hệ quả:** rò rỉ **không thể đo end-to-end** bằng live pipeline. Đây chính là lý
 do label ghi `expected_dlp_action: "not_applicable_mock_provider"` và
@@ -275,36 +415,79 @@ do label ghi `expected_dlp_action: "not_applicable_mock_provider"` và
 - Kết quả này phải được báo cáo **riêng**, gắn nhãn rõ ràng là **"đo bằng provider
   double, không phải bằng Mock Provider mặc định"**, và **không được trộn** vào
   metric detection/FPR của live run.
+- Mỗi scripted double phải deterministic, có `provider_id` và
+  `provider_behavior_hash`, bị output containment cap, và chỉ dùng canary tổng
+  hợp đã duyệt. Artifact chỉ lưu boolean/count an toàn, không lưu canary/input/
+  output thô.
+- Live-mock AOMR/FPR của `C4_no_dlp` và `C5_no_output` có thể thu để hoàn chỉnh
+  ma trận, nhưng delta gần 0 **không** chứng minh guard dư thừa. Leakage/output
+  contribution chỉ được diễn giải trong bảng scripted-double tách biệt.
 - **Luận văn KHÔNG được tuyên bố** "DLP ngăn rò rỉ trong thực tế" dựa trên live
   run. Chỉ được nói: "DLP ngăn rò rỉ trong điều kiện provider có echo context,
   được mô phỏng bằng double."
 
-$$\text{LeakRate}(c) = \frac{\text{số case mà secret xuất hiện trong output cuối}}{\text{số case có secret trong context được chấp nhận}}$$
+$$\text{LeakRate}(c)=\frac{\sum_i \mathbb{1}[eligible_i \wedge observed_i]}
+{\sum_i \mathbb{1}[eligible_i]}$$
 (chỉ tính trong chế độ provider-double)
+
+Mẫu số 0 ⇒ `null`. `leakage_observed` được tính trong memory trước khi bỏ output
+thô; không được suy từ `redaction_count=0`. Mock và scripted provider dùng run/
+artifact/analysis namespace khác nhau và analyzer phải từ chối trộn.
 
 ## 16. Đo độ trễ
 
-- Nguồn: `latency_ms` dict đã có sẵn trong `RagPipelineResult`
-  (`pipeline.py:79`), ghi bằng `time.perf_counter()` (`rag_query.py:121`).
-- **Warm-up:** bỏ 10 lần chạy đầu tiên của mỗi config trước khi ghi số.
-- **Lặp:** mỗi (case, config) chạy $R$ lần; đề xuất $R = 5$.
-  `VERIFY DURING IMPLEMENTATION`: $R$ đủ hay chưa, xét độ ồn của
-  `perf_counter` trên Windows và I/O của SQLite.
-- **Audit log ảnh hưởng latency.** Phải chạy với `ENABLE_AUDIT_LOG` cố định
-  cho mọi config (đề xuất: bật, vì đó là cấu hình serving thật), và ghi rõ đã
-  chọn gì.
+- Nguồn 1: `latency_ms` dict đã có sẵn trong `RagPipelineResult`
+  (`pipeline.py:79`), ghi bằng `time.perf_counter()` (`rag_query.py:121`). Khoá
+  `total` hiện tại kết thúc **trước audit commit**, nên phải đặt tên trong
+  artifact là `pipeline_pre_audit_total`.
+- Nguồn 2: runner dùng `perf_counter` bên ngoài từ ngay trước lời gọi pipeline
+  tới sau `commit_rag_query_audit` để ghi `end_to_end_with_audit`. Không trộn hai
+  loại total.
+- Audit luôn bật cho matrix, ghi vào đường dẫn tạm ngoài repository; mọi config
+  dùng cùng một thiết lập. Audit sink failure vẫn dùng safe fallback và được
+  ghi thành telemetry an toàn.
+- **Warm-up:** trước khi lấy mẫu, mỗi config chạy một lần 10 case `end_to_end`
+  đầu tiên theo `case_id` đã sort của split; warm-up không tạo observation hoặc
+  artifact case result.
+- **Lặp:** mỗi (case, config) chạy $R$ lần; giá trị khởi tạo là $R = 5$. Trước
+  khi mở holdout, $R$ phải được chốt và commit chỉ từ phép đo độ ổn định trên
+  development/validation; sau đó không được đổi theo kết quả holdout.
 - Máy đo: không chạy song song với việc khác; ghi lại CPU/RAM/OS.
+
+Latency overhead dùng mẫu ghép cặp cùng `(case_id, repetition, provider_mode)`:
+
+$$o_{i,r,c}=t_{i,r,c}-t_{i,r,C6}$$
+
+Báo cáo p50/p95 của $o$ cho total; overhead từng guard dùng
+$t(C0)-t(C_{\neg g})$. Phần trăm overhead chỉ tính khi baseline > 0, ngược lại
+trả `null`. Không so latency giữa commit, manifest, provider mode hoặc máy khác.
 
 ## 17. Yêu cầu telemetry theo stage
 
 `latency_ms` **đã có sẵn** 8 khoá stage + `"total"` (§0). Phase 12E cần thêm:
 
 - Khi guard bị tắt, khoá stage đó **phải vắng mặt** (không ghi 0.0) — để phân
-  biệt "chạy hết 0ms" với "không chạy". `VERIFY DURING IMPLEMENTATION`.
+  biệt "chạy hết 0ms" với "không chạy".
 - `StageResult` cho stage bị tắt vẫn phải xuất hiện với
   `reason_code="<stage>_disabled_ablation"` (§7).
+- Mỗi case artifact phải có summary content-free theo đúng schema:
+
+```yaml
+stage_results:
+  - stage: <stable stage id>
+    enabled: true | false
+    decision: allow | block | sanitize | log_only | human_review | null
+    reason_code: <safe fixed code> | null
+    execution_time_ms: <number> | null
+```
+
+  Stage disabled có `enabled=false`, `decision=null`, thời gian `null`. Stage
+  có nhiều per-chunk outcome giữ stable retrieval order; analyzer vẫn đếm case,
+  không đếm số entry như số detection.
 - **Không** thêm telemetry nào ghi nội dung thô (query, chunk text, secret) —
   vi phạm hợp đồng an toàn của `StageResult` (`pipeline.py:29-30`).
+- Aggregate fail-closed phải hiện rõ trong stage summary. Nếu xảy ra trên benign
+  case, nó vẫn là mismatch/FP theo label; không được dùng block để làm đẹp ABR.
 
 ## 18. Tính p50 / p95
 
@@ -317,24 +500,31 @@ $$P_q = x_{\lceil q \cdot n \rceil} \quad (q = 0.50,\ 0.95)$$
 được, không phụ thuộc thư viện. Phải ghi rõ trong báo cáo là đã dùng nearest-rank
 — hai phương pháp khác nhau cho ra số khác nhau.
 
+Trong list Python zero-based đã sort, index là `ceil(q*n) - 1`. Nếu `n=0`
+(ví dụ stage bị tắt hoặc không case nào đi tới stage), p50/p95 là `null` và bảng
+phải ghi `n=0`; không thay bằng 0 ms.
+
 Báo cáo p50/p95 cho: `total`, và từng stage. Kèm $n$ (số mẫu) mỗi ô.
 
 ## 19. Tính đóng góp biên (marginal contribution)
 
-Đóng góp của guard $g$ = mức tụt của ABR khi tắt riêng $g$:
+Đóng góp biên quan sát được của guard $g$ = mức tụt AOMR khi tắt riêng $g$:
 
-$$\Delta_g = \text{ABR}(C0_{\text{all\_on}}) - \text{ABR}(C_{\neg g})$$
+$$\Delta_g = \text{AOMR}(C0_{\text{all\_on}}) - \text{AOMR}(C_{\neg g})$$
 
-**Cảnh báo phải ghi trong báo cáo:** $\sum_g \Delta_g \neq \text{ABR}(C0) -
-\text{ABR}(C6_{\text{none}})$ nói chung, vì các guard **chồng lấn** (một tấn công
+**Cảnh báo phải ghi trong báo cáo:** $\sum_g \Delta_g \neq \text{AOMR}(C0) -
+\text{AOMR}(C6_{\text{none}})$ nói chung, vì các guard **chồng lấn** (một tấn công
 có thể bị nhiều lớp cùng chặn). $\Delta_g$ đo *tính cần thiết* của $g$, **không**
 đo "phần đóng góp" theo nghĩa phân rã cộng tính. Không được trình bày $\Delta_g$
 như một phép chia miếng bánh.
 
 Ngoài ra báo cáo:
-- **Guard cần thiết:** $\Delta_g > 0$ ⇒ có tấn công *chỉ* $g$ chặn được.
-- **Guard dư thừa trên benchmark này:** $\Delta_g = 0$ ⇒ **không** kết luận là vô
-  dụng; chỉ kết luận "benchmark này không chứa tấn công mà chỉ $g$ chặn được".
+- $\Delta_g > 0$ ⇒ tắt $g$ làm giảm allowed-outcome match trên benchmark/provider
+  mode này; không tự động chứng minh $g$ là nguyên nhân duy nhất.
+- $\Delta_g = 0$ ⇒ **không** kết luận guard vô dụng hoặc dư thừa; có thể do guard
+  khác bù, benchmark thiếu kích thích, hoặc Mock Provider không tạo output phù hợp.
+- Riêng C4/C5 live-mock delta chỉ là completeness observation và **không được**
+  dùng cho necessity/redundancy claim; xem §15.
 
 ## 20. Yêu cầu báo cáo theo nhóm
 
@@ -346,30 +536,51 @@ Ngoài ra báo cáo:
 Do đó:
 - **Được** báo cáo phần trăm ở: mức **tổng hợp** (toàn bộ end_to_end), và mức
   **nhóm lớn đã khai báo TRƯỚC khi xem kết quả**.
-- Nhóm lớn đề xuất (**phải chốt trước khi chạy holdout**): `direct_injection`,
-  `indirect_injection`, `data_exfiltration`, `benign_control`, `availability`.
-  Ánh xạ family → nhóm phải viết ra và commit trước.
+- Nhóm lớn đề xuất cho `end_to_end` (**phải chốt trước khi chạy holdout**):
+  `direct_injection`, `indirect_injection`, `data_exfiltration`,
+  `benign_control`. `availability` là scope robustness riêng, không phải nhóm
+  effectiveness trong ma trận chính. Ánh xạ family → nhóm phải viết ra, test và
+  commit trước holdout ở gate 12E.3.
 - **Không được** báo cáo phần trăm theo từng family riêng lẻ. Family chỉ được mô
-  tả **định tính** ("cả 3 case của family X đều bị chặn") hoặc như case study.
+  tả bằng **count đầy đủ** (`matched/total`, error count, không đổi thành %) và
+  case study. Phải liệt kê mọi family, không chọn riêng family thuận lợi.
 - Mọi bảng phải kèm cỡ mẫu $n$. Không có $n$ = không được đăng.
+- Mỗi row config phải đặt **AOMR/ABR và FPR cạnh nhau**, cùng coverage/error count;
+  không được chỉ trình bày metric có lợi. Neutral, component, availability và
+  residual-risk có bảng riêng.
+- **Micro** dùng TP/FP/TN/FN cộng trên toàn bộ case/group hợp lệ rồi tính rate.
+  **Macro** là trung bình không trọng số của rate ở các **nhóm lớn đã khai báo**
+  có mẫu số >0; không macro-average 23 family nhỏ. Luôn công bố group nào tham gia.
+- C4/C5 phải có caveat provider mode ngay cạnh số liệu. Không suy luận interaction
+  bậc cao từ tám config và không gọi guard "redundant" chỉ vì delta được bù hoặc
+  Mock Provider không kích thích nó.
 
 ## 21. Kiểm soát ngẫu nhiên và tính tất định
 
 - Pipeline guard là **rule-based, tất định** — không có sampling.
 - Mock Provider **tất định** (`llm_provider.py`).
 - Retrieval BM25 **tất định** với cùng corpus + query.
+- Config luôn chạy theo thứ tự registry `C0`→`C7`; case sort theo `case_id`;
+  repetition đánh số từ 0. Thứ tự này và expected-case-set hash được lưu trong
+  artifact, không phụ thuộc thứ tự dòng hoặc filesystem enumeration.
 - ⇒ Với cùng code + cùng corpus, kết quả *phán quyết* phải **byte-identical** qua
   các lần chạy. **Runner phải tự kiểm chứng điều này**: chạy lặp lại một config
-  và assert kết quả trùng khớp. `VERIFY DURING IMPLEMENTATION`.
+  và assert mọi field quyết định/content-free telemetry trùng khớp.
 - Chỉ **latency** là biến thiên → chỉ latency mới cần lặp + phân vị.
-- Nếu phát hiện phán quyết **không** tất định ⇒ **dừng ngay**, đó là bug, không
-  phải "nhiễu thống kê".
+- Nếu phát hiện phán quyết **không** tất định ⇒ integrity abort ngay, không ghi
+  artifact final; đó là bug, không phải "nhiễu thống kê".
 
 ## 22. Ghi nhận môi trường và phụ thuộc
 
 Mỗi result artifact **phải** nhúng:
 
 ```yaml
+experiment_id: <sha256 of canonical experiment contract>
+run_id: <experiment_id/config_id/split/provider_id/attempt-N>
+run_status: complete | partial
+config_id: C0_all_on
+config_hash: <sha256 of canonical config JSON>
+expected_case_set_sha256: <sha256 of ordered expected case IDs>
 environment:
   git_commit: <full sha>          # BẮT BUỘC
   git_branch: <branch>
@@ -379,15 +590,24 @@ environment:
   cpu: <processor>
   benchmark_manifest_sha256: <hash của chính manifest>
   benchmark_manifest_status: final
-  dependencies: <pip freeze>      # snapshot
-  enable_audit_log: <bool>
+  dependencies: <sorted name==version inventory, no absolute path>
+  dependencies_sha256: <hash of canonical dependency inventory>
+  enable_audit_log: true
   guard_profile: <profile_id>
-  provider: mock | scripted_double
+  provider_id: mock | <approved scripted-double id>
+  provider_behavior_hash: <canonical implementation/fixture hash>
   repetitions: <R>
   warmup: <int>
+  aggregate_context_limit: <int>
+  provider_output_limit: <int>
+  result_schema_version: <int>
 ```
 
 **Không được chạy trên working tree bẩn.** `git_dirty=true` ⇒ runner abort.
+Editable/direct-reference dependency nào chứa absolute path phải bị từ chối hoặc
+chuẩn hoá thành package/version không có path trước khi ghi artifact. Tất cả
+config trong một experiment phải có cùng commit, manifest, dependency/provider
+identity, safety limits và expected-case set; chỉ profile boolean được khác.
 
 ## 23. Schema artifact kết quả
 
@@ -395,17 +615,38 @@ environment:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
+  "experiment_id": "<canonical experiment hash>",
+  "run_id": "<unique immutable attempt id>",
+  "run_status": "complete",
   "config_id": "C3_no_context",
+  "config_hash": "<sha256>",
   "guard_profile": {"input_guard": true, "rag_context_guard": false, "...": "..."},
   "environment": { "...": "see §22" },
   "split": "validation",
+  "provider_id": "mock",
+  "provider_behavior_hash": "<sha256>",
+  "expected_case_count": 26,
+  "expected_case_set_sha256": "<sha256>",
+  "completed_case_count": 26,
+  "error_case_count": 0,
+  "skipped_case_count": 0,
   "cases": [
     {
       "case_id": "V2-VAL-0001",
+      "case_ordinal": 0,
+      "config_id": "C3_no_context",
       "scenario_family": "indirect_injection",
       "category": "malicious",
       "evaluation_scope": "end_to_end",
+      "git_commit": "<full sha>",
+      "benchmark_manifest_sha256": "<sha256>",
+      "case_status": "completed",
+      "error_category": null,
+      "expected_outcome": {
+        "allowed_final_decisions": ["block"],
+        "allowed_stop_reasons": ["all_context_blocked"]
+      },
       "actual_final_decision": "allow",
       "actual_stop_reason": "allowed",
       "actual_provider_called": true,
@@ -413,20 +654,44 @@ environment:
       "actual_accepted_context_count": 3,
       "actual_redaction_count": 0,
       "correct": false,
-      "latency_ms_samples": {"input_guard": [1.2, 1.1], "total": [42.0, 40.8]}
+      "leakage_eligible": false,
+      "leakage_observed": false,
+      "stage_results": [
+        {
+          "stage": "rag_context_guard",
+          "enabled": false,
+          "decision": null,
+          "reason_code": "rag_context_guard_disabled_ablation",
+          "execution_time_ms": null
+        }
+      ],
+      "latency_ms_samples": {
+        "pipeline_pre_audit_total": [42.0, 40.8],
+        "end_to_end_with_audit": [43.1, 41.9]
+      }
     }
   ],
   "aggregate": {
-    "n_end_to_end": 104,
-    "abr": null,
+    "n_end_to_end": 26,
+    "aomr": null,
     "fpr": null,
     "note": "computed by the analysis step, not the runner"
   }
 }
 ```
 
+`stage_results.execution_time_ms` là timing của canonical first recorded
+repetition; toàn bộ mẫu dùng tính percentile nằm trong `latency_ms_samples`.
+Decision/reason phải giống nhau ở mọi repetition, nếu không integrity abort.
+
+Case exception/timeout vẫn phải có đủ identity/expected fields, `case_status`
+`error` hoặc `timeout`, `error_category` cố định, actual fields có thể `null`,
+`correct=false`, và đúng một record. Không có `skipped` trong run complete.
+
 **Cấm tuyệt đối trong artifact:** query thô, chunk text, giá trị secret, đường dẫn
-tuyệt đối, stack trace. (Cùng hợp đồng an toàn với `StageResult`.)
+tuyệt đối, generated answer, canary, stack trace hoặc exception message tự do.
+Runner và analyzer phải schema-scan recursively; gặp forbidden field/value shape
+là fatal integrity failure, không phải case error.
 
 ## 24. Bố cục file/thư mục đề xuất
 
@@ -438,29 +703,61 @@ scripts/run_v2_evaluation.py            # runner (MỚI)
 scripts/analyze_v2_results.py           # tính metric từ artifact (MỚI, tách khỏi runner)
 
 reports/evaluation-v2/                  # THƯ MỤC MỚI — không đụng reports/evaluation/ (v1)
-  raw/<config_id>-<split>.json
-  analysis/metrics-<split>.json
-  analysis/metrics-<split>.md
+  raw/<experiment_id>/<provider_id>/<split>/<config_id>/<run_id>.json
+  manifests/<experiment_id>-results.json
+  analysis/<experiment_id>/<provider_id>/metrics-<split>.json
+  analysis/<experiment_id>/<provider_id>/metrics-<split>.md
 
 tests/test_guard_profile.py             # MỚI — chứng minh không có bề mặt public
 tests/test_v2_evaluation_runner.py      # MỚI — manifest gate, determinism, abort paths
 ```
 
 **Tách runner khỏi analyzer** là có chủ đích: runner sinh dữ liệu thô, analyzer
-tính metric. Sửa công thức metric không cần chạy lại 960 lần pipeline.
+tính metric. Sửa presentation không cần chạy lại 832 observation, nhưng mọi sửa
+formula sau khi holdout đã xem làm số holdout vô hiệu theo §10.
+
+Mọi JSON được serialize canonical/deterministic vào file tạm cùng filesystem,
+flush + close, rồi atomic replace sang **path mới chưa tồn tại**. Không overwrite.
+Partial/retry dùng `run_id` mới và trường `supersedes_run_id`; artifact cũ bất
+biến. Sau khi file đóng, tạo SHA-256 + byte size trong result manifest. Analyzer
+verify manifest trước khi đọc; nếu platform không hỗ trợ atomic replace đúng
+hợp đồng, implementation phải fail gate thay vì ghi trực tiếp.
 
 **`reports/evaluation/` (v1) tuyệt đối không được ghi đè** — ADR-003 yêu cầu tường
 minh.
 
 ## 25. Chính sách xử lý lỗi và run dở dang
 
-- Bất kỳ exception nào ở một case ⇒ ghi `error_category`, **tiếp tục** các case
-  còn lại, và đánh dấu run là `partial`.
-- **Run `partial` KHÔNG được dùng để báo cáo.** Chỉ run `complete` mới được.
-- Manifest hash lệch ⇒ **abort trước khi ghi bất kỳ file nào** (ADR-003).
-- `git_dirty` ⇒ abort.
-- Phán quyết không tất định ⇒ abort (§21).
-- Runner **không được** ghi đè artifact đã tồn tại; phải fail-closed.
+**Tầng 1 — fatal integrity failure, abort ngay:** wrong/changed commit;
+`git_dirty`; manifest mismatch; mixed/unknown config hoặc provider identity;
+forbidden raw field; output schema corruption; duplicate `(case_id, config_id,
+run_id)`; non-deterministic decision; hoặc attempt ghi đè. Không metric/report
+final nào được sinh từ attempt này.
+
+**Tầng 2 — lỗi riêng một case:**
+
+1. Ghi đúng một record cho case với `case_status=error|timeout`, fixed safe
+   `error_category`, `correct=false`; không ghi exception text/trace/raw input.
+2. Tiếp tục case còn lại chỉ khi DB, identity và containment vẫn ở trạng thái
+   an toàn. Nếu state có thể hỏng, nâng thành fatal integrity abort.
+3. Case lỗi vẫn nằm trong diagnostic error-adjusted denominator: malicious/mixed
+   là FN diagnostic, benign là FP diagnostic. Không drop hoặc thay bằng `allow`.
+4. Timeout có limit cố định trong config hash, tạo record `timeout`, không bị bỏ
+   im lặng và tuân cùng continuation rule.
+5. Bất kỳ unexpected case error/timeout nào làm config run thành `partial`.
+
+**Run `partial`:** được giữ nguyên, hash và báo cáo chẩn đoán với error/count/
+coverage, nhưng **không** được dùng cho primary AOMR/ABR/FPR, marginal hoặc causal
+comparison. Phải có complete rerun trước kết luận cuối.
+
+**Run `complete` khi và chỉ khi:** commit/manifest/config/provider identities
+hợp lệ; mọi expected `case_id` của scope xuất hiện đúng một lần; không missing,
+duplicate, skipped, unexpected error hoặc timeout; result schema + hash hợp lệ.
+
+Không resume/append vào artifact cũ. Retry tạo `run_id`/attempt mới, tham chiếu
+`supersedes_run_id`, giữ cả lịch sử. Holdout partial attempt phải ghi vào
+`04_DECISIONS.md`; retry chỉ được người duy trì phê duyệt khi không đổi code,
+metric, config hoặc benchmark. Nếu cần sửa code/runner, áp dụng quy tắc v3 ở §38.
 
 ## 26. Quy trình tái lập
 
@@ -471,6 +768,10 @@ git checkout <commit ghi trong artifact>
 .venv\Scripts\python.exe scripts/analyze_v2_results.py --split validation
 ```
 Kết quả *phán quyết* phải trùng khớp hoàn toàn. Latency sẽ khác (phần cứng).
+Runner không bao giờ gọi builder/freeze ở chế độ ghi; chỉ verify FINAL manifest.
+Người tái lập phải dùng commit, canonical config/provider identity, expected-case
+hash và dependency inventory trong artifact. Trước analyze, verify result
+manifest SHA-256/size; output chỉnh tay sau run phải bị phát hiện.
 
 ## 27. Giới hạn thống kê
 
@@ -478,8 +779,8 @@ Kết quả *phán quyết* phải trùng khớp hoàn toàn. Latency sẽ khác
 - **Không tính p-value, không tuyên bố "có ý nghĩa thống kê"** cho so sánh giữa
   các config trên cỡ mẫu này.
 - Khoảng tin cậy: nếu tính, phải là CI cho tỉ lệ (Wilson) và phải ghi rằng nó
-  **rất rộng** ở $n$ nhỏ. `VERIFY DURING IMPLEMENTATION` — có thể quyết định không
-  tính, và nói rõ vì sao.
+  **rất rộng** ở $n$ nhỏ. Có thể quyết định không tính, nhưng phải commit quyết
+  định + lý do trước holdout.
 - **Không so sánh theo từng family bằng phần trăm** (§20).
 
 ## 28. Rủi ro construct validity
@@ -498,7 +799,12 @@ Kết quả *phán quyết* phải trùng khớp hoàn toàn. Latency sẽ khác
 - **So sánh run từ các commit khác nhau** — cấm tuyệt đối. Mọi config trong một
   thí nghiệm phải chạy trên **cùng một commit**; commit đó nhúng trong artifact
   (§22). Analyzer **phải abort** nếu các artifact có `git_commit` khác nhau.
-- **Sửa code giữa các lần ablation** — cấm. Toàn bộ 960 run phải cùng một commit.
+- Analyzer cũng abort khi mixed manifest hash, expected-case-set hash, provider
+  mode/behavior hash, dependency/safety-limit identity; config hash không khớp
+  registry; missing/duplicate case; forbidden raw field; invalid result hash;
+  hoặc primary matrix có bất kỳ config `partial`/thiếu C0-C7.
+- **Sửa code giữa các lần ablation** — cấm. Toàn bộ 832 observation chính phải
+  cùng một immutable evaluation commit và experiment identity.
 - **Latency bị nhiễu** bởi tải máy — kiểm soát bằng warm-up, lặp, và ghi môi trường.
 
 ## 30. Rủi ro external validity
@@ -508,21 +814,27 @@ Kết quả *phán quyết* phải trùng khớp hoàn toàn. Latency sẽ khác
   **không** đo được rò rỉ end-to-end (§15).
 - Retrieval **BM25 từ vựng**, không ngữ nghĩa.
 - Guard **rule-based**, không phải model.
+- Ma trận ablation chạy in-process để giữ profile nội bộ, nên không trực tiếp đo
+  FastAPI/Pydantic perimeter ở từng config; optional C0 HTTP parity chỉ là smoke.
 - ⇒ Kết quả nói về **hệ thống này, trên benchmark này**. Không ngoại suy ra
   "production LLM security".
 
 ## 31. Những claim luận văn KHÔNG ĐƯỢC đưa ra
 
 1. ❌ "Hệ thống chặn được X% tấn công prompt injection **trong thực tế**."
-   → Chỉ được: "trên benchmark v2, ở cấu hình C0, ABR = X% (n=...)".
+   → Chỉ được: "trên benchmark v2, ở cấu hình C0, AOMR/ABR-proxy = X% (n=...)".
 2. ❌ "DLP ngăn rò rỉ dữ liệu." → Mock Provider không echo context; rò rỉ chỉ đo
-   được bằng provider double (§15).
+   được bằng provider double (§15). Cùng giới hạn áp dụng cho necessity claim của
+   Output Guard.
 3. ❌ "Guard X chiếm Y% hiệu quả phòng thủ." → $\Delta_g$ không cộng tính (§19).
 4. ❌ "Hệ thống bắt 100% family Z." → cỡ mẫu family quá nhỏ (§20).
 5. ❌ "Hệ thống hiểu ý đồ tấn công." → rule-based (§28).
 6. ❌ "Sẵn sàng production." → PoC học thuật, dữ liệu tổng hợp.
 7. ❌ Bất kỳ số liệu 12E nào **trước khi** runner được viết, audit, và chạy thật.
 8. ❌ "Có ý nghĩa thống kê" ở $n$ này (§27).
+9. ❌ "Ma trận đã đánh giá đầy đủ API perimeter." → matrix chạy in-process (§8).
+10. ❌ "Guard C4/C5 dư thừa vì delta bằng 0" khi dùng Mock Provider hoặc còn
+    compensating guard.
 
 ## 32. Cân nhắc bảo mật và red-team
 
@@ -538,6 +850,20 @@ Kết quả *phán quyết* phải trùng khớp hoàn toàn. Latency sẽ khác
   trigger combos. Đây là **probe lúc evaluation**, không phải case benchmark mới.
 - Artifact kết quả không được chứa payload thô (§23).
 
+**Checklist test bắt buộc riêng cho `C6_none`:**
+
+1. Không thể chọn từ request field, query/header, environment, `Settings` hoặc
+   public route; static scan xác nhận `app/api/` không import profile registry.
+2. Chỉ dùng SQLite tạm ngoài repository, không mở/tạo `data/retrieval.db`.
+3. Chỉ Mock Provider hoặc scripted double offline allow-listed; network socket/
+   external provider path phải bị fail test.
+4. Aggregate/output bounds và separator accounting vẫn chạy.
+5. Audit redaction + safe fallback vẫn chạy dù DLP guard tắt.
+6. Result/audit/debug output không chứa query, chunk, answer, canary hoặc secret.
+7. Sau run, serving singleton/default vẫn `ALL_ON` và không có state mutation.
+8. C6 artifact mang config/provider/commit/manifest identity và không thể trộn
+   với public parity hoặc scripted-double namespace khác.
+
 ## 33. Hạn chế phạm vi
 
 **Được sửa:** `app/core/pipeline.py` (thêm `GuardProfile`), `app/services/rag_query.py`
@@ -547,17 +873,17 @@ Kết quả *phán quyết* phải trùng khớp hoàn toàn. Latency sẽ khác
 
 **Cấm sửa:** 9 artifact `datasets/v2/` (FINAL freeze) · logic bên trong bất kỳ
 guard nào · `reports/evaluation/` (v1) · `redteam/` · `report-latex-template/` ·
-`requirements.txt` · `app/api/` (trừ khi test chứng minh cần, và chỉ để **siết**
-chứ không nới).
+`requirements.txt` · `app/api/`. HTTP parity dùng route Phase 12C nguyên trạng;
+không được sửa route để nhận profile hay tạo bề mặt cấu hình ablation.
 
 ## 34. Các giai đoạn triển khai
 
 | Giai đoạn | Nội dung | Gate |
 |---|---|---|
-| **12E.0** | Kế hoạch này được audit và duyệt | Code X + Gemini + Grok + người duy trì |
+| **12E.0** | Kế hoạch sửa theo adjudication, re-audit và được duyệt | **PASS** — triple re-audit trên `d82bac7828e2e54520e0aa29271e820a52ec6f47` |
 | **12E.1** | `GuardProfile` + tham số hoá pipeline + test chống bề mặt public | Code X |
 | **12E.2** | Runner + manifest gate + determinism check (chỉ development) | Code X |
-| **12E.3** | Analyzer + metric + chốt ánh xạ family→nhóm (chỉ validation) | Code X + Gemini |
+| **12E.3** | Analyzer + metric + result-integrity manifest + chốt/commit ánh xạ family→nhóm (chỉ validation) | Code X + Gemini |
 | **12E.4** | **Chốt đóng băng runner.** Chạy holdout MỘT LẦN | Người duy trì phê duyệt trước |
 | **12E.5** | Phân tích + viết báo cáo, kiểm soát claim | Gemini + Grok |
 
@@ -590,6 +916,14 @@ Theo `01_AGENT_ROLES.md`:
 | G3 | Trước 12E.4 | **Người duy trì** | Phê duyệt tường minh chạy holdout |
 | G4 | Sau 12E.5 | Gemini + Grok | Báo cáo không vượt quá claim cho phép |
 
+**Trạng thái hiện tại:** G0 **PASS**. Plan commit
+`d82bac7828e2e54520e0aa29271e820a52ec6f47` đã nhận Code X technical **PASS**,
+Gemini academic **PASS** và Grok red-team **PASS**. Remaining Critical issues:
+**None**; remaining blocking Major issues: **None**; required corrections before
+implementation: **None**. Master plan được **APPROVED FOR IMPLEMENTATION**,
+nhưng Phase 12E implementation vẫn **NOT STARTED**, evaluation results **NONE**
+và holdout executed **NO**.
+
 ## 37. Tiêu chí chấp nhận
 
 1. `GuardProfile` tồn tại, mặc định `ALL_ON`, **không** có bề mặt public.
@@ -598,28 +932,44 @@ Theo `01_AGENT_ROLES.md`:
 4. Runner verify manifest SHA-256 và abort trước khi ghi file nếu lệch.
 5. Runner abort trên `git_dirty`.
 6. Phán quyết tất định qua các lần chạy (assert trong test).
-7. Analyzer abort nếu các artifact có `git_commit` khác nhau.
-8. Artifact chứa đủ metadata môi trường (§22), không chứa nội dung thô.
-9. Toàn bộ suite pass; không cài gói mới.
-10. Ba audit gate PASS.
+7. Mọi scope có algorithm + expected-case completeness test; corpus loader giữ
+   đúng source policy và không index rejected-mode document.
+8. Analyzer abort trên mixed commit/manifest/config/provider, partial primary
+   matrix, missing/duplicate case, forbidden raw field hoặc hash mismatch.
+9. Artifact có run/config/provider identity, safe stage telemetry, atomic/no-
+   overwrite semantics, result manifest và không chứa nội dung thô.
+10. Timeout/error sinh đúng một record; partial run chỉ diagnostic; complete run
+    mới dùng cho primary comparison.
+11. C6 checklist §32 pass; C4/C5 provider-mode segregation được test.
+12. AOMR/FPR + coverage/error cùng bảng; group mapping commit trước holdout.
+13. Toàn bộ suite pass; không cài gói mới.
+14. Ba audit gate PASS.
 
 ## 38. Chính sách rollback và chạy lại
 
 - **Trước khi chạy holdout:** tự do sửa runner, chạy lại development/validation
-  bao nhiêu lần cũng được.
-- **Sau khi chạy holdout:** mọi thay đổi lên guard/metric/runner ⇒ số holdout
+  bao nhiêu lần cũng được; mỗi attempt vẫn có run ID riêng, không overwrite.
+- **Sau complete holdout run:** mọi thay đổi lên guard/metric/runner ⇒ số holdout
   **vô hiệu**. Không được "chạy lại holdout cho đẹp".
-- Nếu phát hiện **bug hạ tầng** (không phải kết quả xấu) sau khi chạy holdout:
+- Nếu holdout attempt `partial` chỉ vì interruption/timeout ngoài code, giữ
+  artifact diagnostic và chỉ retry **cùng commit/config/provider/metric** sau
+  phê duyệt tường minh; không xem partial để tuning.
+- Nếu phát hiện **bug hạ tầng cần sửa code** (không phải kết quả xấu) sau khi
+  đã chạy holdout:
   ghi lại minh bạch, sửa bug, và **chạy lại toàn bộ trên benchmark v3 mới** —
   hoặc báo cáo kết quả cũ kèm ghi chú bug. Người duy trì quyết định. Không được
   im lặng chạy lại.
-- Mọi lần chạy holdout phải được ghi vào `04_DECISIONS.md`.
+- Mọi attempt holdout, complete hoặc partial, phải được ghi vào `04_DECISIONS.md`
+  với run ID, status, commit, manifest/config hash và quyết định retry.
 
 ## 39. Việc hoãn lại
 
 - Ablation profile bậc cao (tương tác >2 lớp) — cỡ mẫu không cho phép.
-- Confidence interval — `VERIFY DURING IMPLEMENTATION`, có thể quyết định bỏ.
+- Confidence interval — có thể bỏ với lý do cỡ mẫu nhỏ ghi rõ; nếu dùng chỉ
+  Wilson interval ở aggregate/predeclared group, không p-value claim.
 - Semantic/homoglyph resistance (Code X 12C deferrable) — future work.
+- Encoded payload và broader Unicode family — future benchmark/probe, không
+  thêm vào 9 artifact v2 đã freeze.
 - Trusted-internal ablation profile (Code X 12C deferrable) — future work.
 - Non-finite `retrieval_score` schema hardening (Code X 12C Minor #2) — optional.
 - Live LLM provider — ngoài phạm vi đồ án (AGENT_RULES rule 4).
@@ -632,14 +982,18 @@ Phase 12E là **DONE** khi và chỉ khi **tất cả** thoả:
 2. Hành vi mặc định byte-identical với 12C (regression test pass).
 3. Runner + analyzer hoạt động, có manifest gate, abort trên dirty tree và non-determinism.
 4. Development + validation đã chạy, runner đã đóng băng.
-5. **Holdout đã chạy đúng MỘT LẦN**, sau phê duyệt tường minh của người duy trì.
+5. **Holdout có đúng một complete/reportable run**, sau phê duyệt tường minh;
+   mọi partial attempt (nếu có) được giữ và adjudicate công khai.
 6. **Không có sửa đổi guard/metric/runner nào sau khi xem kết quả holdout.**
 7. Báo cáo tồn tại, **kèm cỡ mẫu ở mọi bảng**, tuân thủ §20 (không có phần trăm
    theo family) và §31 (không có claim bị cấm).
 8. Giới hạn rò rỉ (§15) được khai báo tường minh, không bị che.
-9. Full test suite pass; `verify_phase.ps1` toàn PASS; không cài gói mới.
-10. **Code X PASS + Gemini PASS + Grok PASS**, không còn Critical / blocking Major.
-11. Người duy trì tuyên bố DONE. **Không agent nào được tự tuyên bố.**
+9. Mọi primary config complete, đủ case; partial/error report tách biệt; result
+   hashes, commit/manifest/config/provider identities verify được.
+10. C6 safety checklist pass; public HTTP vẫn ALL_ON; không raw content artifact.
+11. Full test suite pass; `verify_phase.ps1` toàn PASS; không cài gói mới.
+12. **Code X PASS + Gemini PASS + Grok PASS**, không còn Critical / blocking Major.
+13. Người duy trì tuyên bố DONE. **Không agent nào được tự tuyên bố.**
 
 ---
 

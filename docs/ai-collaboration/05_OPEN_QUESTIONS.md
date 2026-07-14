@@ -6,13 +6,16 @@ Câu hỏi chưa trả lời và việc đã hoãn lại. Không để chúng bi
 
 ## Q-001 — Ablation profile nào cho Phase 12E?
 
-**Trạng thái:** ĐÃ CÓ ĐỀ XUẤT trong master plan (`06_PHASE_12E_MASTER_PLAN.md` §5-6),
-chờ audit G0
+**Trạng thái:** **ĐÃ ĐÓNG — G0 PASS; master plan APPROVED FOR IMPLEMENTATION**
 
 Đề xuất 8 config: C0_all_on, C1_no_input, C2_no_provenance, C3_no_context,
 C4_no_dlp, C5_no_output, C6_none, C7_no_context_no_output. **Không** chạy toàn bộ
-2⁵=32 tổ hợp (cỡ mẫu không cho phép kết luận tương tác bậc cao). Chốt cuối sau
-khi Code X/Gemini/Grok audit kế hoạch.
+2⁵=32 tổ hợp (cỡ mẫu không cho phép kết luận tương tác bậc cao). C0-C7 dùng một
+seam in-process; public HTTP luôn `ALL_ON`. Chưa được coi là approved cho tới khi
+ba re-audit PASS và người duy trì phê duyệt. Điều kiện đó đã hoàn thành trên
+plan commit `d82bac7828e2e54520e0aa29271e820a52ec6f47`: Code X, Gemini và Grok
+đều trả **PASS**, không còn Critical, blocking Major hoặc correction bắt buộc.
+Triển khai Phase 12E chưa bắt đầu; chưa có kết quả evaluation và chưa chạy holdout.
 
 ---
 
@@ -48,26 +51,15 @@ revoke và tạo lại** — chưa xác nhận đã làm.
 
 ---
 
-## Q-005 — Phase 12C còn treo một vòng Code X re-audit
+## Q-005 — Phase 12C final Code X re-audit
 
-**Trạng thái:** ĐÃ ĐIỀU TRA — audit request soạn sẵn, chờ bạn chạy Code X
+**Trạng thái:** **ĐÃ ĐÓNG — PASS**
 
-**Đây là blocker duy nhất còn lại trước Phase 12E.**
+Code X final re-audit tại `9fed074481f46ce5e3ae2bfa20abcec3e36661fb`
+xác nhận nested response construction đã được bảo vệ, không còn Critical hoặc
+blocking Major và không có required action trước DONE. Báo cáo authoritative:
+`docs/modernization-ai-reviews/codex-phase-12c-final-reaudit.md`.
 
-Điều tra (2026-07-13) cho thấy:
-
-- Code X audit cuối trả **REVISE** với finding: nested `ProvenanceItemResponse`
-  dựng ngoài block bảo vệ.
-- **Fix ĐÃ triển khai** ở commit `56b749a`, kèm 5 regression test
-  (`test_nested_*`, `test_response_construction_failure_*` trong
-  `tests/test_rag_query_routes.py`).
-- Xác minh trực tiếp trong code: `app/api/routes.py:349-401` — cả ba model
-  response giờ dựng trong **một block `try` duy nhất**, audit commit **sau khi**
-  toàn bộ cây response dựng xong.
-- **`app/` KHÔNG thay đổi** kể từ commit merge `ad555c9`
-  (`git log ad555c9..HEAD -- app/` trống).
-- **Nhưng chưa có báo cáo Code X re-audit nào xác nhận PASS** → 12C vẫn In Review.
-
-**Việc cần làm:** dán khối prompt trong
-`handoffs/phase-12c-final-reaudit.md` vào Code X. Không cần Gemini/Grok audit
-lại vì code họ đã xem không đổi.
+Q-005 không còn chặn Phase 12E. G0 plan re-audit sau đó cũng đã đóng bằng triple
+**PASS**; xem `docs/modernization-ai-reviews/phase-12e-plan-audit-resolution.md`.
+Master plan đã được phê duyệt cho triển khai, nhưng implementation chưa bắt đầu.

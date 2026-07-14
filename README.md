@@ -2,7 +2,7 @@
 
 **Xây dựng Hệ thống Bảo mật LLM Chống Tấn công Prompt Injection và Data Poisoning trong Môi trường Doanh nghiệp**
 
-> Status: **Phase 10 (v1 report track) In Review; Phase 12C (end-to-end RAG security pipeline) is DONE — final independent Code X re-audit PASS, no remaining Critical or blocking Major findings; Phase 12D (independent v2 benchmark design/generation/freeze) is DONE — Code X final technical verification PASS, Gemini final academic audit PASS, Grok final red-team audit PASS, and the 9-artifact benchmark manifest is FINAL; Phase 12E (evaluation) has not started.** The lab-scale gateway, guards, offline mock provider, controlled v1 evaluation harness, and final v1 report content are integrated (Phase 0-10). The separate v2 wave has added SQLite FTS5/BM25 retrieval, server-controlled provenance, a guarded end-to-end RAG pipeline, and a final-frozen, deterministic 120-case v2 benchmark for a future Phase 12E evaluation. This is a university internship proof-of-concept (PoC), not a production system.
+> Status: **Phase 10 (v1 report track) In Review; Phase 12C (end-to-end RAG security pipeline) is DONE — final independent Code X re-audit PASS, no remaining Critical or blocking Major findings; Phase 12D (independent v2 benchmark design/generation/freeze) is DONE — Code X final technical verification PASS, Gemini final academic audit PASS, Grok final red-team audit PASS, and the 9-artifact benchmark manifest is FINAL; Phase 12E G0 planning gate is PASS and its master plan is APPROVED FOR IMPLEMENTATION, but implementation has NOT STARTED, evaluation results are NONE, and holdout execution is NO.** The lab-scale gateway, guards, offline mock provider, controlled v1 evaluation harness, and final v1 report content are integrated (Phase 0-10). The separate v2 wave has added SQLite FTS5/BM25 retrieval, server-controlled provenance, a guarded end-to-end RAG pipeline, and a final-frozen, deterministic 120-case v2 benchmark for a future Phase 12E evaluation. This is a university internship proof-of-concept (PoC), not a production system.
 
 ## Project Summary
 
@@ -624,7 +624,7 @@ retrieval, residual paraphrase/encoding bypasses, benchmark-author/
 guard-author overlap, and the exact tested boundary of the bilingual
 translation-detection lexicon). Phase 12D produces benchmark artifacts
 only — no security evaluation, no ASR/FPR/FNR numbers, no ablation
-results; that is Phase 12E, which has not started. **Phase 12D is DONE**:
+results; that is Phase 12E, whose implementation has not started. **Phase 12D is DONE**:
 after the three fix rounds, the committed candidate (commit `4e10a2e`)
 passed all remaining multidisciplinary gates — Code X final technical
 verification **PASS**, Gemini final academic audit **PASS**, Grok final
@@ -640,6 +640,21 @@ predeclared high-level attack-group levels with adequate support;
 individual-family outcomes are descriptive only. Any
 future change to the frozen artifacts is a new benchmark version (v3)
 requiring fresh audits, per ADR-003's Rule of Freezing.
+
+### Phase 12E G0 Planning Gate (PASS — implementation not started)
+
+The Phase 12E master plan at audited commit
+`d82bac7828e2e54520e0aa29271e820a52ec6f47` passed all three final G0
+reviews: [Code X technical verification](docs/modernization-ai-reviews/codex-phase-12e-plan-final-verification.md),
+[Gemini academic re-audit](docs/modernization-ai-reviews/gemini-phase-12e-plan-final-academic-reaudit.md),
+and [Grok red-team re-audit](docs/modernization-ai-reviews/grok-phase-12e-plan-final-red-team-reaudit.md).
+All three verdicts are **PASS**; remaining Critical issues, blocking Major
+issues, and required corrections before implementation are **None**. The
+master plan is therefore **APPROVED FOR IMPLEMENTATION**. This closes only
+the planning gate: Phase 12E implementation is **NOT STARTED**, evaluation
+results are **NONE**, and holdout execution is **NO**. All documented
+limitations and deferred recommendations remain in force, and implementation
+requires a separate explicit task.
 
 Everything before Phase 4 was documentation/data only — Phase 0–3.1 produced scaffolding, research, architecture/threat-model docs, and the synthetic benchmark (`datasets/`, `redteam/`). See [PROJECT_PLAN.md](PROJECT_PLAN.md) for the full roadmap.
 
