@@ -23,6 +23,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.core.config import load_settings
+from app.core.decisions import Decision
 from scripts import run_v2_evaluation as runner
 
 
@@ -230,6 +231,7 @@ EXPECTED_OUTCOME_KEYS = frozenset(
 STAGE_KEYS = frozenset(
     {"stage", "enabled", "decision", "reason_code", "execution_time_ms"}
 )
+VALID_STAGE_DECISIONS = frozenset(decision.value for decision in Decision)
 LATENCY_SAMPLE_KEYS = frozenset(
     {"pipeline_pre_audit_total", "end_to_end_with_audit"}
 )
@@ -738,9 +740,21 @@ def _validate_stage_results(value: Any, location: str) -> None:
     for index, stage in enumerate(value):
         item = _exact_keys(stage, STAGE_KEYS, f"{location}[{index}]")
         _string(item["stage"], f"{location}[{index}].stage", safe_id=True)
-        if type(item["enabled"]) is not bool:
-            _fail("case_schema", f"{location}[{index}].enabled must be boolean")
-        _string(item["decision"], f"{location}[{index}].decision", safe_id=True)
+        enabled = _boolean(item["enabled"], f"{location}[{index}].enabled")
+        if enabled:
+            decision = _string(
+                item["decision"], f"{location}[{index}].decision", safe_id=True
+            )
+            if decision not in VALID_STAGE_DECISIONS:
+                _fail(
+                    "case_schema",
+                    f"{location}[{index}].decision is not a supported decision",
+                )
+        elif item["decision"] is not None:
+            _fail(
+                "case_schema",
+                f"{location}[{index}].decision must be null when the stage is disabled",
+            )
         _string(item["reason_code"], f"{location}[{index}].reason_code", safe_id=True)
         _finite_number(
             item["execution_time_ms"],

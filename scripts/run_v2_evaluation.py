@@ -594,14 +594,13 @@ def _validate_output_root(output_root: Path, repo_root: Path, benchmark_root: Pa
     resolved = output_root.expanduser().resolve()
     repo = repo_root.resolve()
     benchmark = benchmark_root.resolve()
-    approved_repo_output = (repo / "reports" / "evaluation-v2").resolve()
 
-    if resolved == repo or resolved == benchmark or _is_within(resolved, benchmark):
+    if resolved == benchmark or _is_within(resolved, benchmark):
         raise IntegrityError("output_containment", "output root overlaps protected repository input")
-    if _is_within(resolved, repo) and not _is_within(resolved, approved_repo_output):
+    if resolved == repo or _is_within(resolved, repo):
         raise IntegrityError(
             "output_containment",
-            "repository-local output is allowed only under reports/evaluation-v2",
+            "output root must remain outside the repository",
         )
     if resolved.exists() and not resolved.is_dir():
         raise IntegrityError("output_containment", "output root must be a directory")
@@ -1035,8 +1034,15 @@ def _project_stage_results(result: RagPipelineResult, profile: GuardProfile) -> 
             raise IntegrityError("unsafe_stage_reason", "stage reason code is not a safe identifier")
         profile_field = GUARD_STAGE_TO_FIELD.get(stage.stage)
         enabled = getattr(profile, profile_field) if profile_field else True
-        decision = stage.decision.value if stage.decision is not None else None
-        execution_time = result.latency_ms.get(stage.stage)
+        # Artifact telemetry reserves null decisions for disabled ablation
+        # stages. Successful informational stages use neutral ALLOW while
+        # their reason code preserves the precise execution outcome.
+        decision = (
+            (stage.decision or Decision.ALLOW).value
+            if enabled
+            else None
+        )
+        execution_time = result.latency_ms.get(stage.stage) if enabled else None
         projected.append(
             {
                 "stage": stage.stage,

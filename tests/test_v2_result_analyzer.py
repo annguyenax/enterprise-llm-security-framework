@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+from app.core.decisions import Decision
+from app.core.pipeline import RagPipelineResult, StageResult
 from scripts import analyze_v2_results as analyzer
 from scripts import run_v2_evaluation as runner
 
@@ -30,7 +32,46 @@ def _hooks() -> analyzer.AnalyzerHooks:
     return analyzer.AnalyzerHooks(repository_state_loader=lambda _root: _state())
 
 
-def _safe_outcome(label: dict) -> runner.ScopeOutcome:
+def _runner_projected_ablation_stages() -> tuple[dict, ...]:
+    result = RagPipelineResult(
+        request_id="safe-request-id",
+        final_decision=Decision.ALLOW,
+        answer="raw answer that must not enter telemetry",
+        retrieved_count=1,
+        accepted_context_count=1,
+        rejected_context_count=0,
+        stage_results=(
+            StageResult(
+                stage="input_guard",
+                decision=None,
+                reason_code="input_guard_disabled_ablation",
+                detail="raw disabled-stage detail",
+            ),
+            StageResult(
+                stage="retrieval",
+                decision=None,
+                reason_code="retrieval_completed",
+                detail="raw informational-stage detail",
+            ),
+            StageResult(
+                stage="rag_context_guard",
+                decision=Decision.ALLOW,
+                reason_code="context_guard_allow",
+                detail="raw enabled-stage detail",
+            ),
+        ),
+        latency_ms={"retrieval": 0.5, "rag_context_guard": 1.5, "total": 2.0},
+        stop_reason="allowed",
+        provider_called=True,
+    )
+    return runner._project_stage_results(  # noqa: SLF001
+        result, runner.CONFIG_REGISTRY["C1_no_input"].profile
+    )
+
+
+def _safe_outcome(
+    label: dict, *, stage_results: tuple[dict, ...] = ()
+) -> runner.ScopeOutcome:
     return runner.ScopeOutcome(
         final_decision=label["allowed_final_decisions"][0],
         stop_reason=label["allowed_stop_reasons"][0],
@@ -40,7 +81,7 @@ def _safe_outcome(label: dict) -> runner.ScopeOutcome:
         rejected_context_count=0,
         redaction_count=0,
         dlp_finding_categories={},
-        stage_results=(),
+        stage_results=stage_results,
         pipeline_pre_audit_ms=1.0,
         end_to_end_with_audit_ms=2.0,
     )
@@ -79,6 +120,11 @@ def _build_matrix(root: Path, *, split: str = "development") -> tuple[Path, ...]
         for ordinal, case_id in enumerate(expected_ids):
             case = cases_by_id[case_id]
             label = benchmark.labels_by_id[case_id]
+            stage_results = (
+                _runner_projected_ablation_stages()
+                if config_id == "C1_no_input" and ordinal == 0
+                else ()
+            )
             first = runner._case_completed_record(  # noqa: SLF001
                 case=case,
                 label=label,
@@ -87,7 +133,7 @@ def _build_matrix(root: Path, *, split: str = "development") -> tuple[Path, ...]
                 repository=repository,
                 manifest=manifest,
                 split=split,
-                outcome=_safe_outcome(label),
+                outcome=_safe_outcome(label, stage_results=stage_results),
             )
             records.append(runner._merge_repetition_latency(first, first))  # noqa: SLF001
 
@@ -274,6 +320,42 @@ def _make_first_case_error(result: dict) -> None:
     result["error_case_count"] = 1
 
 
+def test_analyzer_accepts_runner_projected_disabled_stage_contract():
+    projected = list(_runner_projected_ablation_stages())
+
+    assert projected[0] == {
+        "stage": "input_guard",
+        "enabled": False,
+        "decision": None,
+        "reason_code": "input_guard_disabled_ablation",
+        "execution_time_ms": None,
+    }
+    assert projected[1]["enabled"] is True
+    assert projected[1]["decision"] == "allow"
+    assert projected[1]["reason_code"] == "retrieval_completed"
+    assert projected[2]["enabled"] is True
+    assert projected[2]["decision"] == "allow"
+    assert all("detail" not in stage for stage in projected)
+    analyzer._validate_stage_results(projected, "case.stage_results")  # noqa: SLF001
+
+
+def test_analyzer_rejects_non_null_decision_for_disabled_stage():
+    projected = list(_runner_projected_ablation_stages())
+    projected[0] = {**projected[0], "decision": "allow"}
+
+    with pytest.raises(analyzer.AnalysisIntegrityError, match="must be null"):
+        analyzer._validate_stage_results(projected, "case.stage_results")  # noqa: SLF001
+
+
+@pytest.mark.parametrize("invalid_decision", [None, "unexpected"])
+def test_analyzer_requires_supported_non_null_decision_for_enabled_stage(invalid_decision):
+    projected = list(_runner_projected_ablation_stages())
+    projected[1] = {**projected[1], "decision": invalid_decision}
+
+    with pytest.raises(analyzer.AnalysisIntegrityError):
+        analyzer._validate_stage_results(projected, "case.stage_results")  # noqa: SLF001
+
+
 @pytest.fixture(scope="module")
 def synthetic_matrix(tmp_path_factory) -> tuple[Path, tuple[Path, ...]]:
     root = tmp_path_factory.mktemp("phase12e3-matrix")
@@ -288,6 +370,15 @@ def successful_analysis(synthetic_matrix):
         hooks=_hooks(),
     )
     return root, manifests, written
+
+
+def test_authentic_ablated_runner_stage_record_passes_full_analysis(successful_analysis):
+    _root, manifests, _written = successful_analysis
+    c1_manifest = next(path for path in manifests if path.parent.name == "C1_no_input")
+    result = json.loads((c1_manifest.parent / "result.json").read_text(encoding="utf-8"))
+    projected = result["cases"][0]["stage_results"]
+
+    assert projected == list(_runner_projected_ablation_stages())
 
 
 def test_analyzer_publishes_exact_three_canonical_deterministic_files(

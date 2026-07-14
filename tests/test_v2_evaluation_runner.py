@@ -182,7 +182,7 @@ def _minimal_label() -> dict:
     }
 
 
-def _pipeline_result() -> RagPipelineResult:
+def _pipeline_result(*, input_decision: Decision | None = Decision.ALLOW) -> RagPipelineResult:
     return RagPipelineResult(
         request_id="safe-request-id",
         final_decision=Decision.ALLOW,
@@ -193,8 +193,12 @@ def _pipeline_result() -> RagPipelineResult:
         stage_results=(
             StageResult(
                 stage="input_guard",
-                decision=Decision.ALLOW,
-                reason_code="input_guard_decision",
+                decision=input_decision,
+                reason_code=(
+                    "input_guard_disabled_ablation"
+                    if input_decision is None
+                    else "input_guard_decision"
+                ),
                 detail="raw detail that must never be projected",
             ),
         ),
@@ -526,13 +530,26 @@ def test_expected_case_set_hash_is_order_sensitive_and_stable():
     assert runner._case_set_hash(ids) != runner._case_set_hash(tuple(reversed(ids)))  # noqa: SLF001
 
 
-def test_output_root_cannot_overlap_benchmark_or_unapproved_repo_path(tmp_path):
+def test_output_root_must_be_an_external_directory(tmp_path):
     benchmark = runner.ROOT / "datasets" / "v2"
     with pytest.raises(runner.IntegrityError, match="overlaps"):
         runner._validate_output_root(benchmark, runner.ROOT, benchmark)  # noqa: SLF001
-    with pytest.raises(runner.IntegrityError, match="only under"):
+    with pytest.raises(runner.IntegrityError, match="outside"):
+        runner._validate_output_root(runner.ROOT, runner.ROOT, benchmark)  # noqa: SLF001
+    with pytest.raises(runner.IntegrityError, match="outside"):
+        runner._validate_output_root(  # noqa: SLF001
+            runner.ROOT / "reports" / "evaluation-v2", runner.ROOT, benchmark
+        )
+    with pytest.raises(runner.IntegrityError, match="outside"):
         runner._validate_output_root(runner.ROOT / "data" / "bad", runner.ROOT, benchmark)  # noqa: SLF001
-    assert runner._validate_output_root(tmp_path / "external", runner.ROOT, benchmark)  # noqa: SLF001
+
+    external = tmp_path / "external"
+    assert runner._validate_output_root(external, runner.ROOT, benchmark) == external.resolve()  # noqa: SLF001
+
+    external_file = tmp_path / "not-a-directory"
+    external_file.write_text("not a directory", encoding="utf-8")
+    with pytest.raises(runner.IntegrityError, match="directory"):
+        runner._validate_output_root(external_file, runner.ROOT, benchmark)  # noqa: SLF001
 
 
 def test_external_or_unapproved_provider_is_rejected():
@@ -686,18 +703,25 @@ def test_component_retrieval_uses_frozen_query_not_relevant_document_ids():
 
 def test_safe_stage_projection_excludes_detail_and_marks_disabled_stage():
     projected = runner._project_stage_results(  # noqa: SLF001
-        _pipeline_result(), runner.CONFIG_REGISTRY["C1_no_input"].profile
+        _pipeline_result(input_decision=None),
+        runner.CONFIG_REGISTRY["C1_no_input"].profile,
     )
     assert projected == (
         {
             "stage": "input_guard",
             "enabled": False,
-            "decision": "allow",
-            "reason_code": "input_guard_decision",
-            "execution_time_ms": 1.5,
+            "decision": None,
+            "reason_code": "input_guard_disabled_ablation",
+            "execution_time_ms": None,
         },
     )
     assert "detail" not in projected[0]
+
+    enabled = runner._project_stage_results(  # noqa: SLF001
+        _pipeline_result(), runner.CONFIG_REGISTRY["C0_all_on"].profile
+    )
+    assert enabled[0]["enabled"] is True
+    assert enabled[0]["decision"] == "allow"
 
 
 @pytest.mark.parametrize(
