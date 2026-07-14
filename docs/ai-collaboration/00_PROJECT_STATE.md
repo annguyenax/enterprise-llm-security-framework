@@ -14,14 +14,15 @@
 | 12B | SQLite FTS5/BM25 retrieval foundation | Done |
 | 12C | End-to-end RAG security pipeline | **DONE** — Code X final re-audit PASS |
 | 12D | Benchmark V2 (thiết kế / sinh / freeze) | **DONE** — manifest FINAL |
-| 12E | Đánh giá + ablation trên benchmark v2 | **G0 PASS — APPROVED FOR IMPLEMENTATION; triển khai CHƯA BẮT ĐẦU** |
+| 12E | Đánh giá + ablation trên benchmark v2 | **12E.1 G1 PASS; 12E.2 CHƯA BẮT ĐẦU** |
 
 **Cả hai phase chặn 12E (12C và 12D) đều đã đóng bằng audit độc lập PASS.**
-G0 của Phase 12E cũng đã đóng bằng triple PASS trên plan commit
-`d82bac7828e2e54520e0aa29271e820a52ec6f47`. Việc triển khai không tự bắt đầu;
-vẫn cần một task/go-ahead triển khai riêng theo `AGENT_RULES.md` rule 12.
+G0 của Phase 12E đã đóng bằng triple PASS trên plan commit
+`d82bac7828e2e54520e0aa29271e820a52ec6f47`. Foundation 12E.1 sau đó được
+triển khai tại `8b1e485f128d08adc4baeed499363886e8969a18` và đã qua G1 audit độc lập.
+12E.2 không tự bắt đầu; vẫn cần task/go-ahead riêng theo `AGENT_RULES.md` rule 12.
 
-## Phase 12E — trạng thái planning gate G0
+## Phase 12E — trạng thái gate hiện tại
 
 - Ba audit kế hoạch tại baseline `a5afcea` đều trả **REVISE**:
   Code X technical · Gemini academic · Grok red-team.
@@ -36,10 +37,22 @@ vẫn cần một task/go-ahead triển khai riêng theo `AGENT_RULES.md` rule 1
 - Remaining Critical issues: **None**. Remaining blocking Major issues:
   **None**. Required corrections before implementation: **None**.
 - **G0 PASS. Master plan APPROVED FOR IMPLEMENTATION.**
-- Chưa có `GuardProfile`, runner, analyzer, test Phase 12E, result artifact hoặc
-  generated evaluation output nào.
-- Phase 12E implementation: **NOT STARTED**. Evaluation results: **NONE**.
-  Holdout executed: **NO**.
+- `GuardProfile`, internal pipeline parameterization và regression/public-isolation
+  tests đã được triển khai tại commit
+  `8b1e485f128d08adc4baeed499363886e8969a18`.
+- Grok Web combined technical/security/red-team G1 audit: **PASS**. Báo cáo:
+  `docs/modernization-ai-reviews/grok-phase-12e-1-g1-audit.md`.
+- G1 remaining Critical issues: **None**. Major issues: **None**. Required
+  corrections: **None**.
+- **12E.1 G1 PASS. 12E.2 NOT STARTED.** Chưa có runner, analyzer, result artifact
+  hoặc generated evaluation output. Evaluation results: **NONE**. Holdout
+  executed: **NO**.
+- Operating model từ 12E.2 trở đi: Grok Web planning chat riêng; Code X primary
+  implementer; Qwen2.5-Coder local mechanical preflight; Hermes3 local chỉ sinh
+  adversarial candidate; `scripts/verify_phase.ps1` mechanical verifier; Grok
+  Web audit chat riêng làm combined technical/security/red-team audit; Gemini
+  Web giữ academic/statistical/claim gate; người duy trì adjudicate và phê duyệt
+  holdout.
 
 ## Phase 12C — đã đóng
 

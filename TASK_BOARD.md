@@ -792,20 +792,20 @@ Full traceable resolution: `docs/modernization-ai-reviews/phase-12c-audit-resolu
 - Deferrable recommendations carried forward: semantic/homoglyph resistance
   and trusted-internal ablation profiles stay within the documented future
   evaluation scope (candidates for the Phase 12E ablation design).
-- **Phase 12C: DONE.** Phase 12D: **DONE**. **Phase 12E: G0 PASS; implementation NOT STARTED.**
+- **Phase 12C: DONE.** Phase 12D: **DONE**. **Phase 12E: 12E.1 G1 PASS; 12E.2 NOT STARTED.**
 
-**Next phase:** Phase 12E — Benchmark V2 Evaluation and Ablation. Per
-`AGENT_RULES.md` rule 12, Phase 12E does not start automatically and
-requires a separate, explicit implementation task. Both prerequisite phases
-(12C and 12D) are `Done`, and the Phase 12E G0 plan has independently passed
-Code X, Gemini, and Grok review at commit `d82bac7`; no implementation work
-has started.
+**Next stage:** Phase 12E.2 runner foundation. Per `AGENT_RULES.md` rule 12,
+12E.2 does not start automatically and requires a separate, explicit task.
+The Phase 12E G0 plan passed at `d82bac7`; 12E.1 was implemented at
+`8b1e485f128d08adc4baeed499363886e8969a18` and independently received G1
+PASS. No evaluation or holdout has run.
 
 ## Phase 12D — Independent Benchmark V2 Design, Generation, Validation and Freeze — **Status: Done**
 
 Produces a new, independently-governed benchmark for a future Phase 12E
 security evaluation — artifacts only; no guard rule modified, no evaluation
-run, no ASR/FPR/FNR computed, no ablation, Phase 12E not started.
+run, no ASR/FPR/FNR computed, no ablation; at the Phase 12D freeze, Phase 12E
+had not started.
 
 - **Structure:** `datasets/v2/{corpus,cases,labels,design,manifests}/` — 172
   corpus documents, 120 cases (30 development / 30 validation / 60
@@ -1162,14 +1162,15 @@ manifest) then corrected:
   repository suite **578 passed, 1 warning**; six-file Python compile,
   guard-independent validator, deterministic rebuild, FINAL manifest
   verification, and temporary-copy mutation detection all passed.
-  Phase 12D is **DONE**; Phase 12E implementation has not started.
+  Phase 12D is **DONE**; at that closure point Phase 12E implementation had
+  not started.
 
 **Next phase:** Phase 12E — Benchmark V2 Evaluation and Ablation. Per
 `AGENT_RULES.md` rule 12, implementation requires a separate, explicit task.
-The G0 planning gate has since passed, but no runner, analyzer, result, or
-holdout execution has begun.
+The G0 planning gate and 12E.1 G1 gate have since passed, but no runner,
+analyzer, result, evaluation, or holdout execution has begun.
 
-## Phase 12E — Benchmark V2 Evaluation and Ablation — **Status: G0 PASS; Implementation Not Started**
+## Phase 12E — Benchmark V2 Evaluation and Ablation — **Status: 12E.1 G1 PASS; 12E.2 Not Started**
 
 - Audited master-plan commit:
   `d82bac7828e2e54520e0aa29271e820a52ec6f47`.
@@ -1179,11 +1180,25 @@ holdout execution has begun.
 - Remaining Critical issues: **None**. Remaining blocking Major issues:
   **None**. Required corrections before implementation: **None**.
 - Master plan: **APPROVED FOR IMPLEMENTATION**. Phase 12E implementation:
-  **NOT STARTED**. Evaluation results: **NONE**. Holdout executed: **NO**.
+  12E.1 foundation only.
+- 12E.1 implementation commit:
+  `8b1e485f128d08adc4baeed499363886e8969a18`.
+- Grok Web combined technical/security/red-team G1 audit: **PASS**. Critical
+  issues: **None**. Major issues: **None**. Required corrections: **None**.
+  Audit report: `docs/modernization-ai-reviews/grok-phase-12e-1-g1-audit.md`.
+- Phase 12E.2: **NOT STARTED**. Evaluation results: **NONE**. Holdout executed:
+  **NO**. No runner, analyzer or generated evaluation output exists.
+- Operating model: Grok Web planning chat riêng; Code X primary implementer;
+  Qwen2.5-Coder local mechanical preflight; Hermes3 local adversarial candidate
+  generation; `scripts/verify_phase.ps1` mechanical verifier; Grok Web audit
+  chat riêng combined technical/security/red-team auditor; Gemini Web required
+  academic/statistical/claim auditor; người duy trì final adjudicator và
+  holdout approver.
+- Code X không tự approve implementation. Qwen và Hermes không phát hành
+  PASS/REVISE; Qwen finding cần người hoặc Code X kiểm chứng trực tiếp, và
+  Hermes candidate không bao giờ trở thành frozen benchmark ground truth.
 - The approved limitations and deferred recommendations remain unchanged.
-  Implementation still requires a separate explicit task; this G0 closure
-  does not create or execute a runner, analyzer, configuration, result, or
-  evaluation output.
+  12E.2 still requires a separate explicit task.
 
 ## Notes
 

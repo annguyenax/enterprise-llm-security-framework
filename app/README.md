@@ -211,6 +211,18 @@ default - only a safe per-hit provenance summary (`document_id`,
 `chunk_id`, `title`, `source_type`, `classification`, `trust_level`,
 `rank`, `retrieval_score`, `status`, `reason_code`).
 
+## Phase 12E.1 GuardProfile Foundation
+
+The internal-only `GuardProfile` foundation was implemented at commit
+`8b1e485f128d08adc4baeed499363886e8969a18` and passed the Phase 12E.1 G1
+combined technical, security, and red-team audit. The public HTTP path remains
+permanently bound to `ALL_ON`; clients cannot select a profile or disable a
+guard through request fields, headers, query parameters, environment values,
+or public settings.
+
+Phase 12E.2 has not started. No ablation runner, analyzer, evaluation result,
+or holdout execution exists.
+
 ## Not Implemented
 
 - No real external LLM provider call; only `MockLLMProvider` is implemented.
@@ -218,12 +230,8 @@ default - only a safe per-hit provenance summary (`document_id`,
   as of Phase 12B - see `docs/decisions/ADR-002-retrieval-engine.md`).
 - No semantic classifier or LLM judge. Rule-based detection can miss semantic,
   deeply obfuscated, or encoded attacks and may still produce false positives.
-- No `GuardProfile` ablation harness yet (`app/core/pipeline.py` holds
-  only the Phase 12C typed pipeline result; the on/off layer-ablation
-  configuration named in `docs/modernization-v2-architecture.md` §2 is a
-  Phase 12E concern, deliberately not implemented in this pass). Public
-  requests cannot disable guards through fields, headers, or serving-mode
-  configuration; the full secure profile is mandatory.
+- No Phase 12E.2 ablation runner, analyzer, or generated evaluation output;
+  the Phase 12E.1 profile foundation alone is not an executed experiment.
 - Multi-chunk coordination is only partially mitigated (see "End-to-End
   RAG Pipeline" above) - not fully solved.
 - Not production-ready: no production claim, no real-world detection-rate
@@ -260,8 +268,8 @@ contradictory, integer limits are non-positive or exceed hard ceilings, or
 boolean/integer environment values are malformed. Per-request telemetry uses
 stable stage IDs, safe reason codes, monotonic stage timings, provider-called
 state, DLP categories/counts, and retrieval/context counts. Phase 12E will
-aggregate these into p50/p95 and ablation metrics; the request path does not
-invent aggregate benchmark results.
+aggregate these into p50/p95 and ablation metrics only after Phase 12E.2
+begins; the request path does not invent aggregate benchmark results.
 
 ## Not Production-Ready
 

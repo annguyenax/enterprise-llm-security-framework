@@ -6,37 +6,52 @@ bằng script.
 ## Sơ đồ
 
 ```
-                    Người duy trì (Orchestrator + Adjudicator)
+                    Người duy trì (Final Adjudicator)
                                     │
                      ┌──────────────┴──────────────┐
                      │  docs/ai-collaboration/     │  ← memory chung
                      │  (00_PROJECT_STATE đọc đầu) │
                      └──────────────┬──────────────┘
                                     │
-        Planner ──► Implementer ──► Verifier (SCRIPT) ──► Handoff
+       Grok Planner ──► Code X ──► Qwen preflight ──► Verifier (SCRIPT)
+      (planning chat)                (advisory)               │
                                     │
-              ┌─────────────────────┼─────────────────────┐  ← chạy SONG SONG
-              │                     │                     │     trên CÙNG commit
-      Security Auditor      Academic Auditor       Red-team Auditor
-         (Code X)               (Gemini)                (Grok)
-              └─────────────────────┼─────────────────────┘
+                         ┌───────────┴───────────┐
+                         │                       │
+               Grok combined audit       Gemini academic
+                 (audit chat riêng)       / statistical
+                         └───────────┬───────────┘
                                     │
-                         Người adjudicate → PASS / REVISE
+                       Người duy trì → PASS / REVISE
+
+       Hermes3 local ──► adversarial candidates only (không ground truth)
 ```
 
 ## Bảng vai
 
 | Vai | Ai/Model | Được làm | KHÔNG được làm |
 |---|---|---|---|
-| **Orchestrator / Adjudicator** | Người (Nguyen Van An) | Quyết định phase gate, tuyên bố DONE, phê duyệt commit | — |
-| **Planner** | Claude Code, hoặc DeepSeek-R1 (rẻ) | Phân rã task, chọn cách tiếp cận | Sửa code |
-| **Implementer** | Claude Code (logic phức tạp) hoặc Continue + DeepSeek (số lượng lớn) | Viết code, sửa test, cập nhật tài liệu | **Tự tuyên bố công việc của mình là PASS** |
-| **Verifier** | **`scripts/verify_phase.ps1` — SCRIPT, không LLM** | Chạy test, hash, determinism, scope check; sinh evidence block | — (không có phán đoán) |
-| **Security Auditor** | Code X | Tìm lỗi logic, invariant, edge case, fail-closed | Sửa code (chỉ báo cáo) |
-| **Academic Auditor** | Gemini | Tính hợp lệ phương pháp, giới hạn claim, thống kê | Sửa code |
-| **Red-team Auditor** | Grok | Độ phủ tấn công, rò rỉ template, độ mới holdout | Sửa code |
-| **Payload Generator** | Hermes local (Ollama), khi cần | Sinh biến thể tấn công cho probe Phase 12E | **Đưa payload vào `datasets/v2/`** (đã FINAL freeze) |
-| **Grunt worker** | Qwen2.5-Coder local | Docstring, fixture, format, refactor cơ học | Đụng vào logic guard hoặc validator |
+| **Final Adjudicator / Holdout Approver** | Người duy trì | Quyết định phase gate, tuyên bố DONE, phê duyệt holdout và kết luận cuối | Chuyển quyền phê duyệt cuối cho agent |
+| **Planner** | **Grok Web, planning chat riêng** | Phân rã task, chọn cách tiếp cận, xác định gate | Sửa code; dùng cùng chat với Grok Auditor |
+| **Primary Implementer** | **Code X** | Viết code, sửa test, cập nhật tài liệu trong scope | **Tự approve implementation của mình hoặc tuyên bố PASS/REVISE** |
+| **Mechanical / Local Preflight** | **Qwen2.5-Coder local** | Fixture, format, kiểm tra cơ học, gợi ý lỗi cục bộ | Phát hành PASS/REVISE; findings chưa được người hoặc Code X kiểm chứng trực tiếp |
+| **Mechanical Verifier** | **`scripts/verify_phase.ps1`**, không LLM | Chạy test, hash, determinism, scope check; sinh evidence block | Phán đoán hoặc thay adjudicator |
+| **Combined Technical / Security / Red-team Auditor** | **Grok Web, audit chat riêng** | Audit code/commit độc lập, invariant, fail-closed, public bypass, adversarial coverage | Sửa code; dùng planning chat; dựa vào tự-đánh-giá của implementer |
+| **Academic / Statistical Auditor** | **Gemini Web** | Metric, construct validity, thống kê, giới hạn claim | Sửa code; bỏ qua metric/statistical/claim gate |
+| **Adversarial Candidate Generator** | **Hermes3 local** | Sinh candidate/probe để người và auditor xem xét | Phát hành PASS/REVISE; biến candidate thành frozen benchmark ground truth |
+
+## Quy tắc phân quyền Phase 12E
+
+1. Grok Planner và Grok Auditor bắt buộc dùng **hai chat tách biệt**. Audit chat
+   phải đọc commit/evidence trực tiếp, không kế thừa kết luận tự tin từ planning chat.
+2. Code X là primary implementer nhưng **không được approve implementation của
+   chính mình**. G1/G2/G4 cần auditor đúng vai và final adjudication của người duy trì.
+3. Qwen và Hermes chỉ là công cụ hỗ trợ, không phát hành verdict `PASS`/`REVISE`.
+   Mọi finding của Qwen phải được người duy trì hoặc Code X kiểm tra trực tiếp.
+4. Candidate do Hermes sinh chỉ dùng cho adversarial probing. Candidate đó không
+   được trở thành label, ground truth hoặc artifact trong benchmark v2 đã FINAL freeze.
+5. Gemini Web vẫn là gate bắt buộc cho metric, thống kê và claim, kể cả khi Grok
+   đã hoàn tất combined technical/security/red-team audit.
 
 ## Vì sao Verifier phải là script
 
