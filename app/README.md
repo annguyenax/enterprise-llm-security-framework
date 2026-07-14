@@ -220,8 +220,16 @@ permanently bound to `ALL_ON`; clients cannot select a profile or disable a
 guard through request fields, headers, query parameters, environment values,
 or public settings.
 
-Phase 12E.2 has not started. No ablation runner, analyzer, evaluation result,
-or holdout execution exists.
+The development-only Phase 12E.2 runner was implemented at commit
+`2233002ccf3e067ab932a5a8fa2b6a7bbe350b01` and passed its Grok Web combined
+G2 audit with no Critical, Major, Minor, or required corrections. A maintainer
+C0 development smoke completed outside the repository with
+`run_status=complete`, result SHA-256
+`3da58e32b8ae0c1d72ccd0dd2aed0f8092a56624a1614967c9661920c3d49ef2`, and
+result size `84995` bytes. It is infrastructure evidence only: no aggregate
+metrics were calculated, and it is neither validation evidence nor a final
+experimental result. The analyzer does not exist, Phase 12E.3 has not started,
+and neither validation nor holdout has been executed.
 
 ## Not Implemented
 
@@ -230,8 +238,8 @@ or holdout execution exists.
   as of Phase 12B - see `docs/decisions/ADR-002-retrieval-engine.md`).
 - No semantic classifier or LLM judge. Rule-based detection can miss semantic,
   deeply obfuscated, or encoded attacks and may still produce false positives.
-- No Phase 12E.2 ablation runner, analyzer, or generated evaluation output;
-  the Phase 12E.1 profile foundation alone is not an executed experiment.
+- No Phase 12E.3 analyzer, aggregate ablation metrics, validation execution, or
+  holdout execution. The Phase 12E.2 development smoke is not a final experiment.
 - Multi-chunk coordination is only partially mitigated (see "End-to-End
   RAG Pipeline" above) - not fully solved.
 - Not production-ready: no production claim, no real-world detection-rate
@@ -267,9 +275,9 @@ Phase 12C settings fail construction/startup when top-k relationships are
 contradictory, integer limits are non-positive or exceed hard ceilings, or
 boolean/integer environment values are malformed. Per-request telemetry uses
 stable stage IDs, safe reason codes, monotonic stage timings, provider-called
-state, DLP categories/counts, and retrieval/context counts. Phase 12E will
-aggregate these into p50/p95 and ablation metrics only after Phase 12E.2
-begins; the request path does not invent aggregate benchmark results.
+state, DLP categories/counts, and retrieval/context counts. The planned Phase
+12E.3 analyzer will aggregate these into p50/p95 and ablation metrics; the
+development runner and request path do not invent aggregate benchmark results.
 
 ## Not Production-Ready
 

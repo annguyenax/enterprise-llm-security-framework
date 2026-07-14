@@ -14,13 +14,15 @@
 | 12B | SQLite FTS5/BM25 retrieval foundation | Done |
 | 12C | End-to-end RAG security pipeline | **DONE** — Code X final re-audit PASS |
 | 12D | Benchmark V2 (thiết kế / sinh / freeze) | **DONE** — manifest FINAL |
-| 12E | Đánh giá + ablation trên benchmark v2 | **12E.1 G1 PASS; 12E.2 CHƯA BẮT ĐẦU** |
+| 12E | Đánh giá + ablation trên benchmark v2 | **12E.1 G1 PASS; 12E.2 G2 PASS; 12E.3 CHƯA BẮT ĐẦU** |
 
 **Cả hai phase chặn 12E (12C và 12D) đều đã đóng bằng audit độc lập PASS.**
 G0 của Phase 12E đã đóng bằng triple PASS trên plan commit
 `d82bac7828e2e54520e0aa29271e820a52ec6f47`. Foundation 12E.1 sau đó được
 triển khai tại `8b1e485f128d08adc4baeed499363886e8969a18` và đã qua G1 audit độc lập.
-12E.2 không tự bắt đầu; vẫn cần task/go-ahead riêng theo `AGENT_RULES.md` rule 12.
+Runner development-only của 12E.2 được triển khai tại
+`2233002ccf3e067ab932a5a8fa2b6a7bbe350b01` và đã qua G2 audit độc lập.
+12E.3 chưa bắt đầu và vẫn cần task/go-ahead riêng theo `AGENT_RULES.md` rule 12.
 
 ## Phase 12E — trạng thái gate hiện tại
 
@@ -44,9 +46,18 @@ triển khai tại `8b1e485f128d08adc4baeed499363886e8969a18` và đã qua G1 au
   `docs/modernization-ai-reviews/grok-phase-12e-1-g1-audit.md`.
 - G1 remaining Critical issues: **None**. Major issues: **None**. Required
   corrections: **None**.
-- **12E.1 G1 PASS. 12E.2 NOT STARTED.** Chưa có runner, analyzer, result artifact
-  hoặc generated evaluation output. Evaluation results: **NONE**. Holdout
-  executed: **NO**.
+- **12E.1 G1 PASS. 12E.2 G2 PASS.** Runner implementation commit:
+  `2233002ccf3e067ab932a5a8fa2b6a7bbe350b01`. Grok Web combined G2 audit
+  xác nhận **PASS**, không có Critical, Major, Minor hoặc required correction.
+- Runner chỉ hỗ trợ split `development`. Một C0 smoke development do người duy
+  trì thực hiện ngoài repository đã hoàn tất với `run_status=complete`, result
+  SHA-256 `3da58e32b8ae0c1d72ccd0dd2aed0f8092a56624a1614967c9661920c3d49ef2`
+  và kích thước `84995` byte.
+- Smoke trên chỉ là bằng chứng vận hành development, không phải validation hay
+  kết quả thí nghiệm cuối. Không có aggregate metric nào được tính. Validation:
+  **NOT EXECUTED**. Holdout: **NOT EXECUTED**.
+- Analyzer chưa tồn tại và **12E.3 NOT STARTED**. Các giới hạn và khuyến nghị
+  deferred đã phê duyệt vẫn giữ nguyên.
 - Operating model từ 12E.2 trở đi: Grok Web planning chat riêng; Code X primary
   implementer; Qwen2.5-Coder local mechanical preflight; Hermes3 local chỉ sinh
   adversarial candidate; `scripts/verify_phase.ps1` mechanical verifier; Grok

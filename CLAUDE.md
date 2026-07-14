@@ -19,14 +19,18 @@ poisoning. **PoC học thuật, KHÔNG phải production**, dữ liệu tổng h
 
 - Phase 12C (RAG pipeline): **DONE** — Code X final re-audit PASS
 - Phase 12D (Benchmark V2): **DONE** — manifest FINAL, 3 gate audit đều PASS
-- Phase 12E (Evaluation): **12E.1 G1 PASS; 12E.2 CHƯA BẮT ĐẦU**
+- Phase 12E (Evaluation): **12E.1 G1 PASS; 12E.2 G2 PASS; 12E.3 CHƯA BẮT ĐẦU**
 
 Cả hai phase chặn 12E đều đã đóng. Kế hoạch tại commit `d82bac7` đã qua
 Code X, Gemini và Grok với verdict PASS, không còn Critical hoặc blocking
 Major. GuardProfile foundation tại commit
 `8b1e485f128d08adc4baeed499363886e8969a18` đã qua Grok Web combined G1 audit
-với verdict PASS. 12E.2 vẫn cần task riêng (AGENT_RULES rule 12); kết quả đánh
-giá hiện là NONE và holdout chưa được thực thi.
+với verdict PASS. Development-only runner tại
+`2233002ccf3e067ab932a5a8fa2b6a7bbe350b01` đã qua Grok Web combined G2 audit
+với verdict PASS, không có finding hoặc correction bắt buộc. C0 development
+smoke ngoài repository có trạng thái complete nhưng không phải validation hay
+kết quả thí nghiệm cuối; không có aggregate metric. Analyzer chưa tồn tại,
+12E.3 chưa bắt đầu, validation và holdout chưa được thực thi.
 
 ## Operating model Phase 12E
 
