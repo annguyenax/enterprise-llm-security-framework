@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Run the Phase 12E.2 development-only ablation foundation offline.
+"""Run the Phase 12E.3 development/validation ablation foundation offline.
 
 This runner intentionally does not calculate aggregate metrics. It verifies
 repository and benchmark identity, builds one temporary SQLite corpus per
-configuration, executes only the frozen development cases, projects results
-through an explicit content-free allowlist, and publishes immutable diagnostic
-artifacts. Validation and holdout are not accepted by this phase.
+configuration, executes one supported frozen split, projects results through an
+explicit content-free allowlist, and publishes immutable diagnostic artifacts.
+Holdout evaluation is not accepted by this phase.
 """
 from __future__ import annotations
 
@@ -66,7 +66,7 @@ from app.services.rag_query import (
 
 RESULT_SCHEMA_VERSION = 2
 RESULT_MANIFEST_SCHEMA_VERSION = 1
-SUPPORTED_SPLIT = "development"
+SUPPORTED_SPLITS = ("development", "validation")
 SUPPORTED_PROVIDER_ID = "mock"
 CONFIG_REGISTRY_VERSION = 1
 WORKER_PROTOCOL_VERSION = 1
@@ -107,11 +107,14 @@ EVALUATION_SCOPES = (
     "availability_fault",
     "residual_risk_only",
 )
-EXPECTED_DEVELOPMENT_SCOPE_COUNTS = {
-    "end_to_end": 26,
-    "component": 1,
-    "availability_fault": 2,
-    "residual_risk_only": 1,
+EXPECTED_SCOPE_COUNTS_BY_SPLIT = {
+    split: {
+        "end_to_end": 26,
+        "component": 1,
+        "availability_fault": 2,
+        "residual_risk_only": 1,
+    }
+    for split in SUPPORTED_SPLITS
 }
 OBSERVATION_NAMESPACES = {
     "end_to_end": "ablation_matrix",
@@ -591,24 +594,32 @@ def _validate_output_root(output_root: Path, repo_root: Path, benchmark_root: Pa
     resolved = output_root.expanduser().resolve()
     repo = repo_root.resolve()
     benchmark = benchmark_root.resolve()
-    approved_repo_output = (repo / "reports" / "evaluation-v2").resolve()
 
-    if resolved == repo or resolved == benchmark or _is_within(resolved, benchmark):
+    if resolved == benchmark or _is_within(resolved, benchmark):
         raise IntegrityError("output_containment", "output root overlaps protected repository input")
-    if _is_within(resolved, repo) and not _is_within(resolved, approved_repo_output):
+    if resolved == repo or _is_within(resolved, repo):
         raise IntegrityError(
             "output_containment",
-            "repository-local output is allowed only under reports/evaluation-v2",
+            "output root must remain outside the repository",
         )
     if resolved.exists() and not resolved.is_dir():
         raise IntegrityError("output_containment", "output root must be a directory")
     return resolved
 
 
-def load_development_benchmark(benchmark_root: Path) -> LoadedBenchmark:
+def load_split_benchmark(benchmark_root: Path, requested_split: str) -> LoadedBenchmark:
+    if requested_split not in SUPPORTED_SPLITS:
+        raise IntegrityError("split_not_allowed", "evaluation split must be development or validation")
+
     corpus = _load_jsonl(benchmark_root / "corpus" / "documents.jsonl", "corpus/documents")
-    cases = _load_jsonl(benchmark_root / "cases" / "development.jsonl", "cases/development")
-    labels = _load_jsonl(benchmark_root / "labels" / "development.jsonl", "labels/development")
+    cases = _load_jsonl(
+        benchmark_root / "cases" / f"{requested_split}.jsonl",
+        f"cases/{requested_split}",
+    )
+    labels = _load_jsonl(
+        benchmark_root / "labels" / f"{requested_split}.jsonl",
+        f"labels/{requested_split}",
+    )
 
     document_ids: set[str] = set()
     for index, document in enumerate(corpus):
@@ -664,8 +675,8 @@ def load_development_benchmark(benchmark_root: Path) -> LoadedBenchmark:
         scope = _require_string(case, "evaluation_scope", location)
         top_k = case.get("top_k")
         relevant_ids = case.get("relevant_document_ids")
-        if split != SUPPORTED_SPLIT:
-            raise IntegrityError("benchmark_split", f"{location}.split is not development")
+        if split != requested_split:
+            raise IntegrityError("benchmark_split", f"{location}.split does not match the request")
         if scope not in EVALUATION_SCOPES:
             raise IntegrityError("benchmark_scope", f"{location}.evaluation_scope is invalid")
         if type(top_k) is not int or not 1 <= top_k <= 50:
@@ -683,16 +694,21 @@ def load_development_benchmark(benchmark_root: Path) -> LoadedBenchmark:
         scope_counts[scope] += 1
         validated_cases.append(case)
 
-    if len(validated_cases) != 30 or scope_counts != EXPECTED_DEVELOPMENT_SCOPE_COUNTS:
-        raise IntegrityError("benchmark_case_set", "development expected-case set changed")
+    if len(validated_cases) != 30 or scope_counts != EXPECTED_SCOPE_COUNTS_BY_SPLIT[requested_split]:
+        raise IntegrityError("benchmark_case_set", f"{requested_split} expected-case set changed")
     if case_ids != set(labels_by_id):
-        raise IntegrityError("benchmark_mapping", "development case and label identities differ")
+        raise IntegrityError("benchmark_mapping", f"{requested_split} case and label identities differ")
 
     return LoadedBenchmark(
         corpus=tuple(sorted(corpus, key=lambda item: item["document_id"])),
         cases=tuple(sorted(validated_cases, key=lambda item: item["case_id"])),
         labels_by_id=labels_by_id,
     )
+
+
+def load_development_benchmark(benchmark_root: Path) -> LoadedBenchmark:
+    """Backward-compatible helper for existing development-only callers."""
+    return load_split_benchmark(benchmark_root, "development")
 
 
 def _expected_case_sets(
@@ -809,6 +825,7 @@ def _experiment_id(
     provider: ProviderSpec,
     safety_limits: Mapping[str, Any],
     dependencies_sha256: str,
+    split: str,
 ) -> str:
     contract = {
         "result_schema_version": RESULT_SCHEMA_VERSION,
@@ -816,7 +833,7 @@ def _experiment_id(
         "config_hashes": {
             config_id: CONFIG_REGISTRY[config_id].config_hash for config_id in CONFIG_REGISTRY
         },
-        "split": SUPPORTED_SPLIT,
+        "split": split,
         "git_commit": repository.commit,
         "benchmark_manifest_sha256": manifest.sha256,
         "provider_id": provider.provider_id,
@@ -837,8 +854,11 @@ def preflight(
     active_hooks = hooks or RunnerHooks()
     benchmark_path = (benchmark_root or repo_root / "datasets" / "v2").resolve()
 
-    if request.split != SUPPORTED_SPLIT:
-        raise IntegrityError("split_not_allowed", "Phase 12E.2 supports development only")
+    if request.split not in SUPPORTED_SPLITS:
+        raise IntegrityError(
+            "split_not_allowed",
+            "evaluation split must be development or validation; holdout is prohibited",
+        )
     if not _FULL_SHA_RE.fullmatch(request.expected_commit):
         raise IntegrityError("expected_commit", "expected commit must be a full lowercase SHA-1")
     _safe_location(request.expected_branch)
@@ -867,12 +887,17 @@ def preflight(
     _validate_provider_environment(provider)
 
     safety_limits = _settings_safety_limits(active_settings, request.case_timeout_seconds)
-    benchmark = load_development_benchmark(benchmark_path)
+    benchmark = load_split_benchmark(benchmark_path, request.split)
     expected_ids, expected_scope_ids = _expected_case_sets(benchmark, request.config_ids)
     dependencies = _dependency_inventory()
     dependencies_hash = _sha256_bytes(_canonical_json_bytes(list(dependencies)))
     experiment_id = _experiment_id(
-        repository, manifest, provider, safety_limits, dependencies_hash
+        repository,
+        manifest,
+        provider,
+        safety_limits,
+        dependencies_hash,
+        request.split,
     )
 
     return PreflightContext(
@@ -1009,8 +1034,15 @@ def _project_stage_results(result: RagPipelineResult, profile: GuardProfile) -> 
             raise IntegrityError("unsafe_stage_reason", "stage reason code is not a safe identifier")
         profile_field = GUARD_STAGE_TO_FIELD.get(stage.stage)
         enabled = getattr(profile, profile_field) if profile_field else True
-        decision = stage.decision.value if stage.decision is not None else None
-        execution_time = result.latency_ms.get(stage.stage)
+        # Artifact telemetry reserves null decisions for disabled ablation
+        # stages. Successful informational stages use neutral ALLOW while
+        # their reason code preserves the precise execution outcome.
+        decision = (
+            (stage.decision or Decision.ALLOW).value
+            if enabled
+            else None
+        )
+        execution_time = result.latency_ms.get(stage.stage) if enabled else None
         projected.append(
             {
                 "stage": stage.stage,
@@ -1746,6 +1778,7 @@ def _case_error_record(
     ordinal: int,
     repository: RepositoryState,
     manifest: ManifestIdentity,
+    split: str,
     status: str,
     error_category: str,
 ) -> dict[str, Any]:
@@ -1760,7 +1793,7 @@ def _case_error_record(
         "config_id": config.config_id,
         "config_hash": config.config_hash,
         "profile_id": config.profile.profile_id,
-        "split": SUPPORTED_SPLIT,
+        "split": split,
         "scenario_family": case["scenario_family"],
         "category": label["category"],
         "evaluation_scope": case["evaluation_scope"],
@@ -1803,6 +1836,7 @@ def _case_completed_record(
     ordinal: int,
     repository: RepositoryState,
     manifest: ManifestIdentity,
+    split: str,
     outcome: ScopeOutcome,
 ) -> dict[str, Any]:
     correct = (
@@ -1818,7 +1852,7 @@ def _case_completed_record(
         "config_id": config.config_id,
         "config_hash": config.config_hash,
         "profile_id": config.profile.profile_id,
-        "split": SUPPORTED_SPLIT,
+        "split": split,
         "scenario_family": case["scenario_family"],
         "category": label["category"],
         "evaluation_scope": case["evaluation_scope"],
@@ -1863,6 +1897,7 @@ def _execute_case_record(
     worker: _SpawnCaseWorker,
     repository: RepositoryState,
     manifest: ManifestIdentity,
+    split: str,
     timeout_seconds: float,
     timeout_recovery_check: Callable[[Mapping[str, Any]], None],
 ) -> dict[str, Any]:
@@ -1884,6 +1919,7 @@ def _execute_case_record(
             ordinal=ordinal,
             repository=repository,
             manifest=manifest,
+            split=split,
             status="timeout",
             error_category="case_timeout",
         )
@@ -1895,6 +1931,7 @@ def _execute_case_record(
             ordinal=ordinal,
             repository=repository,
             manifest=manifest,
+            split=split,
             status="error",
             error_category="case_execution_error",
         )
@@ -1906,6 +1943,7 @@ def _execute_case_record(
         ordinal=ordinal,
         repository=repository,
         manifest=manifest,
+        split=split,
         outcome=outcome,
     )
 
@@ -2172,6 +2210,7 @@ def _execute_config(
                             worker=worker,
                             repository=context.repository,
                             manifest=context.manifest,
+                            split=context.request.split,
                             timeout_seconds=context.request.case_timeout_seconds,
                             timeout_recovery_check=verify_timeout_recovery,
                         )
@@ -2186,6 +2225,7 @@ def _execute_config(
                             worker=worker,
                             repository=context.repository,
                             manifest=context.manifest,
+                            split=context.request.split,
                             timeout_seconds=context.request.case_timeout_seconds,
                             timeout_recovery_check=verify_timeout_recovery,
                         )
@@ -2245,7 +2285,7 @@ def _execute_config(
         "profile_id": config.profile.profile_id,
         "guard_profile": config.profile_payload,
         "environment": environment,
-        "split": SUPPORTED_SPLIT,
+        "split": context.request.split,
         "provider_id": context.provider.provider_id,
         "provider_behavior_hash": context.provider.behavior_hash,
         "safety_limits": dict(context.safety_limits),
@@ -2420,7 +2460,7 @@ def _publish_artifact(output_root: Path, artifact: dict[str, Any]) -> WrittenRun
     )
 
 
-def run_development_evaluation(
+def run_evaluation(
     request: RunRequest,
     *,
     repo_root: Path = ROOT,
@@ -2464,9 +2504,30 @@ def run_development_evaluation(
     return [_publish_artifact(output_root, artifact) for artifact in artifacts]
 
 
+def run_development_evaluation(
+    request: RunRequest,
+    *,
+    repo_root: Path = ROOT,
+    benchmark_root: Path | None = None,
+    hooks: RunnerHooks | None = None,
+) -> list[WrittenRun]:
+    """Compatibility wrapper that remains explicitly development-only."""
+    if request.split != "development":
+        raise IntegrityError(
+            "split_not_allowed",
+            "run_development_evaluation accepts only the development split",
+        )
+    return run_evaluation(
+        request,
+        repo_root=repo_root,
+        benchmark_root=benchmark_root,
+        hooks=hooks,
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--split", required=True, choices=[SUPPORTED_SPLIT])
+    parser.add_argument("--split", required=True, choices=list(SUPPORTED_SPLITS))
     selection = parser.add_mutually_exclusive_group(required=True)
     selection.add_argument(
         "--config",
@@ -2497,7 +2558,7 @@ def main(argv: list[str] | None = None) -> int:
         case_timeout_seconds=args.case_timeout_seconds,
     )
     try:
-        written = run_development_evaluation(request)
+        written = run_evaluation(request)
     except RunnerError as exc:
         print(f"FAIL [{exc.code}]: {exc}", file=sys.stderr)
         return 1
@@ -2505,10 +2566,10 @@ def main(argv: list[str] | None = None) -> int:
         print("FAIL [internal_error]: runner failed closed.", file=sys.stderr)
         return 1
 
-    print(f"OK: wrote {len(written)} development diagnostic run(s).")
+    print(f"OK: wrote {len(written)} {args.split} diagnostic run(s).")
     for item in written:
         print(f"  {item.config_id}: {item.run_status} ({item.run_id})")
-    print("Aggregate metrics were not computed. Validation and holdout were not executed.")
+    print("Aggregate metrics were not computed. Holdout was not executed.")
     return 0
 
 
