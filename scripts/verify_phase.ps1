@@ -44,7 +44,8 @@ $FocusedModules = @(
     "tests/test_guard_profile.py",
     "tests/test_rag_pipeline.py",
     "tests/test_v2_evaluation_runner.py",
-    "tests/test_v2_result_analyzer.py"
+    "tests/test_v2_result_analyzer.py",
+    "tests/test_v2_holdout_authorization.py"
 )
 
 # Đường dẫn KHÔNG được thay đổi ngoài scope (invariant check).

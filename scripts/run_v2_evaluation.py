@@ -5,13 +5,22 @@ This runner intentionally does not calculate aggregate metrics. It verifies
 repository and benchmark identity, builds one temporary SQLite corpus per
 configuration, executes one supported frozen split, projects results through an
 explicit content-free allowlist, and publishes immutable diagnostic artifacts.
-Holdout evaluation is not accepted by this phase.
+
+Holdout execution is available only through the separate canonical external
+maintainer-authorization path and a verified holdout capability. The ordinary
+development/validation APIs and CLI paths cannot represent holdout: it is not a
+member of ``SUPPORTED_SPLITS``, ``load_split_benchmark`` never loads it, and
+``--split`` does not accept it. Holdout remains unauthorized until the
+maintainer issues that authorization. The authorization gate is a procedural
+misuse barrier under a trusted-maintainer threat model, not a cryptographic
+boundary.
 """
 from __future__ import annotations
 
 import argparse
 import contextlib
 import dataclasses
+import datetime
 import hashlib
 import importlib.metadata
 import inspect
@@ -37,7 +46,13 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.core.config import Settings, load_settings
+from app.core.config import (
+    DLP_MAX_INSPECT_CHARS_HARD_LIMIT,
+    RAG_MAX_AGGREGATE_CONTEXT_CHARS_HARD_LIMIT,
+    RAG_MAX_TOP_K_HARD_LIMIT,
+    Settings,
+    load_settings,
+)
 from app.core.decisions import Decision
 from app.core.pipeline import GuardProfile, RagPipelineResult
 from app.core.source_policy import resolve_source_policy
@@ -180,6 +195,99 @@ _FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _SAFE_REASON_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,127}$")
 _WINDOWS_ABSOLUTE_RE = re.compile(r"^[A-Za-z]:[\\/]")
 _CANARY_VALUE_RE = re.compile(r"(?:V2TOK\d+|FAKE-SECRET-|BEGIN [A-Z ]*PRIVATE KEY)", re.I)
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_CANONICAL_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+)
+_ISO_UTC_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$")
+
+# ---------------------------------------------------------------------------
+# Phase 12E.4 holdout gate (plan: docs/ai-collaboration/07_PHASE_12E4_HOLDOUT_PLAN.md).
+#
+# The holdout split is deliberately NOT part of SUPPORTED_SPLITS. It is reachable
+# only through a dedicated request type, a dedicated loader, and a verified
+# capability derived from an external canonical maintainer authorization file.
+# Holdout execution itself remains unauthorized until the maintainer issues that
+# file; this module only implements the gate.
+# ---------------------------------------------------------------------------
+
+HOLDOUT_SPLIT = "holdout"
+HOLDOUT_AUTHORIZATION_SCHEMA = "phase12e4-holdout-authorization-v1"
+HOLDOUT_START_RECEIPT_SCHEMA = "phase12e4-holdout-start-receipt-v1"
+HOLDOUT_RESULT_SCHEMA_VERSION = 1
+HOLDOUT_RESULT_MANIFEST_SCHEMA_VERSION = 1
+# Analysis-side holdout schema identities are declared here so the runner can
+# validate the authorization's analysis contract before claiming an attempt
+# root, without importing the analyzer. `analyze_v2_results` asserts equality.
+HOLDOUT_ANALYSIS_SCHEMA_VERSION = 1
+HOLDOUT_ANALYSIS_MANIFEST_SCHEMA_VERSION = 1
+HOLDOUT_AUTHORIZATION_ISSUER = "maintainer:annguyenax"
+HOLDOUT_AUTHORIZATION_PURPOSE = "phase12e4_holdout_c0_c7"
+
+# Derived by arithmetic from the documented Phase 12D aggregate distribution --
+# NOT by reading the frozen holdout files. Documented totals: 120 cases split
+# 30/30/60 with evaluation_scope totals end_to_end 104, component 4,
+# availability_fault 8, residual_risk_only 4. Development and validation each
+# contribute 26/1/2/1 (EXPECTED_SCOPE_COUNTS_BY_SPLIT above), so the holdout
+# remainder is 52/2/4/2 = 60 cases.
+HOLDOUT_CASE_COUNT = 60
+EXPECTED_HOLDOUT_SCOPE_COUNTS = {
+    "end_to_end": 52,
+    "component": 2,
+    "availability_fault": 4,
+    "residual_risk_only": 2,
+}
+
+HOLDOUT_AUTHORIZATION_KEYS = frozenset(
+    {
+        "schema_version",
+        "authorization_id",
+        "issued_at_utc",
+        "issued_by",
+        "purpose",
+        "execution_branch",
+        "execution_commit",
+        "benchmark_manifest_sha256",
+        "provider_id",
+        "config_ids",
+        "config_hashes",
+        "result_schema_version",
+        "result_manifest_schema_version",
+        "analysis_schema_version",
+        "analysis_manifest_schema_version",
+        "analysis_contract_sha256",
+        "mapping_sha256",
+        "output_root",
+        "attempt",
+        "supersedes_authorization_sha256",
+        "holdout_authorized",
+    }
+)
+
+HOLDOUT_START_RECEIPT_KEYS = frozenset(
+    {
+        "schema_version",
+        "authorization_id",
+        "holdout_authorization_sha256",
+        "attempt",
+        "supersedes_authorization_sha256",
+        "execution_branch",
+        "execution_commit",
+        "benchmark_manifest_sha256",
+        "benchmark_manifest_status",
+        "provider_id",
+        "config_ids",
+        "config_hashes",
+        "result_schema_version",
+        "result_manifest_schema_version",
+        "analysis_schema_version",
+        "analysis_manifest_schema_version",
+        "analysis_contract_sha256",
+        "mapping_sha256",
+        "started_at_utc",
+        "status",
+    }
+)
 
 
 class RunnerError(RuntimeError):
@@ -192,6 +300,271 @@ class RunnerError(RuntimeError):
 
 class IntegrityError(RunnerError):
     """Fatal identity or safety failure; no result artifact may be written."""
+
+
+class HoldoutAuthorizationError(IntegrityError):
+    """The supplied holdout authorization is absent, malformed or not binding."""
+
+
+@dataclass(frozen=True)
+class HoldoutAuthorization:
+    """A parsed, structurally valid maintainer authorization.
+
+    Parsing alone grants nothing. Only `verify_holdout_authorization` may turn
+    this into a `VerifiedHoldoutAuthorization`, and only that verified
+    capability unlocks `load_authorized_holdout_benchmark`.
+    """
+
+    schema_version: int
+    authorization_id: str
+    issued_at_utc: str
+    issued_by: str
+    purpose: str
+    execution_branch: str
+    execution_commit: str
+    benchmark_manifest_sha256: str
+    provider_id: str
+    config_ids: tuple[str, ...]
+    config_hashes: Mapping[str, str]
+    result_schema_version: int
+    result_manifest_schema_version: int
+    analysis_schema_version: int
+    analysis_manifest_schema_version: int
+    analysis_contract_sha256: str
+    mapping_sha256: str
+    output_root: str
+    attempt: int
+    supersedes_authorization_sha256: str | None
+    holdout_authorized: bool
+    authorization_sha256: str
+
+
+@dataclass(frozen=True)
+class VerifiedHoldoutAuthorization:
+    """Capability proving every holdout precondition already passed.
+
+    Validity is NOT a property of this object and cannot be conferred by
+    constructing one. A capability is valid only while BOTH hold:
+
+    1. this exact object instance was minted inside the verifier closure, and
+    2. a fingerprint over every security-relevant field still matches the one
+       recorded at mint time.
+
+    Consequences: direct construction fails; `copy.copy` and `copy.deepcopy`
+    fail (a copy is a different instance); `dataclasses.replace` of any field
+    fails; a plain dict, bool or bare `HoldoutAuthorization` fails.
+
+    This is a **procedural misuse barrier** under the trusted-maintainer threat
+    model. It is not a cryptographic boundary and makes no claim against
+    hostile Python reflection or a malicious local administrator, either of
+    which can reach closure state in-process.
+    """
+
+    authorization: HoldoutAuthorization
+    repository: RepositoryState
+    manifest: ManifestIdentity
+    benchmark_root: Path
+    attempt_root: Path
+
+    def is_valid(self) -> bool:
+        return _holdout_capability_is_valid(self)
+
+
+def _build_holdout_capability_system() -> tuple[Any, Any, Any]:
+    """Create the holdout verifiers with closure-private minting.
+
+    Codex finding: the previous design exported `_register_holdout_capability`,
+    so any importer could pass a builder callback and receive a registered
+    capability. Minting now happens ONLY inside this closure, and the closure
+    returns only the two public verifier entry points plus the read-only
+    validity predicate. No mint/register/token callable is reachable as a
+    module attribute.
+    """
+    issued: dict[int, str] = {}
+    keepalive: list[VerifiedHoldoutAuthorization] = []
+
+    def _fingerprint(capability: VerifiedHoldoutAuthorization) -> str:
+        """Bind EVERY security-relevant value, not a selected subset."""
+        authorization = capability.authorization
+        payload = {
+            "schema": HOLDOUT_AUTHORIZATION_SCHEMA,
+            # Every canonical authorization field.
+            **{
+                field.name: (
+                    list(getattr(authorization, field.name))
+                    if isinstance(getattr(authorization, field.name), tuple)
+                    else dict(getattr(authorization, field.name))
+                    if isinstance(getattr(authorization, field.name), Mapping)
+                    else getattr(authorization, field.name)
+                )
+                for field in dataclasses.fields(authorization)
+            },
+            # Verified runtime identities the loader depends on.
+            "repository_branch": capability.repository.branch,
+            "repository_commit": capability.repository.commit,
+            "repository_dirty": capability.repository.dirty,
+            "manifest_sha256": capability.manifest.sha256,
+            "manifest_status": capability.manifest.status,
+            "manifest_file_count": capability.manifest.file_count,
+            "benchmark_root": capability.benchmark_root.as_posix(),
+            "attempt_root": capability.attempt_root.as_posix(),
+        }
+        return _sha256_bytes(_canonical_json_bytes(payload))
+
+    def _mint(
+        *,
+        authorization: HoldoutAuthorization,
+        repository: RepositoryState,
+        manifest: ManifestIdentity,
+        benchmark_root: Path,
+        attempt_root: Path,
+    ) -> VerifiedHoldoutAuthorization:
+        capability = VerifiedHoldoutAuthorization(
+            authorization=authorization,
+            repository=repository,
+            manifest=manifest,
+            benchmark_root=benchmark_root,
+            attempt_root=attempt_root,
+        )
+        # Keyed by the instance itself, so a copy is never the same capability.
+        # `keepalive` pins the instance so its id() can never be recycled.
+        keepalive.append(capability)
+        issued[id(capability)] = _fingerprint(capability)
+        return capability
+
+    def _is_registered(capability: Any) -> bool:
+        if not isinstance(capability, VerifiedHoldoutAuthorization):
+            return False
+        recorded = issued.get(id(capability))
+        if recorded is None:
+            return False
+        try:
+            return recorded == _fingerprint(capability)
+        except Exception:  # noqa: BLE001 -- fail closed on any malformed field
+            return False
+
+    def verify_holdout_authorization(
+        authorization: HoldoutAuthorization,
+        *,
+        repo_root: Path = ROOT,
+        benchmark_root: Path | None = None,
+        cli_output_root: Path | None = None,
+        hooks: RunnerHooks | None = None,
+        analysis_contract_sha256: str,
+        mapping_sha256: str,
+        settings: Settings | None = None,
+        case_timeout_seconds: float | None = None,
+    ) -> VerifiedHoldoutAuthorization:
+        """Full fail-closed holdout preflight, in the plan's mandated order.
+
+        Order (07_PHASE_12E4_HOLDOUT_PLAN.md section 7): the authorization is
+        already parsed; then repository identity, then EVERY
+        benchmark-independent contract/schema/mapping gate, then runtime safety
+        settings, then the FINAL frozen manifest, then the external attempt
+        root, then the atomic claim, then the durable start receipt. A request
+        failing any gate above the claim leaves no attempt root, no receipt and
+        triggers no loader call.
+        """
+        active_hooks = hooks or RunnerHooks()
+        benchmark_path = (benchmark_root or repo_root / "datasets" / "v2").resolve()
+
+        repository, manifest = _verify_holdout_identity_preclaim(
+            authorization,
+            repo_root=repo_root,
+            benchmark_path=benchmark_path,
+            analysis_contract_sha256=analysis_contract_sha256,
+            mapping_sha256=mapping_sha256,
+            settings=settings,
+            case_timeout_seconds=case_timeout_seconds,
+            hooks=active_hooks,
+        )
+
+        attempt_root = validate_holdout_attempt_root(
+            authorization,
+            repo_root=repo_root,
+            benchmark_root=benchmark_path,
+            cli_output_root=cli_output_root,
+        )
+        # Everything verifiable without touching the filesystem has passed.
+        claim_holdout_attempt_root(attempt_root)
+        receipt = build_start_receipt(
+            authorization,
+            repository=repository,
+            manifest=manifest,
+            started_at_utc=datetime.datetime.now(datetime.timezone.utc)
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z"),
+        )
+        # A receipt-write failure deliberately leaves the claimed root in place
+        # and propagates: the attempt is burned, no loader runs, no cleanup.
+        write_start_receipt(attempt_root, receipt)
+
+        return _mint(
+            authorization=authorization,
+            repository=repository,
+            manifest=manifest,
+            benchmark_root=benchmark_path,
+            attempt_root=attempt_root,
+        )
+
+    def verify_holdout_authorization_for_analysis(
+        authorization: HoldoutAuthorization,
+        *,
+        attempt_root: Path,
+        repo_root: Path = ROOT,
+        benchmark_root: Path | None = None,
+        hooks: RunnerHooks | None = None,
+        analysis_contract_sha256: str,
+        mapping_sha256: str,
+    ) -> VerifiedHoldoutAuthorization:
+        """Analyzer-side verifier: same identity gates, no claim, no receipt write.
+
+        The analyzer never claims an attempt root; it reads one the runner
+        already claimed. It still re-derives every identity itself rather than
+        trusting a hash stored in a runner artifact, and it mints through the
+        same closure-private path, so no caller can fabricate a capability.
+        """
+        active_hooks = hooks or RunnerHooks()
+        benchmark_path = (benchmark_root or repo_root / "datasets" / "v2").resolve()
+
+        repository, manifest = _verify_holdout_identity_preclaim(
+            authorization,
+            repo_root=repo_root,
+            benchmark_path=benchmark_path,
+            analysis_contract_sha256=analysis_contract_sha256,
+            mapping_sha256=mapping_sha256,
+            settings=None,
+            case_timeout_seconds=None,
+            hooks=active_hooks,
+        )
+        resolved_root = validate_holdout_attempt_root(
+            authorization,
+            repo_root=repo_root,
+            benchmark_root=benchmark_path,
+            cli_output_root=attempt_root,
+            require_absent=False,
+        )
+        return _mint(
+            authorization=authorization,
+            repository=repository,
+            manifest=manifest,
+            benchmark_root=benchmark_path,
+            attempt_root=resolved_root,
+        )
+
+    return (
+        verify_holdout_authorization,
+        verify_holdout_authorization_for_analysis,
+        _is_registered,
+    )
+
+
+(
+    verify_holdout_authorization,
+    verify_holdout_authorization_for_analysis,
+    _holdout_capability_is_valid,
+) = _build_holdout_capability_system()
 
 
 @dataclass(frozen=True)
@@ -269,8 +642,30 @@ class RunRequest:
 
 
 @dataclass(frozen=True)
+class HoldoutRunRequest:
+    """Holdout execution request. Deliberately has no `split` field.
+
+    It is a separate type from `RunRequest` so the ordinary and holdout paths
+    can never be merged behind one flag (07_PHASE_12E4_HOLDOUT_PLAN.md
+    section 2). The whole request is derived from the external authorization.
+    """
+
+    authorization_path: Path
+    output_root: Path
+    analysis_contract_sha256: str
+    mapping_sha256: str
+    case_timeout_seconds: float = 30.0
+
+    @property
+    def split(self) -> str:
+        raise AttributeError(
+            "HoldoutRunRequest has no split; holdout is not a SUPPORTED_SPLITS member"
+        )
+
+
+@dataclass(frozen=True)
 class PreflightContext:
-    request: RunRequest
+    request: RunRequest | HoldoutRunRequest
     repository: RepositoryState
     benchmark_root: Path
     manifest: ManifestIdentity
@@ -283,6 +678,11 @@ class PreflightContext:
     experiment_id: str
     expected_ids_by_config: Mapping[str, tuple[str, ...]]
     expected_scope_ids_by_config: Mapping[str, Mapping[str, tuple[str, ...]]]
+    # Carried explicitly so the execution code never has to ask a request
+    # object for its split -- HoldoutRunRequest deliberately has no split.
+    split: str = ""
+    case_timeout_seconds: float = 30.0
+    holdout_capability: VerifiedHoldoutAuthorization | None = None
 
 
 @dataclass(frozen=True)
@@ -607,9 +1007,669 @@ def _validate_output_root(output_root: Path, repo_root: Path, benchmark_root: Pa
     return resolved
 
 
+# ---------------------------------------------------------------------------
+# Phase 12E.4: canonical holdout authorization parsing
+# ---------------------------------------------------------------------------
+
+
+def _canonical_authorization_bytes(payload: Mapping[str, Any]) -> bytes:
+    """Exact canonical serialization required of an authorization file."""
+    text = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return text.encode("utf-8") + b"\n"
+
+
+def _require_utc_timestamp(value: Any, field_name: str) -> str:
+    if not isinstance(value, str) or not value.endswith("Z"):
+        raise HoldoutAuthorizationError(
+            "authorization_field", f"{field_name} must be a UTC timestamp ending in Z"
+        )
+    # Python 3.11+ `fromisoformat` also accepts a space separator; the canonical
+    # authorization form requires the ISO-8601 'T' separator explicitly.
+    if not _ISO_UTC_RE.fullmatch(value):
+        raise HoldoutAuthorizationError(
+            "authorization_field", f"{field_name} must use the canonical ISO-8601 'T' separator"
+        )
+    try:
+        parsed = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise HoldoutAuthorizationError(
+            "authorization_field", f"{field_name} is not a valid ISO-8601 timestamp"
+        ) from exc
+    if parsed.tzinfo is None or parsed.utcoffset() != datetime.timedelta(0):
+        raise HoldoutAuthorizationError("authorization_field", f"{field_name} must be UTC")
+    return value
+
+
+def parse_holdout_authorization(
+    path: Path,
+    *,
+    repo_root: Path | None = None,
+    benchmark_root: Path | None = None,
+) -> HoldoutAuthorization:
+    """Strictly parse an external canonical maintainer authorization file.
+
+    Rejects semantically equivalent but non-canonical encodings: a BOM, CRLF,
+    a missing or duplicated trailing newline, added whitespace, or any key
+    ordering other than sorted. The SHA-256 is taken over the complete
+    canonical byte sequence including the final LF.
+
+    When `repo_root` is supplied the file must also live outside the repository
+    and outside the frozen benchmark tree, and must not be a symlink.
+    """
+    if repo_root is not None:
+        benchmark_path = (benchmark_root or repo_root / "datasets" / "v2").resolve()
+        assert_external_holdout_path(
+            Path(path).expanduser().absolute(),
+            repo_root=repo_root,
+            benchmark_root=benchmark_path,
+            label="authorization_path",
+        )
+    try:
+        raw = Path(path).read_bytes()
+    except OSError as exc:
+        raise HoldoutAuthorizationError(
+            "authorization_unreadable", "holdout authorization file could not be read"
+        ) from exc
+
+    if raw.startswith(b"\xef\xbb\xbf"):
+        raise HoldoutAuthorizationError("authorization_encoding", "authorization must not contain a BOM")
+    if b"\r" in raw:
+        raise HoldoutAuthorizationError("authorization_encoding", "authorization must not contain CR")
+    if not raw.endswith(b"\n") or raw.endswith(b"\n\n"):
+        raise HoldoutAuthorizationError(
+            "authorization_encoding", "authorization must end with exactly one LF"
+        )
+
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise HoldoutAuthorizationError("authorization_encoding", "authorization must be UTF-8") from exc
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise HoldoutAuthorizationError("authorization_json", "authorization is not valid JSON") from exc
+    if not isinstance(payload, dict):
+        raise HoldoutAuthorizationError("authorization_json", "authorization must be a JSON object")
+    if _canonical_authorization_bytes(payload) != raw:
+        raise HoldoutAuthorizationError(
+            "authorization_encoding",
+            "authorization is not exact canonical JSON",
+        )
+
+    keys = set(payload)
+    missing = sorted(HOLDOUT_AUTHORIZATION_KEYS - keys)
+    extra = sorted(keys - HOLDOUT_AUTHORIZATION_KEYS)
+    if missing:
+        raise HoldoutAuthorizationError("authorization_keys", f"authorization is missing keys: {missing}")
+    if extra:
+        raise HoldoutAuthorizationError("authorization_keys", f"authorization has unexpected keys: {extra}")
+
+    if payload["schema_version"] != 1 or type(payload["schema_version"]) is not int:
+        raise HoldoutAuthorizationError("authorization_schema", "authorization schema_version must be 1")
+    if payload["holdout_authorized"] is not True:
+        raise HoldoutAuthorizationError(
+            "authorization_flag", "holdout_authorized must be the JSON boolean true"
+        )
+
+    authorization_id = payload["authorization_id"]
+    if not isinstance(authorization_id, str) or not _CANONICAL_UUID_RE.fullmatch(authorization_id):
+        raise HoldoutAuthorizationError(
+            "authorization_field", "authorization_id must be a canonical lowercase UUID"
+        )
+    issued_at = _require_utc_timestamp(payload["issued_at_utc"], "issued_at_utc")
+    if payload["issued_by"] != HOLDOUT_AUTHORIZATION_ISSUER:
+        raise HoldoutAuthorizationError("authorization_field", "issued_by is not the recognized maintainer")
+    if payload["purpose"] != HOLDOUT_AUTHORIZATION_PURPOSE:
+        raise HoldoutAuthorizationError("authorization_field", "purpose is not the approved holdout purpose")
+
+    branch = payload["execution_branch"]
+    if not isinstance(branch, str) or not _SAFE_IDENTIFIER_RE.fullmatch(branch):
+        raise HoldoutAuthorizationError("authorization_field", "execution_branch is unsupported")
+    commit = payload["execution_commit"]
+    if not isinstance(commit, str) or not _FULL_SHA_RE.fullmatch(commit):
+        raise HoldoutAuthorizationError(
+            "authorization_field", "execution_commit must be 40 lowercase hexadecimal characters"
+        )
+    if payload["provider_id"] != SUPPORTED_PROVIDER_ID:
+        raise HoldoutAuthorizationError("authorization_field", "provider_id must be mock")
+
+    for sha_field in ("benchmark_manifest_sha256", "analysis_contract_sha256", "mapping_sha256"):
+        value = payload[sha_field]
+        if not isinstance(value, str) or not _SHA256_RE.fullmatch(value):
+            raise HoldoutAuthorizationError(
+                "authorization_field", f"{sha_field} must be a lowercase SHA-256"
+            )
+
+    config_ids = payload["config_ids"]
+    expected_ids = list(CONFIG_REGISTRY)
+    if not isinstance(config_ids, list) or config_ids != expected_ids:
+        raise HoldoutAuthorizationError(
+            "authorization_configs",
+            "config_ids must list the exact approved C0-C7 identifiers in order",
+        )
+    config_hashes = payload["config_hashes"]
+    if not isinstance(config_hashes, dict) or set(config_hashes) != set(expected_ids):
+        raise HoldoutAuthorizationError(
+            "authorization_configs", "config_hashes must contain exactly the eight approved configs"
+        )
+    for config_id in expected_ids:
+        value = config_hashes[config_id]
+        if not isinstance(value, str) or value != CONFIG_REGISTRY[config_id].config_hash:
+            raise HoldoutAuthorizationError(
+                "authorization_configs", f"config_hash mismatch for {config_id}"
+            )
+
+    for version_field, expected in (
+        ("result_schema_version", HOLDOUT_RESULT_SCHEMA_VERSION),
+        ("result_manifest_schema_version", HOLDOUT_RESULT_MANIFEST_SCHEMA_VERSION),
+    ):
+        value = payload[version_field]
+        if type(value) is not int or value != expected:
+            raise HoldoutAuthorizationError(
+                "authorization_contract", f"{version_field} does not match the holdout contract"
+            )
+    for version_field in ("analysis_schema_version", "analysis_manifest_schema_version"):
+        value = payload[version_field]
+        if type(value) is not int or value < 1:
+            raise HoldoutAuthorizationError(
+                "authorization_contract", f"{version_field} must be a positive integer"
+            )
+
+    output_root = payload["output_root"]
+    if not isinstance(output_root, str) or not output_root.strip():
+        raise HoldoutAuthorizationError("authorization_field", "output_root must be a non-empty string")
+
+    attempt = payload["attempt"]
+    if type(attempt) is not int or attempt < 1:
+        raise HoldoutAuthorizationError("authorization_attempt", "attempt must be an integer >= 1")
+    supersedes = payload["supersedes_authorization_sha256"]
+    if attempt == 1:
+        if supersedes is not None:
+            raise HoldoutAuthorizationError(
+                "authorization_attempt", "attempt 1 must not supersede a previous authorization"
+            )
+    else:
+        if not isinstance(supersedes, str) or not _SHA256_RE.fullmatch(supersedes):
+            raise HoldoutAuthorizationError(
+                "authorization_attempt",
+                "a retry attempt must reference the superseded authorization SHA-256",
+            )
+
+    return HoldoutAuthorization(
+        schema_version=payload["schema_version"],
+        authorization_id=authorization_id,
+        issued_at_utc=issued_at,
+        issued_by=payload["issued_by"],
+        purpose=payload["purpose"],
+        execution_branch=branch,
+        execution_commit=commit,
+        benchmark_manifest_sha256=payload["benchmark_manifest_sha256"],
+        provider_id=payload["provider_id"],
+        config_ids=tuple(config_ids),
+        config_hashes=dict(config_hashes),
+        result_schema_version=payload["result_schema_version"],
+        result_manifest_schema_version=payload["result_manifest_schema_version"],
+        analysis_schema_version=payload["analysis_schema_version"],
+        analysis_manifest_schema_version=payload["analysis_manifest_schema_version"],
+        analysis_contract_sha256=payload["analysis_contract_sha256"],
+        mapping_sha256=payload["mapping_sha256"],
+        output_root=output_root,
+        attempt=attempt,
+        supersedes_authorization_sha256=supersedes,
+        holdout_authorized=True,
+        authorization_sha256=_sha256_bytes(raw),
+    )
+
+
+def assert_external_holdout_path(
+    candidate: Path,
+    *,
+    repo_root: Path,
+    benchmark_root: Path,
+    label: str,
+    allow_symlink: bool = False,
+) -> Path:
+    """Shared containment contract for the authorization file and attempt root.
+
+    Best-effort only. Resolution follows symlinks/junctions so an alias that
+    lands back inside the repository is rejected, but this does NOT claim
+    complete protection against hard links, reparse-point races or a malicious
+    local administrator (see the trusted-maintainer threat model).
+    """
+    if not candidate.is_absolute():
+        raise IntegrityError(label, f"{label} must be an absolute path")
+    if not allow_symlink and candidate.is_symlink():
+        raise IntegrityError(label, f"{label} must not be a symlink")
+
+    resolved = candidate.expanduser().resolve()
+    repo = repo_root.resolve()
+    benchmark = benchmark_root.resolve()
+    for barrier, message in (
+        (repo, "must remain outside the repository"),
+        (benchmark, "overlaps protected frozen benchmark input"),
+    ):
+        if resolved == barrier or _is_within(resolved, barrier):
+            raise IntegrityError("output_containment", f"{label} {message}")
+    return resolved
+
+
+def validate_holdout_attempt_root(
+    authorization: HoldoutAuthorization,
+    *,
+    repo_root: Path,
+    benchmark_root: Path,
+    cli_output_root: Path | None = None,
+    require_absent: bool = True,
+) -> Path:
+    """Resolve and validate the external attempt root.
+
+    `require_absent=True` (runner) demands the root not yet exist so the claim
+    can be atomic. `require_absent=False` (analyzer) accepts an already-claimed
+    root but applies the identical containment contract.
+    """
+    resolved = assert_external_holdout_path(
+        Path(authorization.output_root),
+        repo_root=repo_root,
+        benchmark_root=benchmark_root,
+        label="attempt_root",
+        allow_symlink=True,  # existence/symlink handled explicitly below
+    )
+    if cli_output_root is not None:
+        cli_resolved = Path(cli_output_root).expanduser().resolve()
+        if cli_resolved != resolved:
+            raise IntegrityError(
+                "attempt_root", "supplied output root does not match the authorized attempt root"
+            )
+
+    repo = repo_root.resolve()
+    parent = resolved.parent
+    if not parent.exists():
+        raise IntegrityError("attempt_root", "attempt root parent directory must already exist")
+    resolved_parent = parent.resolve()
+    if not resolved_parent.is_dir():
+        raise IntegrityError("attempt_root", "attempt root parent must be a directory")
+    # The nearest existing parent is resolved separately so a symlink or
+    # junction cannot redirect an apparently external path back inside.
+    if resolved_parent == repo or _is_within(resolved_parent, repo):
+        raise IntegrityError(
+            "output_containment", "attempt root parent resolves inside the repository"
+        )
+
+    if require_absent:
+        if resolved.exists() or resolved.is_symlink():
+            raise IntegrityError(
+                "attempt_root_exists", "attempt root already exists; overwrite refused"
+            )
+    else:
+        if Path(authorization.output_root).is_symlink():
+            raise IntegrityError("attempt_root", "attempt root must not be a symlink")
+        if not resolved.is_dir():
+            raise IntegrityError("attempt_root", "authorized attempt root does not exist")
+    return resolved
+
+
+def claim_holdout_attempt_root(attempt_root: Path) -> Path:
+    """Atomically claim the attempt root. A second claim always fails."""
+    try:
+        attempt_root.mkdir(parents=False, exist_ok=False)
+    except FileExistsError as exc:
+        raise IntegrityError(
+            "attempt_root_exists", "attempt root was claimed concurrently; overwrite refused"
+        ) from exc
+    except OSError as exc:
+        raise IntegrityError("attempt_root", "attempt root could not be claimed") from exc
+    return attempt_root
+
+
+def build_start_receipt(
+    authorization: HoldoutAuthorization,
+    *,
+    repository: RepositoryState,
+    manifest: ManifestIdentity,
+    started_at_utc: str,
+) -> dict[str, Any]:
+    """Safe identity-only receipt. Carries no path, query or authorization text."""
+    receipt = {
+        "schema_version": HOLDOUT_START_RECEIPT_SCHEMA,
+        "authorization_id": authorization.authorization_id,
+        "holdout_authorization_sha256": authorization.authorization_sha256,
+        "attempt": authorization.attempt,
+        "supersedes_authorization_sha256": authorization.supersedes_authorization_sha256,
+        "execution_branch": repository.branch,
+        "execution_commit": repository.commit,
+        "benchmark_manifest_sha256": manifest.sha256,
+        "benchmark_manifest_status": manifest.status,
+        "provider_id": authorization.provider_id,
+        "config_ids": list(authorization.config_ids),
+        "config_hashes": dict(authorization.config_hashes),
+        "result_schema_version": authorization.result_schema_version,
+        "result_manifest_schema_version": authorization.result_manifest_schema_version,
+        "analysis_schema_version": authorization.analysis_schema_version,
+        "analysis_manifest_schema_version": authorization.analysis_manifest_schema_version,
+        "analysis_contract_sha256": authorization.analysis_contract_sha256,
+        "mapping_sha256": authorization.mapping_sha256,
+        "started_at_utc": started_at_utc,
+        "status": "claimed",
+    }
+    if set(receipt) != HOLDOUT_START_RECEIPT_KEYS:
+        raise IntegrityError("start_receipt", "start receipt key set is not the approved contract")
+    scan_forbidden_artifact_content(receipt)
+    _assert_no_absolute_path(receipt)
+    return receipt
+
+
+def verify_start_receipt(
+    receipt: Any,
+    authorization: HoldoutAuthorization,
+    *,
+    repository: RepositoryState,
+    manifest: ManifestIdentity,
+) -> None:
+    """Recompute and compare EVERY stored receipt identity.
+
+    Codex finding: the analyzer previously checked only the authorization hash
+    and attempt, so a receipt written under a different branch, commit,
+    benchmark, provider or contract set would still be accepted.
+    """
+    if not isinstance(receipt, dict):
+        raise IntegrityError("start_receipt", "start receipt is not a JSON object")
+    keys = set(receipt)
+    missing = sorted(HOLDOUT_START_RECEIPT_KEYS - keys)
+    extra = sorted(keys - HOLDOUT_START_RECEIPT_KEYS)
+    if missing:
+        raise IntegrityError("start_receipt", f"start receipt is missing keys: {missing}")
+    if extra:
+        raise IntegrityError("start_receipt", f"start receipt has unexpected keys: {extra}")
+
+    expected = build_start_receipt(
+        authorization,
+        repository=repository,
+        manifest=manifest,
+        started_at_utc=receipt.get("started_at_utc", ""),
+    )
+    for field_name in sorted(HOLDOUT_START_RECEIPT_KEYS - {"started_at_utc"}):
+        if receipt[field_name] != expected[field_name]:
+            raise IntegrityError(
+                "start_receipt", f"start receipt {field_name} disagrees with the verified identity"
+            )
+    if not isinstance(receipt["started_at_utc"], str) or not _ISO_UTC_RE.fullmatch(
+        receipt["started_at_utc"]
+    ):
+        raise IntegrityError("start_receipt", "start receipt started_at_utc is not canonical UTC")
+    _assert_no_absolute_path(receipt)
+    scan_forbidden_artifact_content(receipt)
+
+
+def _assert_no_absolute_path(value: Any, *, location: str = "root") -> None:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            _assert_no_absolute_path(item, location=f"{location}.{key}")
+        return
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            _assert_no_absolute_path(item, location=f"{location}[{index}]")
+        return
+    if isinstance(value, str) and _looks_like_absolute_path(value):
+        raise IntegrityError("forbidden_artifact_path", f"{location} contains an absolute path")
+
+
+def write_start_receipt(attempt_root: Path, receipt: Mapping[str, Any]) -> Path:
+    """Durably write the receipt before any holdout record may be read.
+
+    Exclusive create, then flush + fsync the file, then best-effort fsync of the
+    parent directory so the entry itself is durable. A failure here propagates
+    and the claimed attempt root is deliberately left in place.
+    """
+    payload = _canonical_json_bytes(receipt)
+    destination = attempt_root / "start-receipt.json"
+    with destination.open("xb") as handle:
+        handle.write(payload)
+        handle.flush()
+        os.fsync(handle.fileno())
+    _fsync_directory_best_effort(attempt_root)
+    return destination
+
+
+def _fsync_directory_best_effort(directory: Path) -> None:
+    """fsync a directory entry where the platform supports it (POSIX)."""
+    try:
+        fd = os.open(str(directory), os.O_RDONLY)
+    except (OSError, AttributeError, NotImplementedError):
+        return  # Windows has no directory fsync; documented residual risk.
+    try:
+        os.fsync(fd)
+    except (OSError, NotImplementedError):
+        pass
+    finally:
+        os.close(fd)
+
+
+def verify_holdout_contract_identities(
+    authorization: HoldoutAuthorization,
+    *,
+    analysis_contract_sha256: str,
+    mapping_sha256: str,
+    case_timeout_seconds: float | None = None,
+) -> None:
+    """Every benchmark-independent contract gate, checked BEFORE any claim.
+
+    Codex finding: contract/schema/mapping/timeout errors previously surfaced
+    only after the attempt root was created (or not at all in the runner),
+    leaving a claimed root and a receipt behind for a request that could never
+    have been valid. Nothing here reads a benchmark record or touches the
+    filesystem.
+    """
+    validate_config_registry(CONFIG_REGISTRY)
+    _validate_holdout_result_schema_contract()
+
+    if authorization.provider_id != SUPPORTED_PROVIDER_ID:
+        raise IntegrityError("provider_identity", "authorized holdout requires the mock provider")
+    if list(authorization.config_ids) != list(CONFIG_REGISTRY):
+        raise IntegrityError(
+            "config_identity", "authorization config order is not the approved C0-C7 order"
+        )
+    for config_id, config in CONFIG_REGISTRY.items():
+        if authorization.config_hashes.get(config_id) != config.config_hash:
+            raise IntegrityError(
+                "config_identity", "authorization config hash disagrees with the canonical registry"
+            )
+
+    if authorization.result_schema_version != HOLDOUT_RESULT_SCHEMA_VERSION:
+        raise IntegrityError("result_schema", "authorization result schema identity is unsupported")
+    if authorization.result_manifest_schema_version != HOLDOUT_RESULT_MANIFEST_SCHEMA_VERSION:
+        raise IntegrityError(
+            "result_schema", "authorization result-manifest schema identity is unsupported"
+        )
+    if authorization.analysis_schema_version != HOLDOUT_ANALYSIS_SCHEMA_VERSION:
+        raise IntegrityError(
+            "analysis_schema", "authorization analysis schema identity is unsupported"
+        )
+    if authorization.analysis_manifest_schema_version != HOLDOUT_ANALYSIS_MANIFEST_SCHEMA_VERSION:
+        raise IntegrityError(
+            "analysis_schema", "authorization analysis-manifest schema identity is unsupported"
+        )
+    if authorization.analysis_contract_sha256 != analysis_contract_sha256:
+        raise IntegrityError(
+            "analysis_contract", "authorization analysis contract hash does not match this build"
+        )
+    if authorization.mapping_sha256 != mapping_sha256:
+        raise IntegrityError(
+            "mapping_identity", "authorization mapping hash does not match this build"
+        )
+
+    if case_timeout_seconds is not None:
+        if type(case_timeout_seconds) is bool or not isinstance(case_timeout_seconds, (int, float)):
+            raise IntegrityError("case_timeout", "case timeout must be a real number")
+        if not math.isfinite(case_timeout_seconds) or not 0 < case_timeout_seconds <= 3600:
+            raise IntegrityError("case_timeout", "case timeout is outside the supported bound")
+
+
+def _require_positive_int(value: Any, name: str, *, maximum: int | None = None) -> None:
+    """Strict positive-integer gate. Rejects bool explicitly (bool is an int)."""
+    if type(value) is bool or not isinstance(value, int):
+        raise IntegrityError("runtime_safety", f"{name} must be an integer, not {type(value).__name__}")
+    if value <= 0:
+        raise IntegrityError("runtime_safety", f"{name} must be positive")
+    if maximum is not None and value > maximum:
+        raise IntegrityError("runtime_safety", f"{name} exceeds its supported maximum")
+
+
+def validate_holdout_runtime_safety(
+    settings: Settings, *, case_timeout_seconds: float | None = None
+) -> None:
+    """Validate EVERY runtime/safety setting that needs no benchmark record.
+
+    Codex finding: an invalid setting such as `retrieval_max_batch_size = 0`
+    previously survived until deep inside execution, so the attempt root was
+    claimed, the receipt written and the holdout loader invoked before the
+    request was rejected. This function is called before the claim, so an
+    invalid configuration leaves no attempt root, no receipt and triggers no
+    loader call.
+    """
+    _require_positive_int(settings.retrieval_max_batch_size, "retrieval_max_batch_size")
+    _require_positive_int(settings.retrieval_max_document_chars, "retrieval_max_document_chars")
+    _require_positive_int(settings.retrieval_max_query_chars, "retrieval_max_query_chars")
+    _require_positive_int(settings.retrieval_max_query_terms, "retrieval_max_query_terms")
+    _require_positive_int(
+        settings.retrieval_max_top_k, "retrieval_max_top_k", maximum=RAG_MAX_TOP_K_HARD_LIMIT
+    )
+    _require_positive_int(settings.retrieval_chunk_max_chars, "retrieval_chunk_max_chars")
+    _require_positive_int(settings.retrieval_busy_timeout_ms, "retrieval_busy_timeout_ms")
+    _require_positive_int(settings.rag_default_top_k, "rag_default_top_k")
+    _require_positive_int(settings.rag_max_top_k, "rag_max_top_k", maximum=RAG_MAX_TOP_K_HARD_LIMIT)
+    _require_positive_int(
+        settings.rag_max_aggregate_context_chars,
+        "rag_max_aggregate_context_chars",
+        maximum=RAG_MAX_AGGREGATE_CONTEXT_CHARS_HARD_LIMIT,
+    )
+    _require_positive_int(
+        settings.dlp_max_inspect_chars,
+        "dlp_max_inspect_chars",
+        maximum=DLP_MAX_INSPECT_CHARS_HARD_LIMIT,
+    )
+    if type(settings.retrieval_chunk_overlap_chars) is bool or not isinstance(
+        settings.retrieval_chunk_overlap_chars, int
+    ):
+        raise IntegrityError("runtime_safety", "retrieval_chunk_overlap_chars must be an integer")
+    if settings.retrieval_chunk_overlap_chars < 0:
+        raise IntegrityError("runtime_safety", "retrieval_chunk_overlap_chars must not be negative")
+    if settings.retrieval_chunk_overlap_chars >= settings.retrieval_chunk_max_chars:
+        raise IntegrityError(
+            "runtime_safety", "retrieval_chunk_overlap_chars must be smaller than the chunk size"
+        )
+    if settings.rag_default_top_k > settings.rag_max_top_k:
+        raise IntegrityError("runtime_safety", "rag_default_top_k must not exceed rag_max_top_k")
+    if settings.rag_max_top_k > settings.retrieval_max_top_k:
+        raise IntegrityError("runtime_safety", "rag_max_top_k must not exceed retrieval_max_top_k")
+    if not isinstance(settings.rag_return_provenance, bool):
+        raise IntegrityError("runtime_safety", "rag_return_provenance must be a boolean")
+    _require_positive_int(
+        settings.llm_provider_timeout_seconds, "llm_provider_timeout_seconds", maximum=3600
+    )
+
+    if case_timeout_seconds is not None:
+        if type(case_timeout_seconds) is bool or not isinstance(case_timeout_seconds, (int, float)):
+            raise IntegrityError("runtime_safety", "case timeout must be a real number")
+        if not math.isfinite(case_timeout_seconds) or not 0 < case_timeout_seconds <= 3600:
+            raise IntegrityError("runtime_safety", "case timeout is outside the supported bound")
+
+
+def _verify_holdout_identity_preclaim(
+    authorization: HoldoutAuthorization,
+    *,
+    repo_root: Path,
+    benchmark_path: Path,
+    analysis_contract_sha256: str,
+    mapping_sha256: str,
+    settings: Settings | None,
+    case_timeout_seconds: float | None,
+    hooks: RunnerHooks,
+) -> tuple[RepositoryState, ManifestIdentity]:
+    """Shared identity gate for both the runner and the analyzer."""
+    repository = hooks.repository_state_loader(repo_root)
+    if repository.branch != authorization.execution_branch:
+        raise IntegrityError("branch_mismatch", "repository branch does not match the authorization")
+    if repository.commit != authorization.execution_commit:
+        raise IntegrityError("commit_mismatch", "repository commit does not match the authorization")
+    if repository.dirty:
+        raise IntegrityError("git_dirty", "working tree must be clean before holdout evaluation")
+
+    verify_holdout_contract_identities(
+        authorization,
+        analysis_contract_sha256=analysis_contract_sha256,
+        mapping_sha256=mapping_sha256,
+        case_timeout_seconds=case_timeout_seconds,
+    )
+    if settings is not None:
+        validate_holdout_runtime_safety(settings, case_timeout_seconds=case_timeout_seconds)
+
+    manifest = verify_frozen_manifest(benchmark_path)
+    if manifest.sha256 != authorization.benchmark_manifest_sha256:
+        raise IntegrityError(
+            "benchmark_manifest", "frozen benchmark manifest does not match the authorization"
+        )
+    if manifest.status != "final":
+        raise IntegrityError("benchmark_manifest", "holdout requires the FINAL frozen manifest")
+    return repository, manifest
+
+
+def _validate_holdout_result_schema_contract() -> None:
+    if RESULT_SCHEMA_VERSION != 2 or RESULT_MANIFEST_SCHEMA_VERSION != 1:
+        raise IntegrityError("result_schema", "development/validation schema identity changed")
+    if HOLDOUT_RESULT_SCHEMA_VERSION != 1 or HOLDOUT_RESULT_MANIFEST_SCHEMA_VERSION != 1:
+        raise IntegrityError("result_schema", "holdout schema identity is unsupported")
+
+
+def load_authorized_holdout_benchmark(
+    verified_capability: VerifiedHoldoutAuthorization,
+    *,
+    benchmark_root: Path | None = None,
+    repo_root: Path = ROOT,
+) -> LoadedBenchmark:
+    """Load the frozen holdout split. The ONLY function permitted to do so.
+
+    `load_split_benchmark` never accepts holdout, and this loader refuses
+    anything that is not a capability minted by a verifier in this process and
+    still matching every identity it was registered with.
+    """
+    if not isinstance(verified_capability, VerifiedHoldoutAuthorization):
+        raise IntegrityError(
+            "holdout_capability", "authorized holdout loading requires a verified capability"
+        )
+    if not verified_capability.is_valid():
+        raise IntegrityError("holdout_capability", "holdout capability failed verification")
+
+    benchmark_path = (benchmark_root or repo_root / "datasets" / "v2").resolve()
+    if benchmark_path != verified_capability.benchmark_root:
+        raise IntegrityError(
+            "holdout_capability", "benchmark root does not match the verified capability"
+        )
+    return _load_frozen_split(benchmark_path, HOLDOUT_SPLIT)
+
+
 def load_split_benchmark(benchmark_root: Path, requested_split: str) -> LoadedBenchmark:
+    """Ordinary development/validation loader. Never loads holdout.
+
+    Holdout is reachable only through `load_authorized_holdout_benchmark`, which
+    demands a verified capability. This function has no `authorized` parameter
+    by design: a boolean must never be the only barrier protecting the holdout
+    split (07_PHASE_12E4_HOLDOUT_PLAN.md section 2).
+    """
     if requested_split not in SUPPORTED_SPLITS:
         raise IntegrityError("split_not_allowed", "evaluation split must be development or validation")
+    return _load_frozen_split(benchmark_root, requested_split)
+
+
+def _load_frozen_split(benchmark_root: Path, requested_split: str) -> LoadedBenchmark:
+    """Shared strict loader. Callers are responsible for split authorization."""
+    if requested_split in SUPPORTED_SPLITS:
+        expected_case_count = 30
+        expected_scope_counts = EXPECTED_SCOPE_COUNTS_BY_SPLIT[requested_split]
+    elif requested_split == HOLDOUT_SPLIT:
+        expected_case_count = HOLDOUT_CASE_COUNT
+        expected_scope_counts = EXPECTED_HOLDOUT_SCOPE_COUNTS
+    else:
+        raise IntegrityError("split_not_allowed", "unknown benchmark split")
 
     corpus = _load_jsonl(benchmark_root / "corpus" / "documents.jsonl", "corpus/documents")
     cases = _load_jsonl(
@@ -694,7 +1754,7 @@ def load_split_benchmark(benchmark_root: Path, requested_split: str) -> LoadedBe
         scope_counts[scope] += 1
         validated_cases.append(case)
 
-    if len(validated_cases) != 30 or scope_counts != EXPECTED_SCOPE_COUNTS_BY_SPLIT[requested_split]:
+    if len(validated_cases) != expected_case_count or scope_counts != expected_scope_counts:
         raise IntegrityError("benchmark_case_set", f"{requested_split} expected-case set changed")
     if case_ids != set(labels_by_id):
         raise IntegrityError("benchmark_mapping", f"{requested_split} case and label identities differ")
@@ -827,8 +1887,13 @@ def _experiment_id(
     dependencies_sha256: str,
     split: str,
 ) -> str:
+    # The experiment identity must bind the schema the artifacts actually use.
+    # Codex finding: a holdout experiment previously bound the ordinary schema
+    # version 2, so a holdout run and a dev/val run could collide in identity.
     contract = {
-        "result_schema_version": RESULT_SCHEMA_VERSION,
+        "result_schema_version": (
+            HOLDOUT_RESULT_SCHEMA_VERSION if split == HOLDOUT_SPLIT else RESULT_SCHEMA_VERSION
+        ),
         "config_registry_version": CONFIG_REGISTRY_VERSION,
         "config_hashes": {
             config_id: CONFIG_REGISTRY[config_id].config_hash for config_id in CONFIG_REGISTRY
@@ -914,6 +1979,91 @@ def preflight(
         experiment_id=experiment_id,
         expected_ids_by_config=expected_ids,
         expected_scope_ids_by_config=expected_scope_ids,
+        split=request.split,
+        case_timeout_seconds=request.case_timeout_seconds,
+        holdout_capability=None,
+    )
+
+
+def holdout_preflight(
+    request: HoldoutRunRequest,
+    *,
+    repo_root: Path = ROOT,
+    benchmark_root: Path | None = None,
+    hooks: RunnerHooks | None = None,
+) -> PreflightContext:
+    """Fail-closed holdout preflight in the plan's mandated order.
+
+    Every rejection below happens before the attempt root is created and
+    before a single holdout record is read: the authorization is parsed first,
+    then `verify_holdout_authorization` performs identity, contract, manifest,
+    attempt-root, atomic-claim and start-receipt steps, and only afterwards is
+    the authorized loader allowed to touch the frozen holdout split.
+    """
+    active_hooks = hooks or RunnerHooks()
+    benchmark_path = (benchmark_root or repo_root / "datasets" / "v2").resolve()
+
+    authorization = parse_holdout_authorization(
+        request.authorization_path, repo_root=repo_root, benchmark_root=benchmark_path
+    )
+
+    active_settings = load_settings()
+    provider = active_hooks.provider_spec_loader(authorization.provider_id, active_settings)
+    _validate_provider(provider, allow_test_provider=active_hooks.allow_test_provider)
+    _validate_provider_environment(provider)
+
+    # Contract identities are supplied by the caller so the runner never has to
+    # import the analyzer; `analyze_v2_results` asserts these constants match.
+    capability = verify_holdout_authorization(
+        authorization,
+        repo_root=repo_root,
+        benchmark_root=benchmark_path,
+        cli_output_root=request.output_root,
+        hooks=active_hooks,
+        analysis_contract_sha256=request.analysis_contract_sha256,
+        mapping_sha256=request.mapping_sha256,
+        settings=active_settings,
+        case_timeout_seconds=request.case_timeout_seconds,
+    )
+
+    # Only now may frozen holdout records be read.
+    benchmark = load_authorized_holdout_benchmark(
+        capability,
+        benchmark_root=benchmark_path,
+        repo_root=repo_root,
+    )
+
+    config_ids = tuple(CONFIG_REGISTRY)
+    expected_ids, expected_scope_ids = _expected_case_sets(benchmark, config_ids)
+    safety_limits = _settings_safety_limits(active_settings, request.case_timeout_seconds)
+    dependencies = _dependency_inventory()
+    dependencies_hash = _sha256_bytes(_canonical_json_bytes(list(dependencies)))
+    experiment_id = _experiment_id(
+        capability.repository,
+        capability.manifest,
+        provider,
+        safety_limits,
+        dependencies_hash,
+        HOLDOUT_SPLIT,
+    )
+
+    return PreflightContext(
+        request=request,
+        repository=capability.repository,
+        benchmark_root=benchmark_path,
+        manifest=capability.manifest,
+        benchmark=benchmark,
+        provider=provider,
+        settings=active_settings,
+        dependencies=dependencies,
+        dependencies_sha256=dependencies_hash,
+        safety_limits=safety_limits,
+        experiment_id=experiment_id,
+        expected_ids_by_config=expected_ids,
+        expected_scope_ids_by_config=expected_scope_ids,
+        split=HOLDOUT_SPLIT,
+        case_timeout_seconds=request.case_timeout_seconds,
+        holdout_capability=capability,
     )
 
 
@@ -2210,8 +3360,8 @@ def _execute_config(
                             worker=worker,
                             repository=context.repository,
                             manifest=context.manifest,
-                            split=context.request.split,
-                            timeout_seconds=context.request.case_timeout_seconds,
+                            split=context.split,
+                            timeout_seconds=context.case_timeout_seconds,
                             timeout_recovery_check=verify_timeout_recovery,
                         )
                     )
@@ -2225,8 +3375,8 @@ def _execute_config(
                             worker=worker,
                             repository=context.repository,
                             manifest=context.manifest,
-                            split=context.request.split,
-                            timeout_seconds=context.request.case_timeout_seconds,
+                            split=context.split,
+                            timeout_seconds=context.case_timeout_seconds,
                             timeout_recovery_check=verify_timeout_recovery,
                         )
                     )
@@ -2285,7 +3435,7 @@ def _execute_config(
         "profile_id": config.profile.profile_id,
         "guard_profile": config.profile_payload,
         "environment": environment,
-        "split": context.request.split,
+        "split": context.split,
         "provider_id": context.provider.provider_id,
         "provider_behavior_hash": context.provider.behavior_hash,
         "safety_limits": dict(context.safety_limits),
@@ -2525,10 +3675,190 @@ def run_development_evaluation(
     )
 
 
+def _holdout_run_directory(attempt_root: Path, artifact: Mapping[str, Any]) -> Path:
+    """Holdout layout: <attempt-root>/runs/<experiment>/<config>/<run_id>."""
+    return (
+        attempt_root
+        / "runs"
+        / artifact["experiment_id"]
+        / artifact["config_id"]
+        / artifact["run_id"]
+    )
+
+
+def _augment_holdout_artifact(
+    artifact: dict[str, Any], capability: VerifiedHoldoutAuthorization
+) -> dict[str, Any]:
+    """Minimum strict extension: safe authorization and attempt identity only."""
+    authorization = capability.authorization
+    augmented = dict(artifact)
+    augmented["schema_version"] = HOLDOUT_RESULT_SCHEMA_VERSION
+    # The embedded environment block must describe the artifact it lives in.
+    # Required by the analyzer's environment identity check, which compares
+    # environment.result_schema_version against the artifact's own schema.
+    environment = dict(augmented["environment"])
+    environment["result_schema_version"] = HOLDOUT_RESULT_SCHEMA_VERSION
+    augmented["environment"] = environment
+    augmented["authorization_id"] = authorization.authorization_id
+    augmented["holdout_authorization_sha256"] = authorization.authorization_sha256
+    augmented["attempt"] = authorization.attempt
+    augmented["supersedes_authorization_sha256"] = authorization.supersedes_authorization_sha256
+    augmented["holdout_authorized"] = True
+    scan_forbidden_artifact_content(augmented)
+    _assert_no_absolute_path(augmented)
+    return augmented
+
+
+def _publish_holdout_artifact(
+    attempt_root: Path,
+    artifact: dict[str, Any],
+    capability: VerifiedHoldoutAuthorization,
+) -> WrittenRun:
+    scan_forbidden_artifact_content(artifact)
+    _assert_no_absolute_path(artifact)
+    result_bytes = _canonical_json_bytes(artifact)
+    result_hash = _sha256_bytes(result_bytes)
+    authorization = capability.authorization
+    result_manifest = {
+        "schema_version": HOLDOUT_RESULT_MANIFEST_SCHEMA_VERSION,
+        "result_file": "result.json",
+        "result_sha256": result_hash,
+        "result_size_bytes": len(result_bytes),
+        "result_schema_version": artifact["schema_version"],
+        "experiment_id": artifact["experiment_id"],
+        "run_id": artifact["run_id"],
+        "run_status": artifact["run_status"],
+        "config_id": artifact["config_id"],
+        "config_hash": artifact["config_hash"],
+        "profile_id": artifact["profile_id"],
+        "provider_id": artifact["provider_id"],
+        "provider_behavior_hash": artifact["provider_behavior_hash"],
+        "git_commit": artifact["environment"]["git_commit"],
+        "benchmark_manifest_sha256": artifact["environment"]["benchmark_manifest_sha256"],
+        "expected_case_set_sha256": artifact["expected_case_set_sha256"],
+        "authorization_id": authorization.authorization_id,
+        "holdout_authorization_sha256": authorization.authorization_sha256,
+        "attempt": authorization.attempt,
+        "supersedes_authorization_sha256": authorization.supersedes_authorization_sha256,
+        "holdout_authorized": True,
+    }
+    scan_forbidden_artifact_content(result_manifest)
+    _assert_no_absolute_path(result_manifest)
+    manifest_bytes = _canonical_json_bytes(result_manifest)
+
+    final_directory = _holdout_run_directory(attempt_root, artifact)
+    if final_directory.exists():
+        raise IntegrityError("result_exists", "result destination already exists; overwrite refused")
+    final_directory.parent.mkdir(parents=True, exist_ok=True)
+    temporary = Path(
+        tempfile.mkdtemp(prefix=f".tmp-{artifact['config_id']}-", dir=final_directory.parent)
+    )
+    try:
+        result_temp = temporary / "result.json"
+        manifest_temp = temporary / "result-manifest.json"
+        for path, data in ((result_temp, result_bytes), (manifest_temp, manifest_bytes)):
+            with path.open("xb") as handle:
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+        if _sha256_file(result_temp) != result_hash or result_temp.stat().st_size != len(result_bytes):
+            raise IntegrityError(
+                "result_write_integrity", "temporary result identity changed before publish"
+            )
+        if manifest_temp.read_bytes() != manifest_bytes:
+            raise IntegrityError(
+                "result_write_integrity", "temporary result manifest changed before publish"
+            )
+        if final_directory.exists():
+            raise IntegrityError("result_exists", "result destination appeared before publish")
+        _publish_directory_atomically(temporary, final_directory)
+    except Exception:
+        try:
+            _remove_staging_directory_best_effort(temporary)
+        except Exception:
+            pass
+        raise
+
+    return WrittenRun(
+        config_id=artifact["config_id"],
+        run_id=artifact["run_id"],
+        run_status=artifact["run_status"],
+        result_path=final_directory / "result.json",
+        manifest_path=final_directory / "result-manifest.json",
+    )
+
+
+def run_holdout_evaluation(
+    request: HoldoutRunRequest,
+    *,
+    repo_root: Path = ROOT,
+    benchmark_root: Path | None = None,
+    hooks: RunnerHooks | None = None,
+) -> list[WrittenRun]:
+    """Execute the authorized one-shot holdout matrix (C0-C7, mock provider).
+
+    The attempt root and start receipt are already claimed by the preflight, so
+    any failure from this point on deliberately leaves that evidence in place
+    rather than cleaning it up (07_PHASE_12E4_HOLDOUT_PLAN.md section 22).
+    """
+    active_hooks = hooks or RunnerHooks()
+    context = holdout_preflight(
+        request,
+        repo_root=repo_root,
+        benchmark_root=benchmark_root,
+        hooks=active_hooks,
+    )
+    capability = context.holdout_capability
+    if capability is None or not capability.is_valid():
+        raise IntegrityError("holdout_capability", "holdout capability is missing or invalid")
+
+    attempt_root = capability.attempt_root
+    written: list[WrittenRun] = []
+    run_ids: set[str] = set()
+    # Codex finding: artifacts used to be accumulated in memory and published
+    # only after all eight configs completed, so a failure in C5 destroyed the
+    # evidence for C0-C4. Each config is now validated and atomically published
+    # the moment it completes, in canonical C0-C7 order. A later failure
+    # propagates and leaves every earlier published artifact -- and the receipt
+    # -- untouched. Nothing is cleaned up, the attempt stays permanently
+    # burned, and no retry happens automatically.
+    for config_id in CONFIG_REGISTRY:
+        run_id = active_hooks.run_id_factory(config_id)
+        _validate_run_id(run_id)
+        if run_id in run_ids:
+            raise IntegrityError("run_id_collision", "run identifiers must be unique")
+        run_ids.add(run_id)
+        artifact = _augment_holdout_artifact(
+            _execute_config(
+                context,
+                CONFIG_REGISTRY[config_id],
+                repo_root=repo_root,
+                hooks=active_hooks,
+                run_id=run_id,
+            ),
+            capability,
+        )
+        destination = _holdout_run_directory(attempt_root, artifact)
+        if destination.exists():
+            raise IntegrityError("result_exists", "result destination already exists")
+        written.append(_publish_holdout_artifact(attempt_root, artifact, capability))
+    return written
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--split", required=True, choices=list(SUPPORTED_SPLITS))
-    selection = parser.add_mutually_exclusive_group(required=True)
+    # --split accepts only development/validation. Holdout is NOT a choice here
+    # and is reachable solely via --holdout-authorization.
+    parser.add_argument("--split", choices=list(SUPPORTED_SPLITS))
+    parser.add_argument(
+        "--holdout-authorization",
+        type=Path,
+        help=(
+            "Path to an external canonical maintainer authorization file. "
+            "Selects one-shot authorized holdout mode; incompatible with --split."
+        ),
+    )
+    selection = parser.add_mutually_exclusive_group()
     selection.add_argument(
         "--config",
         action="append",
@@ -2537,16 +3867,109 @@ def build_parser() -> argparse.ArgumentParser:
     )
     selection.add_argument("--all-configs", action="store_true")
     parser.add_argument("--output-root", required=True, type=Path)
-    parser.add_argument("--expected-branch", required=True)
-    parser.add_argument("--expected-commit", required=True)
+    parser.add_argument("--expected-branch")
+    parser.add_argument("--expected-commit")
     parser.add_argument("--provider", default=SUPPORTED_PROVIDER_ID, choices=[SUPPORTED_PROVIDER_ID])
     parser.add_argument("--case-timeout-seconds", type=float, default=30.0)
     return parser
 
 
+def _holdout_request_from_args(
+    args: argparse.Namespace,
+    *,
+    analysis_contract_sha256: str | None = None,
+    mapping_sha256: str | None = None,
+) -> HoldoutRunRequest:
+    """Validate holdout CLI usage. Every rule here fails closed."""
+    if args.split is not None:
+        raise IntegrityError(
+            "cli_holdout_split", "--split must not be combined with --holdout-authorization"
+        )
+    if not args.all_configs:
+        raise IntegrityError(
+            "cli_holdout_configs", "authorized holdout requires --all-configs (the full C0-C7 matrix)"
+        )
+    if args.config:
+        raise IntegrityError(
+            "cli_holdout_configs", "individual --config selection is prohibited for holdout"
+        )
+    if args.provider != SUPPORTED_PROVIDER_ID:
+        raise IntegrityError("cli_holdout_provider", "authorized holdout requires the mock provider")
+    if args.expected_branch is not None or args.expected_commit is not None:
+        raise IntegrityError(
+            "cli_holdout_identity",
+            "holdout identity comes from the authorization, not --expected-branch/--expected-commit",
+        )
+    if analysis_contract_sha256 is None or mapping_sha256 is None:
+        analysis_contract_sha256, mapping_sha256 = _load_analyzer_contract_identities()
+    return HoldoutRunRequest(
+        authorization_path=args.holdout_authorization,
+        output_root=args.output_root,
+        analysis_contract_sha256=analysis_contract_sha256,
+        mapping_sha256=mapping_sha256,
+        case_timeout_seconds=args.case_timeout_seconds,
+    )
+
+
+def _load_analyzer_contract_identities() -> tuple[str, str]:
+    """Read the analyzer's contract identities without a module-scope import.
+
+    The runner must not depend on the analyzer at import time, but the CLI needs
+    these two hashes so an authorization's analysis contract can be verified
+    *before* any attempt root is claimed.
+    """
+    import importlib.util as _importlib_util
+
+    analyzer_path = Path(__file__).resolve().parent / "analyze_v2_results.py"
+    spec = _importlib_util.spec_from_file_location("_v2_analyzer_contract", analyzer_path)
+    if spec is None or spec.loader is None:
+        raise IntegrityError("analysis_contract", "analyzer contract module could not be loaded")
+    module = _importlib_util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception as exc:  # noqa: BLE001 -- fail closed
+        raise IntegrityError(
+            "analysis_contract", "analyzer contract identities are unavailable"
+        ) from exc
+    return module.ANALYSIS_CONTRACT_SHA256, module.MAPPING_SHA256
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if args.holdout_authorization is not None:
+        try:
+            holdout_request = _holdout_request_from_args(args)
+            written = run_holdout_evaluation(holdout_request)
+        except RunnerError as exc:
+            print(f"FAIL [{exc.code}]: {exc}", file=sys.stderr)
+            return 1
+        except Exception:
+            print("FAIL [internal_error]: runner failed closed.", file=sys.stderr)
+            return 1
+        print(f"OK: wrote {len(written)} authorized holdout run(s).")
+        for item in written:
+            print(f"  {item.config_id}: {item.run_status} ({item.run_id})")
+        return 0
+
+    if args.split is None:
+        print(
+            "FAIL [cli_split_required]: --split is required unless --holdout-authorization is used.",
+            file=sys.stderr,
+        )
+        return 1
+    if not args.all_configs and not args.config:
+        print("FAIL [cli_config_required]: --config or --all-configs is required.", file=sys.stderr)
+        return 1
+    if args.expected_branch is None or args.expected_commit is None:
+        print(
+            "FAIL [cli_identity_required]: --expected-branch and --expected-commit are required.",
+            file=sys.stderr,
+        )
+        return 1
+
     config_ids = tuple(CONFIG_REGISTRY) if args.all_configs else tuple(args.config)
     request = RunRequest(
         split=args.split,

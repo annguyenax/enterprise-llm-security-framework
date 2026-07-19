@@ -29,6 +29,28 @@ from scripts import run_v2_evaluation as runner
 
 ANALYSIS_SCHEMA_VERSION = 1
 ANALYSIS_MANIFEST_SCHEMA_VERSION = 1
+
+# Phase 12E.4: holdout analysis artifacts carry their own schema identity so a
+# holdout artifact can never be processed by a development/validation reader and
+# vice versa. The development/validation constants above are unchanged.
+HOLDOUT_ANALYSIS_SCHEMA_VERSION = 1
+HOLDOUT_ANALYSIS_MANIFEST_SCHEMA_VERSION = 1
+
+# The runner declares the same two identities so it can validate an
+# authorization's analysis contract before claiming an attempt root, without
+# importing this module. They must never drift apart.
+assert HOLDOUT_ANALYSIS_SCHEMA_VERSION == runner.HOLDOUT_ANALYSIS_SCHEMA_VERSION
+assert (
+    HOLDOUT_ANALYSIS_MANIFEST_SCHEMA_VERSION
+    == runner.HOLDOUT_ANALYSIS_MANIFEST_SCHEMA_VERSION
+)
+HOLDOUT_IDENTITY_KEYS = (
+    "authorization_id",
+    "holdout_authorization_sha256",
+    "attempt",
+    "supersedes_authorization_sha256",
+    "holdout_authorized",
+)
 ANALYSIS_CONTRACT_VERSION = 1
 CSV_SCHEMA_VERSION = 1
 RATE_REPORTING_MIN_N = 10
@@ -497,6 +519,26 @@ class AnalysisRequest:
 
 
 @dataclass(frozen=True)
+class HoldoutAnalysisRequest:
+    """Authorized holdout analysis request.
+
+    A separate type from `AnalysisRequest` so the ordinary path can never carry
+    holdout, and so `_validate_request`'s SUPPORTED_SPLITS gate stays intact.
+    Branch, commit, attempt root and every contract identity come from the
+    external authorization, not from CLI flags.
+    """
+
+    authorization_path: Path
+    result_manifests: tuple[Path, ...]
+
+    @property
+    def split(self) -> str:
+        raise AttributeError(
+            "HoldoutAnalysisRequest has no split; holdout is not a SUPPORTED_SPLITS member"
+        )
+
+
+@dataclass(frozen=True)
 class AnalyzerHooks:
     repository_state_loader: Callable[[Path], runner.RepositoryState] = field(
         default=lambda root: runner.read_repository_state(root)
@@ -666,14 +708,43 @@ def _resolve_manifest_path(path: Path) -> Path:
     return resolved
 
 
-def _read_verified_input(path: Path) -> VerifiedInput:
+def _validate_holdout_identity_fields(payload: Mapping[str, Any], location: str) -> None:
+    """Strict shape check for the five safe holdout identity fields."""
+    _string(payload["authorization_id"], f"{location}.authorization_id")
+    if not runner._CANONICAL_UUID_RE.fullmatch(payload["authorization_id"]):  # noqa: SLF001
+        _fail("holdout_identity", f"{location}.authorization_id must be a canonical lowercase UUID")
+    _hash(payload["holdout_authorization_sha256"], f"{location}.holdout_authorization_sha256")
+    attempt = payload["attempt"]
+    if type(attempt) is not int or attempt < 1:
+        _fail("holdout_identity", f"{location}.attempt must be an integer >= 1")
+    supersedes = payload["supersedes_authorization_sha256"]
+    if attempt == 1:
+        if supersedes is not None:
+            _fail("holdout_identity", f"{location}.attempt 1 must not supersede an authorization")
+    else:
+        _hash(supersedes, f"{location}.supersedes_authorization_sha256")
+    if payload["holdout_authorized"] is not True:
+        _fail("holdout_identity", f"{location}.holdout_authorized must be boolean true")
+
+
+def _read_verified_input(path: Path, *, holdout: bool = False) -> VerifiedInput:
+    """Read and structurally verify one result manifest and its result.json.
+
+    `holdout=True` selects the Phase 12E.4 holdout contract: the holdout
+    manifest/result schema identities plus the five safe authorization/attempt
+    identity keys. An ordinary development/validation artifact therefore fails
+    holdout analysis, and a holdout artifact fails ordinary analysis.
+    """
     manifest_path = _resolve_manifest_path(path)
     try:
         manifest_bytes = manifest_path.read_bytes()
     except OSError as exc:
         raise AnalysisIntegrityError("manifest_unreadable", "result manifest is unavailable") from exc
     manifest = _strict_json(manifest_bytes, "result-manifest.json")
-    _exact_keys(manifest, RESULT_MANIFEST_KEYS, "result-manifest.json")
+    expected_manifest_keys = (
+        RESULT_MANIFEST_KEYS | frozenset(HOLDOUT_IDENTITY_KEYS) if holdout else RESULT_MANIFEST_KEYS
+    )
+    _exact_keys(manifest, expected_manifest_keys, "result-manifest.json")
     runner.scan_forbidden_artifact_content(manifest)
 
     _integer(manifest["schema_version"], "manifest.schema_version", minimum=1)
@@ -682,10 +753,18 @@ def _read_verified_input(path: Path) -> VerifiedInput:
         "manifest.result_schema_version",
         minimum=1,
     )
-    if manifest["schema_version"] != runner.RESULT_MANIFEST_SCHEMA_VERSION:
+    expected_manifest_schema = (
+        runner.HOLDOUT_RESULT_MANIFEST_SCHEMA_VERSION if holdout else runner.RESULT_MANIFEST_SCHEMA_VERSION
+    )
+    expected_result_schema = (
+        runner.HOLDOUT_RESULT_SCHEMA_VERSION if holdout else runner.RESULT_SCHEMA_VERSION
+    )
+    if manifest["schema_version"] != expected_manifest_schema:
         _fail("manifest_schema", "result manifest schema is unsupported")
-    if manifest["result_schema_version"] != runner.RESULT_SCHEMA_VERSION:
+    if manifest["result_schema_version"] != expected_result_schema:
         _fail("result_schema", "result schema identity is unsupported")
+    if holdout:
+        _validate_holdout_identity_fields(manifest, "manifest")
     if _string(manifest["result_file"], "manifest.result_file") != "result.json":
         _fail("unsafe_result_path", "result manifest must reference sibling result.json")
     _hash(manifest["result_sha256"], "manifest.result_sha256")
@@ -897,18 +976,33 @@ def _validate_case_record(
 def _validate_result(
     verified: VerifiedInput,
     *,
-    request: AnalysisRequest,
+    request: AnalysisRequest | None = None,
     repository: runner.RepositoryState,
     manifest_identity: runner.ManifestIdentity,
     benchmark: runner.LoadedBenchmark,
+    expected_split: str | None = None,
 ) -> None:
-    result = _exact_keys(verified.result, RESULT_KEYS, "result.json")
+    if expected_split is None:
+        if request is None:
+            _fail("split_mismatch", "an expected split is required to validate a result")
+        expected_split = request.split
+    holdout = expected_split == runner.HOLDOUT_SPLIT
+    expected_result_keys = RESULT_KEYS | frozenset(HOLDOUT_IDENTITY_KEYS) if holdout else RESULT_KEYS
+    result = _exact_keys(verified.result, expected_result_keys, "result.json")
     manifest = verified.manifest
     _integer(result["schema_version"], "result.schema_version", minimum=1)
-    if result["schema_version"] != runner.RESULT_SCHEMA_VERSION:
+    expected_result_schema = (
+        runner.HOLDOUT_RESULT_SCHEMA_VERSION if holdout else runner.RESULT_SCHEMA_VERSION
+    )
+    if result["schema_version"] != expected_result_schema:
         _fail("result_schema", "result.json schema is unsupported")
+    if holdout:
+        _validate_holdout_identity_fields(result, "result")
     result_split = _string(result["split"], "result.split", safe_id=True)
-    if result_split not in runner.SUPPORTED_SPLITS or result_split != request.split:
+    if holdout:
+        if result_split != runner.HOLDOUT_SPLIT:
+            _fail("split_mismatch", "result split is not the authorized holdout split")
+    elif result_split not in runner.SUPPORTED_SPLITS or result_split != expected_split:
         _fail("split_mismatch", "result split does not match the requested supported split")
     config_id = _string(result["config_id"], "result.config_id", safe_id=True)
     if config_id not in runner.CONFIG_REGISTRY:
@@ -948,7 +1042,9 @@ def _validate_result(
         "provider_behavior_hash": result["provider_behavior_hash"],
         "repetitions": 2,
         "warmup": 0,
-        "result_schema_version": runner.RESULT_SCHEMA_VERSION,
+        # The embedded environment block must describe the artifact it lives
+        # in, so a holdout result declares the holdout schema here too.
+        "result_schema_version": expected_result_schema,
     }
     for field_name, expected in common_expected.items():
         if environment[field_name] != expected:
@@ -1008,7 +1104,9 @@ def _validate_result(
     expected_experiment_id = runner._sha256_bytes(  # noqa: SLF001
         runner._canonical_json_bytes(  # noqa: SLF001
             {
-                "result_schema_version": runner.RESULT_SCHEMA_VERSION,
+                # Must mirror runner._experiment_id: a holdout experiment binds
+                # the holdout result schema, never the ordinary version 2.
+                "result_schema_version": expected_result_schema,
                 "config_registry_version": runner.CONFIG_REGISTRY_VERSION,
                 "config_hashes": {
                     known_id: runner.CONFIG_REGISTRY[known_id].config_hash
@@ -1028,8 +1126,12 @@ def _validate_result(
         _fail("experiment_identity", "result experiment identity does not match its contract")
 
     manifest_pairs = {
-        "schema_version": runner.RESULT_MANIFEST_SCHEMA_VERSION,
-        "result_schema_version": runner.RESULT_SCHEMA_VERSION,
+        "schema_version": (
+            runner.HOLDOUT_RESULT_MANIFEST_SCHEMA_VERSION
+            if holdout
+            else runner.RESULT_MANIFEST_SCHEMA_VERSION
+        ),
+        "result_schema_version": expected_result_schema,
         "result_sha256": verified.result_sha256,
         "result_size_bytes": verified.result_size_bytes,
         "experiment_id": result["experiment_id"],
@@ -1090,7 +1192,7 @@ def _validate_result(
                 expected_case=cases_by_id[case_id],
                 expected_label=benchmark.labels_by_id[case_id],
                 config=config,
-                split=request.split,
+                split=expected_split,
                 git_commit=repository.commit,
                 benchmark_manifest_sha256=manifest_identity.sha256,
             )
@@ -1496,7 +1598,7 @@ def _build_analysis(
             "leakage_not_real_exfiltration": True,
         },
     }
-    _validate_generated_analysis(analysis)
+    _validate_generated_analysis(analysis, holdout=request.split == runner.HOLDOUT_SPLIT)
     runner.scan_forbidden_artifact_content(analysis)
     return analysis
 
@@ -1559,7 +1661,7 @@ def _validate_confusion_shape(value: Any, location: str) -> None:
         _fail("analysis_shape", f"{location} has inconsistent confusion counts")
 
 
-def _validate_generated_analysis(value: Any) -> None:
+def _validate_generated_analysis(value: Any, *, holdout: bool = False) -> None:
     analysis = _exact_keys(value, ANALYSIS_KEYS, "analysis")
     static_pairs = {
         "schema_version": ANALYSIS_SCHEMA_VERSION,
@@ -1583,7 +1685,11 @@ def _validate_generated_analysis(value: Any) -> None:
     )
     if not _FULL_SHA_RE.fullmatch(_string(analysis["analyzer_commit"], "analysis.analyzer_commit")):
         _fail("analysis_shape", "analysis.analyzer_commit is not a full SHA-1")
-    if _string(analysis["split"], "analysis.split", safe_id=True) not in runner.SUPPORTED_SPLITS:
+    analysis_split = _string(analysis["split"], "analysis.split", safe_id=True)
+    allowed_analysis_splits = (
+        (runner.HOLDOUT_SPLIT,) if holdout else runner.SUPPORTED_SPLITS
+    )
+    if analysis_split not in allowed_analysis_splits:
         _fail("analysis_shape", "analysis.split is unsupported")
 
     input_manifests = analysis["input_manifests"]
@@ -2201,18 +2307,584 @@ def analyze_results(
     return _publish_analysis(output_root, analysis, table_bytes)
 
 
+def _verify_holdout_analysis_authorization(
+    request: HoldoutAnalysisRequest,
+    *,
+    repo_root: Path,
+    benchmark_root: Path,
+    hooks: AnalyzerHooks,
+) -> tuple[runner.HoldoutAuthorization, runner.VerifiedHoldoutAuthorization, Path]:
+    """Independently re-verify the authorization. Never trusts runner artifacts.
+
+    The analyzer parses the external canonical file itself and recomputes every
+    identity, so a tampered or absent authorization cannot be compensated for by
+    a hash a runner artifact happens to carry.
+    """
+    # Parsing enforces canonical bytes AND external-path containment.
+    authorization = runner.parse_holdout_authorization(
+        request.authorization_path, repo_root=repo_root, benchmark_root=benchmark_root
+    )
+
+    # One shared verifier performs repository identity, every contract/schema/
+    # mapping gate and the FINAL manifest check, then mints a genuine
+    # capability through the runner's closure-private registrar. The analyzer
+    # re-derives all of this itself and never trusts a runner artifact hash.
+    try:
+        capability = runner.verify_holdout_authorization_for_analysis(
+            authorization,
+            attempt_root=Path(authorization.output_root),
+            repo_root=repo_root,
+            benchmark_root=benchmark_root,
+            hooks=runner.RunnerHooks(repository_state_loader=hooks.repository_state_loader),
+            analysis_contract_sha256=ANALYSIS_CONTRACT_SHA256,
+            mapping_sha256=MAPPING_SHA256,
+        )
+    except runner.RunnerError as exc:
+        _fail(exc.code, str(exc))
+
+    attempt_root = capability.attempt_root
+    receipt_path = attempt_root / "start-receipt.json"
+    if receipt_path.is_symlink() or not receipt_path.is_file():
+        _fail("attempt_root", "authorized attempt root has no regular start receipt")
+    receipt = _strict_json(receipt_path.read_bytes(), "start-receipt.json")
+    try:
+        runner.verify_start_receipt(
+            receipt,
+            authorization,
+            repository=capability.repository,
+            manifest=capability.manifest,
+        )
+    except runner.RunnerError as exc:
+        _fail(exc.code, str(exc))
+
+    return authorization, capability, attempt_root
+
+
+def _validate_holdout_matrix(
+    inputs: Sequence[VerifiedInput],
+    *,
+    authorization: runner.HoldoutAuthorization,
+) -> tuple[VerifiedInput, ...]:
+    """Require exactly one complete C0-C7 attempt under one authorization."""
+    if len(inputs) != len(runner.CONFIG_REGISTRY):
+        _fail("manifest_count", "exactly eight holdout result manifests are required")
+
+    by_config: dict[str, VerifiedInput] = {}
+    for item in inputs:
+        config_id = item.manifest["config_id"]
+        if config_id not in runner.CONFIG_REGISTRY:
+            _fail("config_identity", "holdout matrix contains an unknown configuration")
+        if config_id in by_config:
+            _fail("config_identity", "holdout matrix contains a duplicate configuration")
+        by_config[config_id] = item
+    missing = [config_id for config_id in runner.CONFIG_REGISTRY if config_id not in by_config]
+    if missing:
+        _fail("config_identity", "holdout matrix is missing one or more approved configurations")
+
+    for item in inputs:
+        manifest = item.manifest
+        result = item.result
+        if manifest["run_status"] != "complete" or result["run_status"] != "complete":
+            _fail("run_status", "every holdout run must be complete; partial matrices are rejected")
+        if manifest["authorization_id"] != authorization.authorization_id:
+            _fail("authorization_mismatch", "holdout matrix mixes authorization identities")
+        if manifest["holdout_authorization_sha256"] != authorization.authorization_sha256:
+            _fail("authorization_mismatch", "holdout matrix mixes authorization hashes")
+        if manifest["attempt"] != authorization.attempt:
+            _fail("attempt_mismatch", "holdout matrix mixes attempts")
+        if (
+            manifest["supersedes_authorization_sha256"]
+            != authorization.supersedes_authorization_sha256
+        ):
+            _fail("attempt_mismatch", "holdout matrix mixes supersedes lineage")
+        if manifest["git_commit"] != authorization.execution_commit:
+            _fail("commit_mismatch", "holdout matrix mixes implementation commits")
+        if manifest["provider_id"] != runner.SUPPORTED_PROVIDER_ID:
+            _fail("provider_identity", "holdout matrix contains a non-mock provider result")
+        if manifest["benchmark_manifest_sha256"] != authorization.benchmark_manifest_sha256:
+            _fail("benchmark_manifest", "holdout matrix mixes benchmark identities")
+        expected_hash = runner.CONFIG_REGISTRY[manifest["config_id"]].config_hash
+        if manifest["config_hash"] != authorization.config_hashes[manifest["config_id"]]:
+            _fail("config_identity", "holdout result config hash disagrees with the authorization")
+        if manifest["config_hash"] != expected_hash:
+            _fail("config_identity", "holdout result config hash disagrees with the registry")
+
+    behavior_hashes = {item.manifest["provider_behavior_hash"] for item in inputs}
+    if len(behavior_hashes) != 1:
+        _fail("provider_identity", "holdout matrix mixes provider behavior identities")
+    experiment_ids = {item.manifest["experiment_id"] for item in inputs}
+    if len(experiment_ids) != 1:
+        _fail("experiment_identity", "holdout matrix mixes experiment identities")
+
+    # Benchmark-independent expected-case-set shape. C0 covers all four
+    # evaluation scopes while C1-C7 cover end_to_end only, so C0's case-set hash
+    # must differ from the single hash the other seven share. This catches a
+    # uniformly rewritten expected_case_set_sha256 without reading any record;
+    # the hash VALUE itself is verified against the benchmark in Stage B.
+    ordered_configs = list(runner.CONFIG_REGISTRY)
+    case_set_by_config = {
+        item.manifest["config_id"]: item.manifest["expected_case_set_sha256"] for item in inputs
+    }
+    ablated = {case_set_by_config[config_id] for config_id in ordered_configs[1:]}
+    if len(ablated) != 1:
+        _fail("case_completeness", "ablated holdout configurations disagree on the expected case set")
+    if case_set_by_config[ordered_configs[0]] in ablated:
+        _fail(
+            "case_completeness",
+            "C0 expected-case set must differ from the ablated configurations",
+        )
+
+    return tuple(by_config[config_id] for config_id in runner.CONFIG_REGISTRY)
+
+
+def analyze_holdout_results(
+    request: HoldoutAnalysisRequest,
+    *,
+    repo_root: Path = ROOT,
+    benchmark_root: Path | None = None,
+    hooks: AnalyzerHooks | None = None,
+) -> WrittenAnalysis:
+    """Analyze exactly one authorized, complete C0-C7 holdout attempt.
+
+    Gate order: authorization is parsed and independently verified, then the
+    frozen manifest bytes, then every result manifest and result identity, then
+    the full-matrix cross-checks. Only after all of those pass are frozen
+    holdout records loaded through the dedicated authorized loader.
+    """
+    active_hooks = hooks or AnalyzerHooks()
+    benchmark_path = (benchmark_root or repo_root / "datasets" / "v2").resolve()
+
+    if len(request.result_manifests) != len(runner.CONFIG_REGISTRY):
+        _fail("manifest_count", "exactly eight holdout result manifests are required")
+    if len({str(path) for path in request.result_manifests}) != len(request.result_manifests):
+        _fail("manifest_count", "duplicate result manifest arguments are prohibited")
+
+    # ---- STAGE A: everything verifiable WITHOUT frozen holdout records -----
+    authorization, capability, attempt_root = _verify_holdout_analysis_authorization(
+        request,
+        repo_root=repo_root,
+        benchmark_root=benchmark_path,
+        hooks=active_hooks,
+    )
+    repository = capability.repository
+    manifest_identity = capability.manifest
+
+    inputs = tuple(_read_verified_input(path, holdout=True) for path in request.result_manifests)
+    resolved_paths = [item.manifest_path for item in inputs]
+    if len(set(resolved_paths)) != len(resolved_paths):
+        _fail("manifest_count", "multiple arguments resolve to the same result manifest")
+    for item in inputs:
+        if not runner._is_within(item.manifest_path, attempt_root):  # noqa: SLF001
+            _fail("attempt_root", "result manifest lies outside the authorized attempt root")
+
+    # Per-result identity that needs no benchmark record. Codex finding: these
+    # ran only AFTER the holdout split had already been loaded.
+    for item in inputs:
+        _validate_holdout_result_identity(
+            item, authorization=authorization, repository=repository, manifest=manifest_identity
+        )
+    ordered = _validate_holdout_matrix(inputs, authorization=authorization)
+
+    output_root = attempt_root / "analysis"
+    if output_root.exists():
+        _fail("analysis_exists", "authorized attempt root already contains an analysis directory")
+
+    # ---- STAGE B: only now may frozen holdout records be read --------------
+    benchmark = _load_authorized_holdout_benchmark_for_analysis(
+        capability, benchmark_root=benchmark_path, repo_root=repo_root
+    )
+
+    for item in ordered:
+        _validate_result(
+            item,
+            repository=repository,
+            manifest_identity=manifest_identity,
+            benchmark=benchmark,
+            expected_split=runner.HOLDOUT_SPLIT,
+        )
+    validate_family_mapping(benchmark)
+    _validate_primary_matrix(ordered)
+
+    analysis = _build_analysis(
+        ordered,
+        request=_holdout_analysis_shim(authorization, output_root),
+        repository=repository,
+        manifest_identity=manifest_identity,
+    )
+    analysis["schema_version"] = HOLDOUT_ANALYSIS_SCHEMA_VERSION
+    analysis["split"] = runner.HOLDOUT_SPLIT
+    for key in HOLDOUT_IDENTITY_KEYS:
+        analysis[key] = _holdout_identity_value(authorization, key)
+    validate_holdout_analysis_document(analysis, authorization=authorization)
+    _assert_no_authorization_disclosure(analysis, authorization, attempt_root)
+
+    table_bytes = _build_csv(analysis)
+    return _publish_holdout_analysis(output_root, analysis, table_bytes, authorization, attempt_root)
+
+
+def _validate_holdout_result_identity(
+    verified: VerifiedInput,
+    *,
+    authorization: runner.HoldoutAuthorization,
+    repository: runner.RepositoryState,
+    manifest: runner.ManifestIdentity,
+) -> None:
+    """Stage A per-result identity. Reads no benchmark record."""
+    result = verified.result
+    location = "result.json"
+    for payload, where in ((verified.manifest, "manifest"), (result, "result")):
+        if payload.get("authorization_id") != authorization.authorization_id:
+            _fail("authorization_mismatch", f"{where} authorization id does not match")
+        if payload.get("holdout_authorization_sha256") != authorization.authorization_sha256:
+            _fail("authorization_mismatch", f"{where} authorization hash does not match")
+        if payload.get("attempt") != authorization.attempt:
+            _fail("attempt_mismatch", f"{where} attempt does not match the authorization")
+        if payload.get("supersedes_authorization_sha256") != (
+            authorization.supersedes_authorization_sha256
+        ):
+            _fail("attempt_mismatch", f"{where} supersedes lineage does not match")
+        if payload.get("holdout_authorized") is not True:
+            _fail("holdout_identity", f"{where} holdout_authorized must be boolean true")
+
+    if result.get("split") != runner.HOLDOUT_SPLIT:
+        _fail("split_mismatch", f"{location} split is not the authorized holdout split")
+    if result.get("run_status") != "complete" or verified.manifest.get("run_status") != "complete":
+        _fail("run_status", "every holdout run must be complete; partial matrices are rejected")
+    if result.get("schema_version") != runner.HOLDOUT_RESULT_SCHEMA_VERSION:
+        _fail("result_schema", f"{location} schema is not the holdout result schema")
+    if verified.manifest.get("schema_version") != runner.HOLDOUT_RESULT_MANIFEST_SCHEMA_VERSION:
+        _fail("manifest_schema", "manifest schema is not the holdout result-manifest schema")
+
+    environment = result.get("environment")
+    if not isinstance(environment, dict):
+        _fail("result_identity", f"{location}.environment is missing")
+    if environment.get("result_schema_version") != runner.HOLDOUT_RESULT_SCHEMA_VERSION:
+        _fail("result_identity", f"{location}.environment.result_schema_version is inconsistent")
+    if environment.get("git_branch") != repository.branch:
+        _fail("branch_mismatch", f"{location} branch does not match the verified repository")
+    if environment.get("git_commit") != repository.commit:
+        _fail("commit_mismatch", f"{location} commit does not match the verified repository")
+    if environment.get("git_dirty") is not False:
+        _fail("git_dirty", f"{location} was produced from a dirty tree")
+    if environment.get("benchmark_manifest_sha256") != manifest.sha256:
+        _fail("benchmark_manifest", f"{location} benchmark identity does not match")
+
+    if result.get("provider_id") != runner.SUPPORTED_PROVIDER_ID:
+        _fail("provider_identity", f"{location} is not a mock-provider result")
+    config_id = result.get("config_id")
+    if config_id not in runner.CONFIG_REGISTRY:
+        _fail("config_identity", f"{location} contains an unknown configuration")
+    config = runner.CONFIG_REGISTRY[config_id]
+    if result.get("config_hash") != authorization.config_hashes.get(config_id):
+        _fail("config_identity", f"{location} config hash disagrees with the authorization")
+    if result.get("config_hash") != config.config_hash:
+        _fail("config_identity", f"{location} config hash disagrees with the canonical registry")
+
+    # ---- Codex finding: these were previously deferred to the POST-loader
+    # _validate_result path, so a mutated provider_behavior_hash or
+    # experiment_id still caused the frozen holdout split to be read. They are
+    # all benchmark-independent and now run in Stage A.
+    if result.get("profile_id") != config.profile.profile_id:
+        _fail("config_identity", f"{location} profile identity disagrees with the registry")
+    if result.get("guard_profile") != config.profile_payload:
+        _fail("config_identity", f"{location} guard booleans disagree with the registry")
+
+    expected_behavior_hash = _expected_provider_behavior_hash()
+    if result.get("provider_behavior_hash") != expected_behavior_hash:
+        _fail("provider_identity", f"{location} provider behavior hash does not match the mock provider")
+    if environment.get("provider_behavior_hash") != expected_behavior_hash:
+        _fail("provider_identity", f"{location}.environment provider behavior hash is inconsistent")
+    if verified.manifest.get("provider_behavior_hash") != expected_behavior_hash:
+        _fail("provider_identity", "manifest provider behavior hash does not match the mock provider")
+    if environment.get("provider_id") != runner.SUPPORTED_PROVIDER_ID:
+        _fail("provider_identity", f"{location}.environment provider is not the mock provider")
+    if environment.get("guard_profile") != config.profile.profile_id:
+        _fail("config_identity", f"{location}.environment guard profile disagrees with the registry")
+    if environment.get("benchmark_manifest_status") != "final":
+        _fail("benchmark_manifest", f"{location} was not produced against the FINAL manifest")
+
+    dependencies = environment.get("dependencies")
+    if not isinstance(dependencies, list) or not all(isinstance(d, str) for d in dependencies):
+        _fail("dependency_identity", f"{location}.environment dependencies are malformed")
+    expected_dependency_hash = runner._sha256_bytes(  # noqa: SLF001
+        runner._canonical_json_bytes(list(dependencies))  # noqa: SLF001
+    )
+    if environment.get("dependencies_sha256") != expected_dependency_hash:
+        _fail("dependency_identity", f"{location}.environment dependency hash is inconsistent")
+
+    expected_case_set = result.get("expected_case_set_sha256")
+    _hash(expected_case_set, f"{location}.expected_case_set_sha256")
+    if verified.manifest.get("expected_case_set_sha256") != expected_case_set:
+        _fail("manifest_result_mismatch", "manifest expected-case-set hash disagrees with result.json")
+
+    safety_limits = result.get("safety_limits")
+    if not isinstance(safety_limits, dict):
+        _fail("safety_identity", f"{location}.safety_limits is missing")
+    expected_experiment_id = runner._sha256_bytes(  # noqa: SLF001
+        runner._canonical_json_bytes(  # noqa: SLF001
+            {
+                "result_schema_version": runner.HOLDOUT_RESULT_SCHEMA_VERSION,
+                "config_registry_version": runner.CONFIG_REGISTRY_VERSION,
+                "config_hashes": {
+                    known_id: runner.CONFIG_REGISTRY[known_id].config_hash
+                    for known_id in runner.CONFIG_REGISTRY
+                },
+                "split": runner.HOLDOUT_SPLIT,
+                "git_commit": environment["git_commit"],
+                "benchmark_manifest_sha256": environment["benchmark_manifest_sha256"],
+                "provider_id": result["provider_id"],
+                "provider_behavior_hash": result["provider_behavior_hash"],
+                "safety_limits": dict(safety_limits),
+                "dependencies_sha256": environment["dependencies_sha256"],
+            }
+        )
+    )
+    if result.get("experiment_id") != expected_experiment_id:
+        _fail("experiment_identity", f"{location} experiment identity does not match its contract")
+    if verified.manifest.get("experiment_id") != expected_experiment_id:
+        _fail("manifest_result_mismatch", "manifest experiment identity disagrees with result.json")
+
+
+def _expected_provider_behavior_hash() -> str:
+    """Behavior hash of the only provider an authorized holdout run may use."""
+    spec = runner.default_provider_spec(runner.SUPPORTED_PROVIDER_ID, load_settings())
+    return spec.behavior_hash
+
+
+def validate_holdout_analysis_document(
+    analysis: Any, *, authorization: runner.HoldoutAuthorization
+) -> None:
+    """Dedicated exact-key validation of the FINAL holdout analysis document.
+
+    Codex finding: the holdout extension was previously applied by mutating an
+    ordinary-shaped dict after validation, so the extended document itself was
+    never validated.
+    """
+    if not isinstance(analysis, dict):
+        _fail("analysis_shape", "holdout analysis is not a JSON object")
+    expected = ANALYSIS_KEYS | frozenset(HOLDOUT_IDENTITY_KEYS)
+    _exact_keys(analysis, expected, "holdout analysis.json")
+    if analysis["schema_version"] != HOLDOUT_ANALYSIS_SCHEMA_VERSION:
+        _fail("analysis_schema", "holdout analysis schema version is unsupported")
+    if analysis["split"] != runner.HOLDOUT_SPLIT:
+        _fail("analysis_shape", "holdout analysis split must be holdout")
+    _validate_holdout_identity_fields(analysis, "holdout analysis")
+    for key in HOLDOUT_IDENTITY_KEYS:
+        if analysis[key] != _holdout_identity_value(authorization, key):
+            _fail("holdout_identity", f"holdout analysis {key} does not match the authorization")
+    runner.scan_forbidden_artifact_content(analysis)
+
+
+def validate_holdout_analysis_manifest_document(
+    manifest: Any, *, authorization: runner.HoldoutAuthorization
+) -> None:
+    """Dedicated exact-key validation of the FINAL holdout analysis manifest."""
+    if not isinstance(manifest, dict):
+        _fail("analysis_shape", "holdout analysis manifest is not a JSON object")
+    expected = ANALYSIS_MANIFEST_KEYS | frozenset(HOLDOUT_IDENTITY_KEYS)
+    _exact_keys(manifest, expected, "holdout analysis-manifest.json")
+    if manifest["schema_version"] != HOLDOUT_ANALYSIS_MANIFEST_SCHEMA_VERSION:
+        _fail("analysis_schema", "holdout analysis-manifest schema version is unsupported")
+    if manifest["analysis_schema_version"] != HOLDOUT_ANALYSIS_SCHEMA_VERSION:
+        _fail("analysis_schema", "holdout analysis-manifest references a wrong analysis schema")
+    if manifest["split"] != runner.HOLDOUT_SPLIT:
+        _fail("analysis_shape", "holdout analysis-manifest split must be holdout")
+    _validate_holdout_identity_fields(manifest, "holdout analysis-manifest")
+    for key in HOLDOUT_IDENTITY_KEYS:
+        if manifest[key] != _holdout_identity_value(authorization, key):
+            _fail(
+                "holdout_identity",
+                f"holdout analysis-manifest {key} does not match the authorization",
+            )
+    runner.scan_forbidden_artifact_content(manifest)
+
+
+def _holdout_identity_value(authorization: runner.HoldoutAuthorization, key: str) -> Any:
+    return {
+        "authorization_id": authorization.authorization_id,
+        "holdout_authorization_sha256": authorization.authorization_sha256,
+        "attempt": authorization.attempt,
+        "supersedes_authorization_sha256": authorization.supersedes_authorization_sha256,
+        "holdout_authorized": True,
+    }[key]
+
+
+def _holdout_analysis_shim(
+    authorization: runner.HoldoutAuthorization, output_root: Path
+) -> AnalysisRequest:
+    """Internal-only adapter so `_build_analysis` keeps its existing contract.
+
+    This never reaches `_validate_request`, so holdout is never admitted to the
+    ordinary path; it only carries identity values the builder already reads.
+    """
+    return AnalysisRequest(
+        split=runner.HOLDOUT_SPLIT,
+        expected_branch=authorization.execution_branch,
+        expected_commit=authorization.execution_commit,
+        output_root=output_root,
+        result_manifests=(),
+    )
+
+
+def _load_authorized_holdout_benchmark_for_analysis(
+    capability: runner.VerifiedHoldoutAuthorization,
+    *,
+    benchmark_root: Path,
+    repo_root: Path,
+) -> runner.LoadedBenchmark:
+    """Defer the actual record read to the runner's single authorized loader.
+
+    Codex finding: the analyzer previously forged a capability by calling the
+    (now removed) module-level token helper. It must instead obtain a genuine
+    capability from `verify_holdout_authorization_for_analysis`, which mints it
+    through the runner's closure-private registrar.
+    """
+    return runner.load_authorized_holdout_benchmark(
+        capability, benchmark_root=benchmark_root, repo_root=repo_root
+    )
+
+
+def _assert_no_authorization_disclosure(
+    payload: Any, authorization: runner.HoldoutAuthorization, attempt_root: Path
+) -> None:
+    serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    for secret in (authorization.output_root, str(attempt_root)):
+        if not secret:
+            continue
+        # On Windows a path serializes with escaped separators, so the raw
+        # string would not appear verbatim; compare both encodings.
+        escaped = json.dumps(secret, ensure_ascii=False)[1:-1]
+        if secret in serialized or escaped in serialized:
+            _fail("forbidden_artifact_path", "analysis discloses the absolute attempt root")
+    try:
+        runner._assert_no_absolute_path(payload)  # noqa: SLF001
+    except runner.IntegrityError as exc:
+        _fail("forbidden_artifact_path", f"analysis contains an absolute path: {exc}")
+
+
+def _publish_holdout_analysis(
+    output_root: Path,
+    analysis: Mapping[str, Any],
+    table_bytes: bytes,
+    authorization: runner.HoldoutAuthorization,
+    attempt_root: Path,
+) -> WrittenAnalysis:
+    analysis_bytes = runner._canonical_json_bytes(analysis)  # noqa: SLF001
+    manifest = _build_analysis_manifest(
+        analysis_bytes=analysis_bytes, table_bytes=table_bytes, analysis=analysis
+    )
+    manifest = dict(manifest)
+    manifest["schema_version"] = HOLDOUT_ANALYSIS_MANIFEST_SCHEMA_VERSION
+    manifest["analysis_schema_version"] = HOLDOUT_ANALYSIS_SCHEMA_VERSION
+    for key in HOLDOUT_IDENTITY_KEYS:
+        manifest[key] = _holdout_identity_value(authorization, key)
+    validate_holdout_analysis_manifest_document(manifest, authorization=authorization)
+    _assert_no_authorization_disclosure(manifest, authorization, attempt_root)
+    manifest_bytes = runner._canonical_json_bytes(manifest)  # noqa: SLF001
+
+    if output_root.exists():
+        _fail("analysis_exists", "analysis destination already exists; overwrite refused")
+    output_root.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=".tmp-holdout-analysis-", dir=output_root.parent))
+    try:
+        payloads = (
+            (staging / "analysis.json", analysis_bytes),
+            (staging / "analysis-table.csv", table_bytes),
+            (staging / "analysis-manifest.json", manifest_bytes),
+        )
+        for path, payload in payloads:
+            with path.open("xb") as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+        for path, payload in payloads:
+            if path.read_bytes() != payload:
+                _fail("analysis_write_integrity", "staged analysis bytes changed before publish")
+        if output_root.exists():
+            _fail("analysis_exists", "analysis destination appeared before publish")
+        _publish_directory_atomically(staging, output_root)
+    except Exception:
+        try:
+            _remove_staging_best_effort(staging)
+        except Exception:
+            pass
+        raise
+    return WrittenAnalysis(
+        output_directory=output_root,
+        analysis_path=output_root / "analysis.json",
+        table_path=output_root / "analysis-table.csv",
+        manifest_path=output_root / "analysis-manifest.json",
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--split", required=True, choices=list(runner.SUPPORTED_SPLITS))
-    parser.add_argument("--expected-branch", required=True)
-    parser.add_argument("--expected-commit", required=True)
-    parser.add_argument("--output-root", required=True, type=Path)
+    # --split accepts only development/validation. Holdout is reachable solely
+    # through --holdout-authorization.
+    parser.add_argument("--split", choices=list(runner.SUPPORTED_SPLITS))
+    parser.add_argument(
+        "--holdout-authorization",
+        type=Path,
+        help=(
+            "Path to the external canonical maintainer authorization. Selects "
+            "authorized holdout analysis; incompatible with --split."
+        ),
+    )
+    parser.add_argument("--expected-branch")
+    parser.add_argument("--expected-commit")
+    parser.add_argument("--output-root", type=Path)
     parser.add_argument("--result-manifest", required=True, action="append", type=Path)
     return parser
 
 
+def _holdout_analysis_request_from_args(args: argparse.Namespace) -> HoldoutAnalysisRequest:
+    if args.split is not None:
+        _fail("cli_holdout_split", "--split must not be combined with --holdout-authorization")
+    if args.expected_branch is not None or args.expected_commit is not None:
+        _fail(
+            "cli_holdout_identity",
+            "holdout identity comes from the authorization, not --expected-branch/--expected-commit",
+        )
+    if args.output_root is not None:
+        _fail(
+            "cli_holdout_output",
+            "holdout analysis writes to the authorized attempt root; --output-root is prohibited",
+        )
+    return HoldoutAnalysisRequest(
+        authorization_path=args.holdout_authorization,
+        result_manifests=tuple(args.result_manifest),
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+
+    if args.holdout_authorization is not None:
+        try:
+            holdout_request = _holdout_analysis_request_from_args(args)
+            written = analyze_holdout_results(holdout_request)
+        except AnalysisError as exc:
+            print(f"FAIL [{exc.code}]: {exc}", file=sys.stderr)
+            return 1
+        except runner.RunnerError as exc:
+            print(f"FAIL [{exc.code}]: {exc}", file=sys.stderr)
+            return 1
+        except Exception:
+            print("FAIL [internal_error]: analyzer failed closed.", file=sys.stderr)
+            return 1
+        print(f"OK: wrote authorized holdout analysis to {written.output_directory.name}.")
+        return 0
+
+    if args.split is None:
+        print("FAIL [cli_split_required]: --split is required unless --holdout-authorization is used.", file=sys.stderr)
+        return 1
+    if args.expected_branch is None or args.expected_commit is None:
+        print("FAIL [cli_identity_required]: --expected-branch and --expected-commit are required.", file=sys.stderr)
+        return 1
+    if args.output_root is None:
+        print("FAIL [cli_output_required]: --output-root is required.", file=sys.stderr)
+        return 1
+
     request = AnalysisRequest(
         split=args.split,
         expected_branch=args.expected_branch,
