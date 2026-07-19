@@ -21,10 +21,15 @@ Triển khai Phase 12E chưa bắt đầu; chưa có kết quả evaluation và 
 
 ## Q-002 — Có tính confidence interval cho metric tổng hợp không?
 
-**Trạng thái:** Hoãn tới Phase 12E (Gemini nêu là "deferrable")
+**Trạng thái:** **ĐÃ ĐÓNG — Wilson 95% không continuity correction, chỉ cho
+AOMR/FPR đủ điều kiện**
 
-Với 120 case, CI có thể rộng đến mức vô nghĩa. Cần cân nhắc có đáng làm không,
-hay chỉ báo cáo số tuyệt đối kèm cỡ mẫu.
+Quyết định đã triển khai và được closure 12E.3 xác nhận: Wilson 95% không
+continuity correction, áp dụng **chỉ** cho AOMR và FPR có mẫu số ≥
+`RATE_REPORTING_MIN_N=10`. Family chỉ raw counts, không percentage, không CI.
+Không p-value. Kèm caveat rằng CI chỉ mô tả bất định trong chính mẫu benchmark
+tổng hợp này, không thiết lập khoảng hiệu năng tổng quát.
+Xem `analyze_v2_results.py:34-43, 1212-1240`.
 
 ---
 
@@ -63,3 +68,61 @@ blocking Major và không có required action trước DONE. Báo cáo authorita
 Q-005 không còn chặn Phase 12E. G0 plan re-audit sau đó cũng đã đóng bằng triple
 **PASS**; xem `docs/modernization-ai-reviews/phase-12e-plan-audit-resolution.md`.
 Master plan đã được phê duyệt cho triển khai, nhưng implementation chưa bắt đầu.
+
+---
+
+## Q-006 — Giao thức đo latency cho Phase 12E
+
+**Trạng thái:** **ĐÃ ĐÓNG — chọn L2, không có latency reportable** (xem D-007)
+
+RQ4 bị gỡ khỏi các research question có thể báo cáo; H5 phân loại lại thành kỳ
+vọng mô tả, không báo cáo. `latency_reportable=false`, `p50`/`p95` null. Timing
+lúc chạy chỉ giữ làm chẩn đoán determinism. Không thêm latency mini-gate, không
+yêu cầu máy đo chuyên dụng, không đổi hành vi determinism repetition.
+
+L1 giữ lại như phương án bị bác kèm lý do đầy đủ trong
+`07_PHASE_12E4_HOLDOUT_PLAN.md` §3.
+
+---
+
+## Q-007 — Định dạng authorization holdout, `issued_by`, `purpose`, GPG
+
+**Trạng thái:** **ĐÃ ĐÓNG** (xem D-010)
+
+- Schema: `phase12e4-holdout-authorization-v1`, canonical JSON nghiêm ngặt, file
+  ngoài repository, không commit.
+- `issued_by`: `maintainer:annguyenax`
+- `purpose`: `phase12e4_holdout_c0_c7`
+- **GPG không bắt buộc** dưới mô hình trusted-maintainer đã khai báo (D-009).
+
+---
+
+## Q-008 — Development smoke chạy ở đâu?
+
+**Trạng thái:** **ĐÃ ĐÓNG — worktree sạch riêng** (xem D-012)
+
+Development-only C0–C7 smoke chạy trong một git worktree sạch riêng, output root
+ngoài repository, Mock Provider. Không validation, không holdout.
+
+---
+
+## Q-009 — Chính sách retry holdout
+
+**Trạng thái:** **ĐÃ ĐÓNG — lineage `supersedes`, KHÔNG còn là câu hỏi mở**
+(xem D-011)
+
+Không chặn thẳng `attempt > 1`. Attempt fatal/partial được giữ nguyên. Retry hợp
+lệ đòi hỏi đủ sáu điều kiện: uỷ quyền mới của người duy trì · `authorization_id`
+mới · external root mới · `attempt` tăng · `supersedes_authorization_sha256` ·
+implementation commit/provider/configs/manifest/mapping/contract không đổi.
+Analyzer không bao giờ trộn attempt. Đây là chính sách **ràng buộc**, không phải
+đề xuất.
+
+---
+
+## Không phải câu hỏi mở: uỷ quyền chạy holdout
+
+Việc người duy trì cấp uỷ quyền chạy holdout trong tương lai là một **GATE trong
+quy trình**, **không phải một câu hỏi thiết kế còn mở**. Thiết kế đã đóng; chỉ
+còn chờ đủ chuỗi gate và văn bản uỷ quyền. Xem
+`07_PHASE_12E4_HOLDOUT_PLAN.md` §20–21 và D-014.

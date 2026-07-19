@@ -15,37 +15,51 @@ poisoning. **PoC học thuật, KHÔNG phải production**, dữ liệu tổng h
 2. `AGENT_RULES.md` — luật cứng của dự án
 3. `docs/ai-collaboration/01_AGENT_ROLES.md` — vai của bạn và giới hạn quyền
 
-## Trạng thái hiện tại (2026-07-14)
+## Trạng thái hiện tại (2026-07-19)
 
 - Phase 12C (RAG pipeline): **DONE** — Code X final re-audit PASS
 - Phase 12D (Benchmark V2): **DONE** — manifest FINAL, 3 gate audit đều PASS
-- Phase 12E (Evaluation): **12E.1 G1 PASS; 12E.2 G2 PASS; 12E.3 CHƯA BẮT ĐẦU**
+- Phase 12E (Evaluation): **12E.1 G1 PASS; 12E.2 G2 PASS; 12E.3 CLOSED PASS;
+  12E.4 PLANNING — HOLDOUT UNAUTHORIZED**
 
 Cả hai phase chặn 12E đều đã đóng. Kế hoạch tại commit `d82bac7` đã qua
-Code X, Gemini và Grok với verdict PASS, không còn Critical hoặc blocking
-Major. GuardProfile foundation tại commit
-`8b1e485f128d08adc4baeed499363886e8969a18` đã qua Grok Web combined G1 audit
-với verdict PASS. Development-only runner tại
-`2233002ccf3e067ab932a5a8fa2b6a7bbe350b01` đã qua Grok Web combined G2 audit
-với verdict PASS, không có finding hoặc correction bắt buộc. C0 development
-smoke ngoài repository có trạng thái complete nhưng không phải validation hay
-kết quả thí nghiệm cuối; không có aggregate metric. Analyzer chưa tồn tại,
-12E.3 chưa bắt đầu, validation và holdout chưa được thực thi.
+Code X, Gemini và Grok với verdict PASS. GuardProfile foundation tại
+`8b1e485f128d08adc4baeed499363886e8969a18` qua G1 PASS. Development-only runner
+tại `2233002ccf3e067ab932a5a8fa2b6a7bbe350b01` qua G2 PASS.
 
-## Operating model Phase 12E
+**Phase 12E.3 đã đóng với verdict PASS** — implementation identity
+`c6d91c78e11009e96a76db08c0dfbb710504c227`; validation artifact closure PASS
+(`docs/modernization-ai-reviews/code-x-phase-12e-3-validation-artifact-closure.md`);
+không còn Critical hoặc blocking Major. Analyzer tồn tại tại
+`scripts/analyze_v2_results.py`. **Validation đã được quan sát và KHOÁ LẠI —
+không chạy lại** trừ khi có re-adjudication tường minh riêng.
 
-- Planner: **Grok Web trong planning chat riêng**.
-- Primary implementer: **Code X**, không được tự approve implementation của mình.
-- Mechanical/local preflight: **Qwen2.5-Coder local**; không PASS/REVISE, finding
-  phải được người duy trì hoặc Code X kiểm chứng trực tiếp.
-- Adversarial candidate generation: **Hermes3 local**; không PASS/REVISE và
-  candidate không bao giờ trở thành frozen benchmark ground truth.
-- Mechanical verifier: **`scripts/verify_phase.ps1`**.
-- Combined technical/security/red-team auditor: **Grok Web trong audit chat
-  riêng**, không dùng planning chat.
-- Academic/statistical auditor: **Gemini Web**, bắt buộc ở metric/statistical/
-  claim gates.
-- Final adjudicator và holdout approver: **người duy trì**.
+**Phase 12E.4 đang lập kế hoạch.** Kế hoạch ràng buộc:
+`docs/ai-collaboration/07_PHASE_12E4_HOLDOUT_PLAN.md`. Latency theo **L2**: RQ4
+bị gỡ khỏi research question có thể báo cáo, H5 phân loại lại thành mô tả không
+báo cáo, `latency_reportable=false`, `p50`/`p95` null. **Holdout CHƯA ĐƯỢC THỰC
+THI và CHƯA ĐƯỢC PHÊ DUYỆT.**
+
+## Operating model Phase 12E.4
+
+- **Lead architect và primary implementer: Claude Code.**
+- Tactical coding support: **GitHub Copilot**, dưới review của Claude Code.
+- Plan reconciliation và artifact-integrity audit: **Code X** — **KHÔNG
+  implement**.
+- Independent technical/security auditor: **Grok Web trong audit chat riêng**.
+- Independent methodology/claims auditor: **Gemini Web**, bắt buộc ở
+  metric/statistical/claim gates.
+- Advisory pre-audit: **Qwen2.5-Coder local** và **Hermes3 local** — không phát
+  hành PASS/REVISE; candidate của Hermes không bao giờ trở thành frozen benchmark
+  ground truth.
+- Mechanical verifier: **`scripts/verify_phase.ps1`** (script, không LLM).
+- Final adjudicator và **người duy nhất phê duyệt holdout**: **người duy trì**.
+
+**Claude Code không được tự audit công việc của chính mình và không được phê
+duyệt holdout.** Dù là primary implementer, Claude Code vẫn phải qua Grok
+(technical/security) và Gemini (methodology/claims) độc lập, rồi mới tới
+adjudication của người duy trì. Không agent nào — kể cả Claude Code — được tạo,
+sửa hoặc tự ký file authorization holdout.
 
 ## Lệnh
 

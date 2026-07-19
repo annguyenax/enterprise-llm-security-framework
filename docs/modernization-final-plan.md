@@ -41,9 +41,27 @@ measurements, not claims made now:
   Provenance, RAG Context, Output/DLP) marginal contribution to overall
   system efficacy, per the `GuardProfile` ablation design in
   `docs/modernization-v2-architecture.md` §2 and §7 (Phase 12E)?
-- **RQ4 (Performance overhead):** What is the latency overhead (p50/p95, in
+- ~~**RQ4 (Performance overhead):** What is the latency overhead (p50/p95, in
   milliseconds) introduced by the multi-layer gateway during an end-to-end
-  retrieval-and-generation cycle against the mock provider?
+  retrieval-and-generation cycle against the mock provider?~~
+  > **SUPERSEDED by the Phase 12E.4 L2 decision (D-007).** This reportable
+  > latency proposal is no longer in force. RQ4 has been removed from the
+  > reportable research questions and the corresponding H5 has been
+  > reclassified as a descriptive, non-reportable expectation.
+  >
+  > **The diagnostic repetition timings that the runner actually collects
+  > cannot support scientific latency claims.** They are a by-product of the
+  > decision-determinism check (`repetitions=2, warmup=0`,
+  > `scripts/run_v2_evaluation.py:2272-2273`; merged by
+  > `_merge_repetition_latency`, `:1980`), not measurements produced under a
+  > frozen latency protocol: there is no warm-up, no isolated measurement
+  > machine, and only two samples per case. Accordingly
+  > `latency_reportable` is `false` and `p50`/`p95` are `null`
+  > (`scripts/analyze_v2_results.py:544, 1491, 1787`).
+  >
+  > Historical context is retained above deliberately. See
+  > `docs/ai-collaboration/07_PHASE_12E4_HOLDOUT_PLAN.md` §3 for the full
+  > rationale and for L1 as the rejected alternative.
 - **RQ5 (Baseline vulnerability, added by audit):** What is the baseline
   leakage rate and poisoned-context exposure of the retrieval pipeline with
   all guard layers disabled (the `no_guards` profile), when evaluated

@@ -3,7 +3,7 @@
 > **Agent đọc file này ĐẦU TIÊN, trước khi làm bất cứ việc gì.**
 > Cập nhật sau mỗi phase gate. Không nhồi lịch sử chat — chỉ trạng thái hiện tại.
 
-**Cập nhật lần cuối:** 2026-07-14
+**Cập nhật lần cuối:** 2026-07-19
 
 ## Trạng thái phase
 
@@ -14,7 +14,7 @@
 | 12B | SQLite FTS5/BM25 retrieval foundation | Done |
 | 12C | End-to-end RAG security pipeline | **DONE** — Code X final re-audit PASS |
 | 12D | Benchmark V2 (thiết kế / sinh / freeze) | **DONE** — manifest FINAL |
-| 12E | Đánh giá + ablation trên benchmark v2 | **12E.1 G1 PASS; 12E.2 G2 PASS; 12E.3 CHƯA BẮT ĐẦU** |
+| 12E | Đánh giá + ablation trên benchmark v2 | **12E.1 G1 PASS; 12E.2 G2 PASS; 12E.3 CLOSED PASS; 12E.4 PLANNING — HOLDOUT UNAUTHORIZED** |
 
 **Cả hai phase chặn 12E (12C và 12D) đều đã đóng bằng audit độc lập PASS.**
 G0 của Phase 12E đã đóng bằng triple PASS trên plan commit
@@ -22,7 +22,45 @@ G0 của Phase 12E đã đóng bằng triple PASS trên plan commit
 triển khai tại `8b1e485f128d08adc4baeed499363886e8969a18` và đã qua G1 audit độc lập.
 Runner development-only của 12E.2 được triển khai tại
 `2233002ccf3e067ab932a5a8fa2b6a7bbe350b01` và đã qua G2 audit độc lập.
-12E.3 chưa bắt đầu và vẫn cần task/go-ahead riêng theo `AGENT_RULES.md` rule 12.
+**12E.3 đã đóng với verdict PASS** (chi tiết bên dưới). **12E.4 đang ở giai đoạn
+lập kế hoạch; holdout vẫn CHƯA ĐƯỢC PHÊ DUYỆT** và vẫn cần văn bản uỷ quyền riêng
+của người duy trì theo `AGENT_RULES.md` rule 12.
+
+## Phase 12E.3 — ĐÃ ĐÓNG (CLOSED, PASS)
+
+- **Implementation identity:** `c6d91c78e11009e96a76db08c0dfbb710504c227`
+  (`fix: align Phase 12E.3 runner and analyzer contracts`).
+- **Validation artifact closure: PASS.** Báo cáo:
+  `docs/modernization-ai-reviews/code-x-phase-12e-3-validation-artifact-closure.md`.
+- Critical issues: **None**. Blocking Major issues: **None**. Required
+  corrections: **None**.
+- Matrix hoàn chỉnh: đúng tám `result.json` + tám `result-manifest.json`, C0–C7,
+  mọi run và mọi case record đều `complete`; error/timeout/skipped bằng 0.
+- Analyzer artifact: `analysis.json`, `analysis-table.csv`,
+  `analysis-manifest.json` — hash, kích thước và identity đều tái lập độc lập và
+  khớp.
+- Chính sách metric được xác nhận nguyên vẹn: không có khoá `abr`, không macro,
+  không family rate, không family percentage; `RATE_REPORTING_MIN_N=10` được tuân
+  thủ; latency non-reportable với `p50=null`, `p95=null`.
+- Quét đệ quy toàn bộ result/analysis JSON cùng 208 dòng CSV: **không** có trường
+  thô, canary/secret, retrieved content, answer hay đường dẫn máy tuyệt đối.
+- **Validation đã được quan sát và KHOÁ LẠI. Không chạy lại** trừ khi có
+  re-adjudication tường minh riêng của người duy trì.
+- Holdout: **NOT EXECUTED**, không được uỷ quyền, và closure này **không** cấp
+  quyền chạy holdout.
+
+## Phase 12E.4 — PLANNING / HOLDOUT UNAUTHORIZED
+
+- Kế hoạch ràng buộc: `docs/ai-collaboration/07_PHASE_12E4_HOLDOUT_PLAN.md`.
+- Baseline lập kế hoạch: `c0b8f6d6fb9fb5faa24f58610368fdc50ca41b62` trên branch
+  `phase-12e-4-holdout-planning`.
+- **Latency: chọn L2.** RQ4 bị gỡ khỏi các research question có thể báo cáo; H5
+  được phân loại lại thành kỳ vọng mô tả, không báo cáo; `latency_reportable`
+  giữ `false`; `p50`/`p95` giữ `null`.
+- **Chưa triển khai gì.** Không có code holdout, không có authorization file,
+  không có artifact holdout.
+- **Holdout vẫn CHƯA ĐƯỢC PHÊ DUYỆT.** Chỉ người duy trì mới cấp được uỷ quyền,
+  sau khi đủ chuỗi gate trong kế hoạch 12E.4.
 
 ## Phase 12E — trạng thái gate hiện tại
 
@@ -56,14 +94,19 @@ Runner development-only của 12E.2 được triển khai tại
 - Smoke trên chỉ là bằng chứng vận hành development, không phải validation hay
   kết quả thí nghiệm cuối. Không có aggregate metric nào được tính. Validation:
   **NOT EXECUTED**. Holdout: **NOT EXECUTED**.
-- Analyzer chưa tồn tại và **12E.3 NOT STARTED**. Các giới hạn và khuyến nghị
-  deferred đã phê duyệt vẫn giữ nguyên.
-- Operating model từ 12E.2 trở đi: Grok Web planning chat riêng; Code X primary
-  implementer; Qwen2.5-Coder local mechanical preflight; Hermes3 local chỉ sinh
-  adversarial candidate; `scripts/verify_phase.ps1` mechanical verifier; Grok
-  Web audit chat riêng làm combined technical/security/red-team audit; Gemini
-  Web giữ academic/statistical/claim gate; người duy trì adjudicate và phê duyệt
-  holdout.
+- ~~Analyzer chưa tồn tại và 12E.3 NOT STARTED.~~ **Đã lỗi thời** — analyzer tồn
+  tại tại `scripts/analyze_v2_results.py` và 12E.3 đã đóng PASS (xem mục
+  "Phase 12E.3 — ĐÃ ĐÓNG" ở trên). Các giới hạn và khuyến nghị deferred đã phê
+  duyệt vẫn giữ nguyên.
+- **Operating model từ 12E.4 trở đi** (thay thế mô hình 12E.2–12E.3): **Claude
+  Code là lead architect và primary implementer**; GitHub Copilot hỗ trợ chiến
+  thuật dưới review của Claude; **Code X là plan reconciler và
+  artifact-integrity auditor, KHÔNG implement**; Grok Web là independent
+  technical/security auditor; Gemini Web là independent methodology/claims
+  auditor; Qwen2.5-Coder và Hermes3 local chỉ là advisory pre-audit;
+  `scripts/verify_phase.ps1` là mechanical verifier; **người duy trì là final
+  adjudicator và là người duy nhất phê duyệt holdout**. Chi tiết:
+  `docs/ai-collaboration/01_AGENT_ROLES.md`.
 
 ## Phase 12C — đã đóng
 

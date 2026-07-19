@@ -1,21 +1,32 @@
 # Phase 12E Master Plan — Ablation Evaluation of the RAG Security Pipeline
 
-> **Trạng thái: G0 PASS; 12E.1 G1 PASS; 12E.2 G2 PASS; 12E.3 CHƯA BẮT ĐẦU.**
-> Branch: `phase-12e-ablation-evaluation` · Audited plan commit:
+> **Trạng thái: G0 PASS; 12E.1 G1 PASS; 12E.2 G2 PASS; 12E.3 CLOSED PASS;
+> 12E.4 PLANNING — HOLDOUT UNAUTHORIZED.**
+> Branch gốc: `phase-12e-ablation-evaluation` · Audited plan commit:
 > `d82bac7828e2e54520e0aa29271e820a52ec6f47`
 > · 12E.1 implementation commit:
 > `8b1e485f128d08adc4baeed499363886e8969a18`
 > · 12E.2 runner implementation commit:
 > `2233002ccf3e067ab932a5a8fa2b6a7bbe350b01`
+> · **12E.3 implementation identity:
+> `c6d91c78e11009e96a76db08c0dfbb710504c227`**
 >
-> Code X, Gemini và Grok đã re-audit plan trên cùng commit và đều trả **PASS**;
-> không còn Critical, blocking Major hoặc correction bắt buộc trước triển khai.
-> Phase 12E.1 sau đó đã qua Grok Web combined G1 audit với verdict **PASS**.
-> Phase 12E.2 sau đó đã qua Grok Web combined G2 audit với verdict **PASS**;
-> audit không ghi nhận Critical, Major, Minor hoặc required correction.
-> Tài liệu này vẫn **không** phải kết quả evaluation. Runner chỉ hỗ trợ split
-> `development`; analyzer chưa tồn tại, 12E.3 chưa bắt đầu, validation và holdout
-> đều chưa được thực thi.
+> Code X, Gemini và Grok đã re-audit plan trên cùng commit và đều trả **PASS**.
+> Phase 12E.1 qua G1 **PASS**; Phase 12E.2 qua G2 **PASS**.
+> **Phase 12E.3 đã ĐÓNG với verdict PASS** — validation artifact closure:
+> `docs/modernization-ai-reviews/code-x-phase-12e-3-validation-artifact-closure.md`;
+> không còn Critical, blocking Major hoặc required correction. Analyzer tồn tại
+> tại `scripts/analyze_v2_results.py`. **Validation đã được quan sát và KHOÁ
+> LẠI — không chạy lại** trừ khi có re-adjudication tường minh riêng (D-008).
+>
+> ## ⚠ Kế hoạch ràng buộc cho Phase 12E.4
+>
+> **Tài liệu này KHÔNG còn là kế hoạch ràng buộc cho Phase 12E.4.** Kế hoạch
+> ràng buộc là **`docs/ai-collaboration/07_PHASE_12E4_HOLDOUT_PLAN.md`**. Ở đâu
+> có mâu thuẫn, tài liệu 07 thắng.
+>
+> Tài liệu này vẫn **không** phải kết quả evaluation. **Holdout CHƯA ĐƯỢC THỰC
+> THI và CHƯA ĐƯỢC PHÊ DUYỆT.**
 
 **Quy ước:** mọi chỗ ghi `VERIFY DURING IMPLEMENTATION` là điều **chưa được
 code hiện tại chứng minh**. Không được coi là đã hỗ trợ.
@@ -64,9 +75,15 @@ thật; tối ưu hiệu năng; bất kỳ thay đổi nào lên 9 artifact đã
 - **RQ2.** Mỗi lớp guard gây ra bao nhiêu báo động giả trên case benign?
 - **RQ3.** Lớp nào là *cần thiết* (bỏ nó ra thì có tấn công lọt) và lớp nào chỉ
   *dư thừa* (bỏ ra không đổi kết quả) trên benchmark này?
-- **RQ4.** Chi phí độ trễ của từng lớp là bao nhiêu (p50/p95 per-stage)?
+- ~~**RQ4.** Chi phí độ trễ của từng lớp là bao nhiêu (p50/p95 per-stage)?~~
+  **ĐÃ GỠ khỏi các research question có thể báo cáo — quyết định L2 của Phase
+  12E.4 (D-007).** Không có claim latency nào được báo cáo. Timing lúc chạy chỉ
+  giữ làm chẩn đoán determinism; `latency_reportable=false`, `p50`/`p95` null.
+  Lý do đầy đủ: `07_PHASE_12E4_HOLDOUT_PLAN.md` §3.
 - **RQ5.** Có tấn công nào **không lớp nào** chặn được (residual risk đã khai
   báo trước) — và benchmark có dự đoán đúng chúng không?
+
+**Research question có thể báo cáo còn lại: RQ1, RQ2, RQ3, RQ5.**
 
 ## 3. Giả thuyết
 
@@ -78,8 +95,11 @@ thật; tối ưu hiệu năng; bất kỳ thay đổi nào lên 9 artifact đã
   gần như không đóng góp ở family khác.
 - **H4.** Tổng đóng góp của các lớp **không cộng tuyến tính** — có chồng lấn
   (một tấn công bị nhiều lớp cùng chặn).
-- **H5.** Latency tổng chủ yếu do `retrieval`, không do guard. (Guard là rule-based,
-  deterministic.)
+- **H5.** *(Kỳ vọng MÔ TẢ, KHÔNG BÁO CÁO — phân loại lại theo L2, D-007.)*
+  Latency tổng chủ yếu do `retrieval`, không do guard (guard là rule-based,
+  deterministic). **H5 không được kiểm định và không được báo cáo trong Phase
+  12E**, vì timing sẵn có chỉ là sản phẩm phụ của determinism repetition
+  (`repetitions=2, warmup=0`), không phải một giao thức đo latency khoa học.
 
 Mọi giả thuyết đều có thể bị bác bỏ. Kết quả xấu được **báo cáo và phân tích**,
 không được vá thầm (ADR-003, Rule of Freezing).
@@ -944,9 +964,14 @@ Một C0 smoke development do người duy trì thực hiện ngoài repository 
 tất với `run_status=complete`, result SHA-256
 `3da58e32b8ae0c1d72ccd0dd2aed0f8092a56624a1614967c9661920c3d49ef2` và
 kích thước `84995` byte. Smoke này không phải validation evidence hoặc final
-experimental result; không có aggregate metric nào được tính. Analyzer chưa
-tồn tại, **12E.3 NOT STARTED**, validation **NOT EXECUTED** và holdout **NOT
-EXECUTED**.
+experimental result; không có aggregate metric nào được tính.
+
+**Cập nhật (2026-07-19):** analyzer nay đã tồn tại tại
+`scripts/analyze_v2_results.py`; **Phase 12E.3 đã ĐÓNG với verdict PASS** tại
+implementation identity `c6d91c78e11009e96a76db08c0dfbb710504c227` (closure:
+`docs/modernization-ai-reviews/code-x-phase-12e-3-validation-artifact-closure.md`).
+Validation **đã được thực thi một lần và KHOÁ LẠI — không chạy lại** (D-008).
+**Holdout vẫn NOT EXECUTED và CHƯA ĐƯỢC PHÊ DUYỆT.**
 
 ## 37. Tiêu chí chấp nhận
 
