@@ -571,3 +571,196 @@ def test_cli_include_redteam_flag_grouped_shape(mat, redteam_repos, tmp_path):
     summary = json.loads(out.read_text(encoding="utf-8"))
     assert set(summary["groups"]) == {"benchmark_v2", "redteam_prompts"}
     assert (r["target_root"] / "redteam" / "prompts.jsonl").exists()
+
+
+# ===========================================================================
+# Cross-review correction V1 — atomic no-clobber publication
+# ===========================================================================
+def _temp_leftovers(directory: Path):
+    return sorted(directory.glob(".materialize-*")) if directory.exists() else []
+
+
+def test_absent_target_publishes_successfully(mat, synthetic_repos):
+    r = synthetic_repos
+    summary = mat.materialize_frozen_artifacts(
+        source_root=r["mod_source_root"], target_root=r["target_root"])
+    assert summary["counts"]["materialized"] == 4
+    for rel, data in r["blobs"].items():
+        assert (r["target_bench"] / rel).read_bytes() == data
+
+
+def test_temp_bytes_complete_before_publication(mat, synthetic_repos, monkeypatch):
+    """The temp file is SHA/size-verified before the no-clobber link; a bad temp
+    fails closed and leaves no final artifact."""
+    r = synthetic_repos
+    real_sha = mat._sha256_of
+    calls = {"n": 0}
+
+    def wrong_first(path):
+        # Corrupt only the first temp verification to simulate an incomplete temp.
+        result = real_sha(path)
+        if ".materialize-" in path.name and calls["n"] == 0:
+            calls["n"] += 1
+            return "0" * 64
+        return result
+
+    monkeypatch.setattr(mat, "_sha256_of", wrong_first)
+    with pytest.raises(mat.MaterializationError) as exc:
+        mat.materialize_frozen_artifacts(
+            source_root=r["mod_source_root"], target_root=r["target_root"])
+    assert exc.value.code == "temp_verify_failed"
+    # No partial final artifact, no leftover temp.
+    assert not (r["target_bench"] / "cases/alpha.jsonl").exists()
+    assert _temp_leftovers(r["target_bench"] / "cases") == []
+
+
+def test_matching_target_reused_without_rewrite(mat, synthetic_repos):
+    r = synthetic_repos
+    rel = "cases/alpha.jsonl"
+    t = r["target_bench"] / rel
+    t.parent.mkdir(parents=True, exist_ok=True)
+    t.write_bytes(r["blobs"][rel])
+    before = t.stat().st_mtime_ns
+    summary = mat.materialize_frozen_artifacts(
+        source_root=r["mod_source_root"], target_root=r["target_root"])
+    assert next(f for f in summary["files"] if f["path"] == rel)["action"] == "reused"
+    assert t.stat().st_mtime_ns == before
+
+
+def test_mismatching_target_refused(mat, synthetic_repos):
+    r = synthetic_repos
+    rel = "cases/alpha.jsonl"
+    t = r["target_bench"] / rel
+    t.parent.mkdir(parents=True, exist_ok=True)
+    t.write_bytes(b'{"synthetic": "TAMPERED"}\n')
+    with pytest.raises(mat.MaterializationError) as exc:
+        mat.materialize_frozen_artifacts(
+            source_root=r["mod_source_root"], target_root=r["target_root"])
+    assert exc.value.code == "target_mismatch"
+    assert t.read_bytes() == b'{"synthetic": "TAMPERED"}\n'
+
+
+def _racing_link(mat, monkeypatch, raced_bytes):
+    """Patch os.link so a target appears immediately before the atomic link."""
+    real_link = os.link
+
+    def racing(src, dst, *a, **k):
+        Path(dst).write_bytes(raced_bytes)   # concurrent creator wins the race
+        return real_link(src, dst, *a, **k)  # now raises FileExistsError
+
+    monkeypatch.setattr(mat.os, "link", racing)
+
+
+def test_concurrent_identical_target_is_reused_not_overwritten(mat, synthetic_repos, monkeypatch):
+    r = synthetic_repos
+    rel = "cases/alpha.jsonl"
+    identical = r["blobs"][rel]
+    _racing_link(mat, monkeypatch, identical)
+    summary = mat.materialize_frozen_artifacts(
+        source_root=r["mod_source_root"], target_root=r["target_root"],
+        only_paths=[rel])
+    entry = next(f for f in summary["files"] if f["path"] == rel)
+    assert entry["action"] == "reused_concurrent"
+    # The concurrently-written bytes are intact (never overwritten).
+    assert (r["target_bench"] / rel).read_bytes() == identical
+    assert _temp_leftovers(r["target_bench"] / "cases") == []
+
+
+def test_concurrent_mismatching_target_fails_closed_not_overwritten(mat, synthetic_repos, monkeypatch):
+    r = synthetic_repos
+    rel = "cases/alpha.jsonl"
+    raced = b'{"synthetic": "RACED_DIFFERENT"}\n'
+    _racing_link(mat, monkeypatch, raced)
+    with pytest.raises(mat.MaterializationError) as exc:
+        mat.materialize_frozen_artifacts(
+            source_root=r["mod_source_root"], target_root=r["target_root"],
+            only_paths=[rel])
+    assert exc.value.code == "target_mismatch"
+    # The concurrently-written differing bytes are preserved, never overwritten.
+    assert (r["target_bench"] / rel).read_bytes() == raced
+    assert _temp_leftovers(r["target_bench"] / "cases") == []
+
+
+def test_unsupported_no_clobber_primitive_fails_closed(mat, synthetic_repos, monkeypatch):
+    r = synthetic_repos
+
+    def unsupported(src, dst, *a, **k):
+        raise OSError("hard links not supported")
+
+    monkeypatch.setattr(mat.os, "link", unsupported)
+    with pytest.raises(mat.MaterializationError) as exc:
+        mat.materialize_frozen_artifacts(
+            source_root=r["mod_source_root"], target_root=r["target_root"],
+            only_paths=["cases/alpha.jsonl"])
+    assert exc.value.code == "no_clobber_unsupported"
+
+
+def test_failed_publication_leaves_no_final_and_no_temp(mat, synthetic_repos, monkeypatch):
+    r = synthetic_repos
+    rel = "cases/alpha.jsonl"
+
+    def unsupported(src, dst, *a, **k):
+        raise OSError("hard links not supported")
+
+    monkeypatch.setattr(mat.os, "link", unsupported)
+    with pytest.raises(mat.MaterializationError):
+        mat.materialize_frozen_artifacts(
+            source_root=r["mod_source_root"], target_root=r["target_root"],
+            only_paths=[rel])
+    assert not (r["target_bench"] / rel).exists()
+    assert _temp_leftovers(r["target_bench"] / "cases") == []
+
+
+def test_temp_removed_after_success(mat, synthetic_repos):
+    r = synthetic_repos
+    mat.materialize_frozen_artifacts(
+        source_root=r["mod_source_root"], target_root=r["target_root"])
+    assert _temp_leftovers(r["target_bench"] / "cases") == []
+    assert _temp_leftovers(r["target_bench"] / "labels") == []
+
+
+def test_both_groups_use_corrected_primitive(mat, redteam_repos, monkeypatch):
+    """A raced identical target in either group is reused via the same
+    no-clobber path (proves both groups route through _publish_no_clobber)."""
+    r = redteam_repos
+    real_link = os.link
+
+    def racing_identical(src, dst, *a, **k):
+        # Concurrent writer produces byte-identical content for whatever artifact
+        # is being published, so both groups exercise the no-clobber race path.
+        Path(dst).write_bytes(Path(src).read_bytes())
+        return real_link(src, dst, *a, **k)
+
+    monkeypatch.setattr(mat.os, "link", racing_identical)
+    summary = mat.materialize(
+        source_root=r["mod_source_root"], target_root=r["target_root"],
+        include_redteam_prompts=True, benchmark_manifest_path=None)
+    bench_actions = {f["action"] for f in summary["groups"]["benchmark_v2"]["files"]}
+    rt = summary["groups"]["redteam_prompts"]["files"][0]
+    assert rt["action"] == "reused_concurrent"
+    assert bench_actions == {"reused_concurrent"}
+
+
+def test_no_final_publication_calls_os_replace(mat):
+    """AST: the materializer never calls os.replace (final publication uses
+    os.link no-clobber)."""
+    import ast
+    source = Path(mat.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    replace_calls = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "replace"
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "os"
+    ]
+    assert replace_calls == [], "materializer must not call os.replace for publication"
+    # And it must use os.link.
+    link_calls = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "link"
+    ]
+    assert link_calls, "materializer must publish via os.link"

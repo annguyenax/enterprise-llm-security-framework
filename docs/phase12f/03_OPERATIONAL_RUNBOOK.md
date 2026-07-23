@@ -178,10 +178,32 @@ Get-ChildItem <EVIDENCE_ROOT> -Recurse -Filter result-manifest.json |
 Get-FileHash <ANALYSIS>\analysis.json,<ANALYSIS>\analysis-table.csv,<ANALYSIS>\analysis-manifest.json -Algorithm SHA256
 ```
 
-### 6.2 Structured inventory tool
+### 6.2 Structured inventory tool (integrated)
 
-> **EXPECTED AFTER INTEGRATION**  
-> If Phase 12F adds `scripts/inventory_evaluation_evidence.py` (or similar), use it to emit a machine-readable inventory. Until merged, use §6.1.
+The evidence inventory and verification tools are integrated in this tree. They
+never parse `result.json` or JSONL records; they compute SHA-256 and byte sizes
+only, and write outputs atomically without modifying source evidence.
+
+Build a content-free inventory (all `--root NAME=PATH` entries must cover every
+root the allowlist references):
+
+```powershell
+cd <REPO_ROOT>
+.\.venv\Scripts\python.exe scripts\phase12f\build_evidence_inventory.py `
+  --allowlist <ALLOWLIST_JSON> `
+  --root <NAME>=<EVIDENCE_ROOT> `
+  --output-dir <FRESH_INVENTORY_OUTPUT_DIR>
+```
+
+Verify an existing inventory against the current evidence (a `PASS` requires no
+missing, added, changed or duplicated artifact; `NOT_VERIFIABLE` is never `PASS`):
+
+```powershell
+.\.venv\Scripts\python.exe scripts\phase12f\verify_evidence_inventory.py `
+  --inventory <INVENTORY_JSON> `
+  --root <NAME>=<EVIDENCE_ROOT> `
+  [--output <REPORT_JSON>]
+```
 
 ---
 
@@ -206,10 +228,28 @@ Exclude:
 - full result.json case dumps  
 - API keys  
 
-### 7.2 Automated sanitizer
+### 7.2 Automated sanitizer (integrated)
 
-> **EXPECTED AFTER INTEGRATION**  
-> A packet builder script, if provided by another branch, should enforce an allowlist of fields. Mark its output with evidence classification (diagnostic vs final).
+The sanitized Gemini packet builder is integrated in this tree. It enforces the
+allowlist, excludes prohibited classes (`result.json`, `*.jsonl`, `.env`,
+databases, `.git`, credentials), produces a deterministic ZIP, and reopens and
+verifies the ZIP against the recorded checksums.
+
+```powershell
+cd <REPO_ROOT>
+.\.venv\Scripts\python.exe scripts\phase12f\prepare_gemini_packet.py `
+  --closure-dir <CLOSURE_AUDIT_DIR> `
+  --allowlist <ALLOWLIST_JSON> `
+  --root <NAME>=<EVIDENCE_ROOT> `
+  --output-dir <FRESH_PACKET_OUTPUT_DIR>
+```
+
+The builder **requires a real COMPLETE closure audit whose findings carry
+`CODEX_PHASE12E4_CLOSURE_AUDIT_PASS`**. It refuses to build when the closure
+`STATUS.json` state is `RUNNING` or not `COMPLETE`, when the closure report is
+missing or ambiguous, or when the closure gate is anything other than a genuine
+`PASS`. It never invents a verdict, and it refuses to reuse a non-empty output
+directory.
 
 ---
 

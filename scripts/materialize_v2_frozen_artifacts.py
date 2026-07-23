@@ -224,8 +224,28 @@ def load_manifest(
     return {"manifest_status": status, "artifact_class": artifact_class, "entries": entries}
 
 
-def _atomic_publish(source: Path, target: Path) -> None:
-    """Copy ``source`` bytes to ``target`` atomically within the target dir."""
+def _publish_no_clobber(
+    source: Path, target: Path, *, expected_sha: str, expected_size: int
+) -> str:
+    """Atomically publish ``source`` bytes to ``target`` WITHOUT clobbering.
+
+    Publication uses ``os.link`` (hard link) as the atomic no-clobber primitive:
+    it fails with ``FileExistsError`` if ``target`` already exists, so a target
+    that appears during the check→publish window is never overwritten. This
+    closes the check-then-``os.replace`` TOCTOU race — ``os.replace`` is never
+    used for the final artifact destination, and no existing destination is ever
+    unlinked, truncated or replaced.
+
+    Returns ``"published"`` on success, or ``"raced"`` when a target appeared
+    concurrently (the caller re-verifies and never overwrites). Raises
+    ``MaterializationError`` (fail closed) if the temporary bytes fail
+    verification or if the filesystem does not support atomic no-clobber linking.
+
+    Trusted-administrator assumptions (documented, not defended against): a local
+    administrator or hostile process with write access to the destination
+    directory could still interfere; and directory-entry durability after a crash
+    is best-effort on filesystems without directory ``fsync`` (e.g. Windows).
+    """
     target.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(prefix=".materialize-", dir=str(target.parent))
     tmp_path = Path(tmp_name)
@@ -235,10 +255,27 @@ def _atomic_publish(source: Path, target: Path) -> None:
                 out.write(chunk)
             out.flush()
             os.fsync(out.fileno())
-        os.replace(tmp_path, target)
-    except BaseException:
+        # Verify the temporary file is complete BEFORE publishing it.
+        if _sha256_of(tmp_path) != expected_sha or tmp_path.stat().st_size != expected_size:
+            raise MaterializationError(
+                "temp_verify_failed", "temporary file failed verification before publication"
+            )
+        try:
+            os.link(tmp_path, target)
+        except FileExistsError:
+            # A target appeared during the race. Never overwrite it.
+            return "raced"
+        except (OSError, NotImplementedError, AttributeError) as exc:
+            raise MaterializationError(
+                "no_clobber_unsupported",
+                "atomic no-clobber link is not supported on this filesystem",
+            ) from exc
+        return "published"
+    finally:
+        # Remove the temporary link on success and on ordinary failure. A raced
+        # or published target is a distinct directory entry and is untouched.
+        # A genuine cleanup OSError (other than 'already gone') is not suppressed.
         tmp_path.unlink(missing_ok=True)
-        raise
 
 
 def _materialize_entries(
@@ -318,15 +355,41 @@ def _materialize_entries(
                                  "sha256": expected_sha, "size_bytes": expected_size})
             continue
 
-        _atomic_publish(source_file, target_file)
+        outcome = _publish_no_clobber(
+            source_file, target_file, expected_sha=expected_sha, expected_size=expected_size
+        )
 
-        # Verify target identity AFTER copy.
+        if outcome == "raced":
+            # A target appeared during the check→publish window. Never overwrite:
+            # re-verify it, accept only if byte-identical, otherwise fail closed.
+            if not target_file.exists():
+                raise MaterializationError(
+                    "race_inconsistent",
+                    f"no-clobber link reported an existing target that is now absent: {rel}",
+                )
+            if _is_symlink_or_reparse(target_file) or not target_file.is_file():
+                raise MaterializationError(
+                    "target_mismatch",
+                    f"a target appeared during the race and is not a regular file: {rel}",
+                )
+            raced_sha = _sha256_of(target_file)
+            if raced_sha == expected_sha and target_file.stat().st_size == expected_size:
+                counts["reused"] += 1
+                file_results.append({"path": rel, "action": "reused_concurrent",
+                                     "sha256": expected_sha, "size_bytes": expected_size})
+                continue
+            raise MaterializationError(
+                "target_mismatch",
+                f"a target appeared during the race and differs; not overwritten: {rel}",
+            )
+
+        # Verify the published target identity AFTER publication.
         after_size = target_file.stat().st_size
         after_sha = _sha256_of(target_file)
         if after_size != expected_size or after_sha != expected_sha:
             raise MaterializationError(
                 "target_verify_failed",
-                f"post-copy verification failed for {rel}",
+                f"post-publication verification failed for {rel}",
             )
         counts["materialized"] += 1
         file_results.append({"path": rel, "action": "materialized",
