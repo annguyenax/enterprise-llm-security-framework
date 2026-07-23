@@ -131,6 +131,39 @@ function Test-SymlinkCapability($tempRoot) {
     }
 }
 
+# Byte-level check of the governed auxiliary release-test fixture manifest.
+# Requires: manifest present + final; exactly one file; expected path;
+# file present; SHA-256 and size match. Returns @{ Ok; Detail }.
+# No JSONL record is parsed.
+function Test-AuxiliaryFixture($manifestPath, $baseDir) {
+    if (-not (Test-Path $manifestPath)) {
+        return @{ Ok = $false; Detail = "redteam/prompts-manifest.json not found" }
+    }
+    $am = Get-Content $manifestPath -Raw | ConvertFrom-Json
+    $problems = @()
+    if ($am.manifest_status -ne "final") { $problems += "manifest_status=$($am.manifest_status) (expected final)" }
+    $files = @($am.files)
+    if ($files.Count -ne 1) {
+        $problems += "expected exactly 1 file, got $($files.Count)"
+    } elseif ($files[0].path -ne "redteam/prompts.jsonl") {
+        $problems += "unexpected path $($files[0].path)"
+    } else {
+        $p = Join-Path $baseDir $files[0].path
+        if (-not (Test-Path $p)) {
+            $problems += "$($files[0].path) MISSING"
+        } else {
+            $h = (Get-FileHash $p -Algorithm SHA256).Hash.ToLower()
+            if ($h -ne $files[0].sha256) { $problems += "$($files[0].path) HASH MISMATCH" }
+            $sz = (Get-Item $p).Length
+            if ($sz -ne $files[0].size_bytes) { $problems += "$($files[0].path) SIZE MISMATCH ($sz)" }
+        }
+    }
+    if ($problems.Count -eq 0) {
+        return @{ Ok = $true; Detail = "1/1 byte-identical (redteam/prompts.jsonl, status=final)" }
+    }
+    return @{ Ok = $false; Detail = ($problems -join "; ") }
+}
+
 # Heuristic: does pytest output indicate a Windows path-length / MAX_PATH setup
 # failure rather than a test assertion failure?
 function Test-PathLengthFailure($output) {
@@ -218,6 +251,10 @@ if ($ReleaseReadiness) {
     } else {
         Record "frozen_artifacts_bytelevel" $false "FINAL manifest not found"
     }
+
+    Write-Section "Release-readiness: auxiliary release test fixture (byte-level only)"
+    $aux = Test-AuxiliaryFixture "redteam/prompts-manifest.json" $RepoRoot
+    Record "release_auxiliary_artifacts_bytelevel" $aux.Ok $aux.Detail
 
     Write-Section "Release-readiness: explicit non-actions"
     Write-Host "  [INFO] holdout: not run" -ForegroundColor DarkGray

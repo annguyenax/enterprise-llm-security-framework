@@ -32,7 +32,8 @@
 - [ ] `freeze_v2_benchmark.py verify` OK  
 - [ ] Manifest status `final`  
 - [ ] Manifest SHA-256 recorded: `________________`  
-- [ ] Materialization method documented if JSONL were copied  
+- [ ] A fresh worktree materialized with `scripts/materialize_v2_frozen_artifacts.py --include-redteam-prompts` (both the nine benchmark-v2 FINAL artifacts and the manifest-governed `redteam/prompts.jsonl` release-test fixture) **before** release-readiness and full-suite testing  
+- [ ] Materialization was manifest-governed and byte-verified (no manual copy; no raw JSONL committed; only `.json` manifests tracked)  
 
 ## E. Documentation
 

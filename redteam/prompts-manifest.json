@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "manifest_status": "final",
+  "artifact_class": "release_test_fixture",
+  "files": [
+    {
+      "path": "redteam/prompts.jsonl",
+      "size_bytes": 16086,
+      "sha256": "7abd3a2745f33401adf4fed2490d654a1932e1f0637d03d55c3fdd8e3179bcc6"
+    }
+  ]
+}

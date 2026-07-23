@@ -79,7 +79,26 @@ From FINAL manifest under `datasets/v2/manifests/benchmark-v2-manifest.json` (st
 # Do not open/parse holdout case/label records for content review.
 ```
 
-**EXPECTED AFTER INTEGRATION:** a dedicated materialization helper script, if another Phase 12F branch adds one. Until then, use verified `copy`/`Copy-Item` of ignored artifacts only.
+**INTEGRATED (Phase 12F):** the dedicated helper `scripts/materialize_v2_frozen_artifacts.py` now performs manifest-governed, byte-verified materialization. Do **not** use `copy`/`Copy-Item` for these artifacts.
+
+A fresh worktree must materialize **both**:
+
+- the nine benchmark-v2 FINAL artifacts (governed by `datasets/v2/manifests/benchmark-v2-manifest.json`), and
+- the manifest-governed redteam release-test fixture `redteam/prompts.jsonl` (governed by `redteam/prompts-manifest.json`), which the v1 evaluation-runner tests require.
+
+```powershell
+# Dry-run first, then run once. Materialize BEFORE release-readiness and full-suite testing.
+python scripts\materialize_v2_frozen_artifacts.py `
+  --source-root "<GOVERNED_SOURCE_REPO>" `
+  --target-root "<FRESH_TARGET_WORKTREE>" `
+  --include-redteam-prompts --dry-run
+python scripts\materialize_v2_frozen_artifacts.py `
+  --source-root "<GOVERNED_SOURCE_REPO>" `
+  --target-root "<FRESH_TARGET_WORKTREE>" `
+  --include-redteam-prompts
+```
+
+Rules: no manual copying; no raw JSONL commit (both `*.jsonl` stay git-ignored; only their `.json` manifests are tracked); byte-level SHA-256/size verification only; the tool never parses JSONL records.
 
 ---
 

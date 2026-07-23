@@ -46,6 +46,15 @@ BENCHMARK_SUBDIR = Path("datasets") / "v2"
 # (it is a ``.json`` file) and is the authority for what must be materialized.
 MANIFEST_RELPATH = BENCHMARK_SUBDIR / "manifests" / "benchmark-v2-manifest.json"
 
+# Governed auxiliary release-test fixture: a single git-ignored JSONL that the
+# v1 evaluation-runner tests require but that predates (and is not covered by)
+# the benchmark v2 FINAL manifest. Its own tiny FINAL manifest is tracked in git
+# and pins exactly one repository-root-relative path. This is an opt-in group;
+# the trusted artifact allowlist is NOT broadened for the default run.
+REDTEAM_MANIFEST_RELPATH = Path("redteam") / "prompts-manifest.json"
+REDTEAM_EXPECTED_PATHS = frozenset({"redteam/prompts.jsonl"})
+REDTEAM_ARTIFACT_CLASS = "release_test_fixture"
+
 _CHUNK = 65536
 _HEX64 = frozenset("0123456789abcdef")
 
@@ -131,8 +140,19 @@ def _safe_resolved(base_benchmark_dir: Path, rel_path: Path, *, label: str) -> P
     return candidate
 
 
-def load_manifest(manifest_path: Path) -> dict[str, Any]:
-    """Load and structurally validate the FINAL manifest metadata only."""
+def load_manifest(
+    manifest_path: Path,
+    *,
+    expected_paths: frozenset[str] | None = None,
+    require_artifact_class: str | None = None,
+) -> dict[str, Any]:
+    """Load and structurally validate the FINAL manifest metadata only.
+
+    ``expected_paths`` (when given) requires the manifest's path set to equal it
+    exactly, rejecting any extra or missing entry — a strict one-line allowlist
+    for the auxiliary fixture. ``require_artifact_class`` (when given) requires a
+    matching top-level ``artifact_class``.
+    """
     if not manifest_path.exists():
         raise MaterializationError("manifest_missing", f"manifest not found: {manifest_path}")
     if _is_symlink_or_reparse(manifest_path):
@@ -153,6 +173,13 @@ def load_manifest(manifest_path: Path) -> dict[str, Any]:
         raise MaterializationError(
             "manifest_not_final",
             f"manifest_status must be 'final' to materialize; got {status!r}",
+        )
+
+    artifact_class = manifest.get("artifact_class")
+    if require_artifact_class is not None and artifact_class != require_artifact_class:
+        raise MaterializationError(
+            "manifest_artifact_class",
+            f"artifact_class must be {require_artifact_class!r}; got {artifact_class!r}",
         )
 
     files = manifest.get("files")
@@ -185,7 +212,16 @@ def load_manifest(manifest_path: Path) -> dict[str, Any]:
             "manifest_count",
             f"file_count {file_count} does not match {len(entries)} listed files",
         )
-    return {"manifest_status": status, "entries": entries}
+
+    if expected_paths is not None:
+        actual_paths = {entry["path"] for entry in entries}
+        if actual_paths != set(expected_paths):
+            raise MaterializationError(
+                "manifest_unexpected_paths",
+                "manifest path set does not match the expected allowlist: "
+                f"expected {sorted(expected_paths)}, got {sorted(actual_paths)}",
+            )
+    return {"manifest_status": status, "artifact_class": artifact_class, "entries": entries}
 
 
 def _atomic_publish(source: Path, target: Path) -> None:
@@ -205,52 +241,24 @@ def _atomic_publish(source: Path, target: Path) -> None:
         raise
 
 
-def materialize_frozen_artifacts(
+def _materialize_entries(
     *,
-    source_root: Path,
-    target_root: Path,
-    manifest_path: Path | None = None,
-    only_paths: list[str] | None = None,
-    dry_run: bool = False,
-) -> dict[str, Any]:
-    """Materialize every FINAL-frozen artifact from source into target.
+    entries: list[dict[str, Any]],
+    source_base: Path,
+    target_base: Path,
+    selected: set[str],
+    dry_run: bool,
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """Core byte-level loop shared by every manifest group.
 
-    Returns a content-free summary. Raises ``MaterializationError`` (fail
-    closed) on any integrity, path-safety or mismatch condition.
+    ``source_base`` / ``target_base`` are the directories the manifest paths are
+    relative to (``datasets/v2`` for the benchmark group, the repository root for
+    the redteam group). Fail-closed on any integrity or path-safety condition.
     """
-    source_root = source_root.expanduser().resolve()
-    target_root = target_root.expanduser().resolve()
-    if not source_root.is_dir():
-        raise MaterializationError("source_root", f"source root is not a directory: {source_root}")
-    if not target_root.is_dir():
-        raise MaterializationError("target_root", f"target root is not a directory: {target_root}")
-
-    resolved_manifest = (
-        manifest_path.expanduser().resolve()
-        if manifest_path is not None
-        else target_root / MANIFEST_RELPATH
-    )
-    manifest = load_manifest(resolved_manifest)
-    allow = {entry["path"] for entry in manifest["entries"]}
-
-    if only_paths is not None:
-        extra = sorted(set(only_paths) - allow)
-        if extra:
-            raise MaterializationError(
-                "extra_selected",
-                f"requested paths are not in the FINAL manifest allowlist: {extra}",
-            )
-        selected = set(only_paths)
-    else:
-        selected = allow
-
-    source_bench = source_root / BENCHMARK_SUBDIR
-    target_bench = target_root / BENCHMARK_SUBDIR
-
     file_results: list[dict[str, Any]] = []
     counts = {"materialized": 0, "reused": 0, "would_materialize": 0, "skipped_not_selected": 0}
 
-    for entry in manifest["entries"]:
+    for entry in entries:
         rel = entry["path"]
         expected_sha = entry["sha256"]
         expected_size = entry["size_bytes"]
@@ -262,8 +270,8 @@ def materialize_frozen_artifacts(
                                  "expected_sha256": expected_sha, "expected_size_bytes": expected_size})
             continue
 
-        source_file = _safe_resolved(source_bench, rel_path, label="source")
-        target_file = _safe_resolved(target_bench, rel_path, label="target")
+        source_file = _safe_resolved(source_base, rel_path, label="source")
+        target_file = _safe_resolved(target_base, rel_path, label="target")
 
         if not source_file.exists():
             raise MaterializationError("source_missing", f"source artifact is missing: {rel}")
@@ -324,6 +332,57 @@ def materialize_frozen_artifacts(
         file_results.append({"path": rel, "action": "materialized",
                              "sha256": expected_sha, "size_bytes": expected_size})
 
+    return file_results, counts
+
+
+def materialize_frozen_artifacts(
+    *,
+    source_root: Path,
+    target_root: Path,
+    manifest_path: Path | None = None,
+    only_paths: list[str] | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Materialize every benchmark-v2 FINAL-frozen artifact from source to target.
+
+    Backward-compatible single-group entry point. Returns a content-free summary.
+    Raises ``MaterializationError`` (fail closed) on any integrity, path-safety
+    or mismatch condition.
+    """
+    source_root = source_root.expanduser().resolve()
+    target_root = target_root.expanduser().resolve()
+    if not source_root.is_dir():
+        raise MaterializationError("source_root", f"source root is not a directory: {source_root}")
+    if not target_root.is_dir():
+        raise MaterializationError("target_root", f"target root is not a directory: {target_root}")
+
+    resolved_manifest = (
+        manifest_path.expanduser().resolve()
+        if manifest_path is not None
+        else target_root / MANIFEST_RELPATH
+    )
+    manifest = load_manifest(resolved_manifest)
+    allow = {entry["path"] for entry in manifest["entries"]}
+
+    if only_paths is not None:
+        extra = sorted(set(only_paths) - allow)
+        if extra:
+            raise MaterializationError(
+                "extra_selected",
+                f"requested paths are not in the FINAL manifest allowlist: {extra}",
+            )
+        selected = set(only_paths)
+    else:
+        selected = allow
+
+    file_results, counts = _materialize_entries(
+        entries=manifest["entries"],
+        source_base=source_root / BENCHMARK_SUBDIR,
+        target_base=target_root / BENCHMARK_SUBDIR,
+        selected=selected,
+        dry_run=dry_run,
+    )
+
     return {
         "schema_version": 1,
         "tool": "materialize_v2_frozen_artifacts",
@@ -339,6 +398,96 @@ def materialize_frozen_artifacts(
     }
 
 
+def _materialize_group(
+    *,
+    source_root: Path,
+    target_root: Path,
+    manifest_path: Path,
+    base_subdir: Path,
+    dry_run: bool,
+    expected_paths: frozenset[str] | None = None,
+    require_artifact_class: str | None = None,
+) -> dict[str, Any]:
+    """Load one manifest and materialize its group; return a content-free summary."""
+    resolved_manifest = manifest_path.expanduser().resolve()
+    manifest = load_manifest(
+        resolved_manifest,
+        expected_paths=expected_paths,
+        require_artifact_class=require_artifact_class,
+    )
+    selected = {entry["path"] for entry in manifest["entries"]}
+    file_results, counts = _materialize_entries(
+        entries=manifest["entries"],
+        source_base=source_root / base_subdir,
+        target_base=target_root / base_subdir,
+        selected=selected,
+        dry_run=dry_run,
+    )
+    return {
+        "manifest_status": manifest["manifest_status"],
+        "artifact_class": manifest["artifact_class"],
+        "manifest_path": str(resolved_manifest),
+        "artifact_count": len(manifest["entries"]),
+        "counts": counts,
+        "files": file_results,
+    }
+
+
+def materialize(
+    *,
+    source_root: Path,
+    target_root: Path,
+    include_redteam_prompts: bool = False,
+    benchmark_manifest_path: Path | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Orchestrate materialization of one or more governed manifest groups.
+
+    Always processes the benchmark-v2 group. When ``include_redteam_prompts`` is
+    set, additionally processes the governed redteam release-test-fixture group
+    (a strict one-file allowlist). Returns a content-free summary that separates
+    ``benchmark_v2`` and ``redteam_prompts``. The trusted artifact allowlist is
+    not broadened for the default (flag-absent) run.
+    """
+    source_root = source_root.expanduser().resolve()
+    target_root = target_root.expanduser().resolve()
+    if not source_root.is_dir():
+        raise MaterializationError("source_root", f"source root is not a directory: {source_root}")
+    if not target_root.is_dir():
+        raise MaterializationError("target_root", f"target root is not a directory: {target_root}")
+
+    groups: dict[str, Any] = {}
+    groups["benchmark_v2"] = _materialize_group(
+        source_root=source_root,
+        target_root=target_root,
+        manifest_path=(benchmark_manifest_path if benchmark_manifest_path is not None
+                       else target_root / MANIFEST_RELPATH),
+        base_subdir=BENCHMARK_SUBDIR,
+        dry_run=dry_run,
+    )
+    if include_redteam_prompts:
+        groups["redteam_prompts"] = _materialize_group(
+            source_root=source_root,
+            target_root=target_root,
+            manifest_path=target_root / REDTEAM_MANIFEST_RELPATH,
+            base_subdir=Path("."),
+            dry_run=dry_run,
+            expected_paths=REDTEAM_EXPECTED_PATHS,
+            require_artifact_class=REDTEAM_ARTIFACT_CLASS,
+        )
+
+    return {
+        "schema_version": 1,
+        "tool": "materialize_v2_frozen_artifacts",
+        "source_root": str(source_root),
+        "target_root": str(target_root),
+        "dry_run": dry_run,
+        "include_redteam_prompts": include_redteam_prompts,
+        "groups": groups,
+        "ok": True,
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-root", required=True, type=Path,
@@ -346,7 +495,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--target-root", required=True, type=Path,
                         help="Repository root (e.g. a fresh worktree) to materialize into.")
     parser.add_argument("--manifest", type=Path, default=None,
-                        help="Optional explicit FINAL manifest path (defaults to the target's manifest).")
+                        help="Optional explicit benchmark FINAL manifest path (defaults to the target's manifest).")
+    parser.add_argument("--include-redteam-prompts", action="store_true",
+                        help="Also materialize the governed redteam/prompts.jsonl release-test fixture.")
     parser.add_argument("--dry-run", action="store_true",
                         help="Verify source identities and report actions without writing.")
     parser.add_argument("--summary-out", type=Path, default=None,
@@ -357,12 +508,22 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        summary = materialize_frozen_artifacts(
-            source_root=args.source_root,
-            target_root=args.target_root,
-            manifest_path=args.manifest,
-            dry_run=args.dry_run,
-        )
+        if args.include_redteam_prompts:
+            summary = materialize(
+                source_root=args.source_root,
+                target_root=args.target_root,
+                include_redteam_prompts=True,
+                benchmark_manifest_path=args.manifest,
+                dry_run=args.dry_run,
+            )
+        else:
+            # Backward-compatible default: benchmark-only flat summary.
+            summary = materialize_frozen_artifacts(
+                source_root=args.source_root,
+                target_root=args.target_root,
+                manifest_path=args.manifest,
+                dry_run=args.dry_run,
+            )
     except MaterializationError as exc:
         payload = {"schema_version": 1, "tool": "materialize_v2_frozen_artifacts",
                    "ok": False, "error_code": exc.code, "error": exc.message}

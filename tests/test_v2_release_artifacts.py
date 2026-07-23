@@ -361,3 +361,213 @@ def test_cli_main_reports_error_code_on_failure(mat, synthetic_repos, tmp_path):
     payload = json.loads(out.read_text(encoding="utf-8"))
     assert payload["ok"] is False
     assert payload["error_code"] == "source_missing"
+
+
+# ===========================================================================
+# Phase 12F remediation — governed redteam auxiliary fixture group
+# ===========================================================================
+REDTEAM_BLOB = b'{"synthetic_redteam": "prompt-1"}\n{"synthetic_redteam": "prompt-2"}\n'
+
+
+def _write_redteam_manifest(target_root, entries, status="final",
+                            artifact_class="release_test_fixture"):
+    d = target_root / "redteam"
+    d.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "schema_version": 1,
+        "manifest_status": status,
+        "artifact_class": artifact_class,
+        "files": entries,
+    }
+    path = d / "prompts-manifest.json"
+    path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+    return path
+
+
+@pytest.fixture()
+def redteam_repos(synthetic_repos):
+    """Extend the synthetic repos with a governed redteam fixture + manifest."""
+    r = synthetic_repos
+    src_redteam = r["mod_source_root"] / "redteam"
+    src_redteam.mkdir(parents=True, exist_ok=True)
+    (src_redteam / "prompts.jsonl").write_bytes(REDTEAM_BLOB)
+    entry = {"path": "redteam/prompts.jsonl", "sha256": _sha(REDTEAM_BLOB),
+             "size_bytes": len(REDTEAM_BLOB)}
+    _write_redteam_manifest(r["target_root"], [entry])
+    r["redteam_blob"] = REDTEAM_BLOB
+    r["redteam_entry"] = entry
+    return r
+
+
+def test_redteam_success_materializes_both_groups(mat, redteam_repos):
+    r = redteam_repos
+    summary = mat.materialize(
+        source_root=r["mod_source_root"], target_root=r["target_root"],
+        include_redteam_prompts=True,
+    )
+    assert summary["ok"] is True
+    assert set(summary["groups"]) == {"benchmark_v2", "redteam_prompts"}
+    rt = summary["groups"]["redteam_prompts"]
+    assert rt["artifact_class"] == "release_test_fixture"
+    assert rt["counts"]["materialized"] == 1
+    target = r["target_root"] / "redteam" / "prompts.jsonl"
+    assert target.read_bytes() == r["redteam_blob"]
+
+
+def test_redteam_dry_run_writes_nothing(mat, redteam_repos):
+    r = redteam_repos
+    summary = mat.materialize(
+        source_root=r["mod_source_root"], target_root=r["target_root"],
+        include_redteam_prompts=True, dry_run=True,
+    )
+    rt = summary["groups"]["redteam_prompts"]
+    assert rt["counts"]["would_materialize"] == 1
+    assert rt["counts"]["materialized"] == 0
+    assert not (r["target_root"] / "redteam" / "prompts.jsonl").exists()
+
+
+def test_redteam_matching_target_is_reused(mat, redteam_repos):
+    r = redteam_repos
+    target = r["target_root"] / "redteam" / "prompts.jsonl"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(r["redteam_blob"])
+    before = target.stat().st_mtime_ns
+    summary = mat.materialize(
+        source_root=r["mod_source_root"], target_root=r["target_root"],
+        include_redteam_prompts=True,
+    )
+    rt = summary["groups"]["redteam_prompts"]
+    assert rt["counts"]["reused"] == 1
+    assert target.stat().st_mtime_ns == before
+
+
+def test_redteam_source_hash_mismatch(mat, redteam_repos):
+    r = redteam_repos
+    src = r["mod_source_root"] / "redteam" / "prompts.jsonl"
+    corrupted = bytearray(src.read_bytes())
+    corrupted[0] ^= 0xFF
+    src.write_bytes(bytes(corrupted))
+    with pytest.raises(mat.MaterializationError) as exc:
+        mat.materialize(source_root=r["mod_source_root"], target_root=r["target_root"],
+                        include_redteam_prompts=True)
+    assert exc.value.code == "source_hash_mismatch"
+
+
+def test_redteam_target_mismatch_not_overwritten(mat, redteam_repos):
+    r = redteam_repos
+    target = r["target_root"] / "redteam" / "prompts.jsonl"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tampered = b'{"synthetic_redteam": "TAMPERED"}\n'
+    target.write_bytes(tampered)
+    with pytest.raises(mat.MaterializationError) as exc:
+        mat.materialize(source_root=r["mod_source_root"], target_root=r["target_root"],
+                        include_redteam_prompts=True)
+    assert exc.value.code == "target_mismatch"
+    assert target.read_bytes() == tampered
+
+
+def test_redteam_extra_manifest_entry_rejected(mat, redteam_repos):
+    r = redteam_repos
+    extra = {"path": "redteam/extra.jsonl", "sha256": _sha(b"x"), "size_bytes": 1}
+    _write_redteam_manifest(r["target_root"], [r["redteam_entry"], extra])
+    with pytest.raises(mat.MaterializationError) as exc:
+        mat.materialize(source_root=r["mod_source_root"], target_root=r["target_root"],
+                        include_redteam_prompts=True)
+    assert exc.value.code == "manifest_unexpected_paths"
+
+
+def test_redteam_wrong_path_rejected(mat, redteam_repos):
+    r = redteam_repos
+    wrong = {"path": "redteam/other.jsonl", "sha256": _sha(b"x"), "size_bytes": 1}
+    _write_redteam_manifest(r["target_root"], [wrong])
+    with pytest.raises(mat.MaterializationError) as exc:
+        mat.materialize(source_root=r["mod_source_root"], target_root=r["target_root"],
+                        include_redteam_prompts=True)
+    assert exc.value.code == "manifest_unexpected_paths"
+
+
+def test_redteam_missing_manifest_rejected(mat, redteam_repos):
+    r = redteam_repos
+    (r["target_root"] / "redteam" / "prompts-manifest.json").unlink()
+    with pytest.raises(mat.MaterializationError) as exc:
+        mat.materialize(source_root=r["mod_source_root"], target_root=r["target_root"],
+                        include_redteam_prompts=True)
+    assert exc.value.code == "manifest_missing"
+
+
+def test_redteam_non_final_manifest_rejected(mat, redteam_repos):
+    r = redteam_repos
+    _write_redteam_manifest(r["target_root"], [r["redteam_entry"]], status="candidate")
+    with pytest.raises(mat.MaterializationError) as exc:
+        mat.materialize(source_root=r["mod_source_root"], target_root=r["target_root"],
+                        include_redteam_prompts=True)
+    assert exc.value.code == "manifest_not_final"
+
+
+def test_redteam_wrong_artifact_class_rejected(mat, redteam_repos):
+    r = redteam_repos
+    _write_redteam_manifest(r["target_root"], [r["redteam_entry"]], artifact_class="something_else")
+    with pytest.raises(mat.MaterializationError) as exc:
+        mat.materialize(source_root=r["mod_source_root"], target_root=r["target_root"],
+                        include_redteam_prompts=True)
+    assert exc.value.code == "manifest_artifact_class"
+
+
+def test_redteam_symlink_source_rejected(mat, redteam_repos):
+    r = redteam_repos
+    src = r["mod_source_root"] / "redteam" / "prompts.jsonl"
+    real = r["mod_source_root"] / "redteam" / "_real.bin"
+    real.write_bytes(r["redteam_blob"])
+    src.unlink()
+    try:
+        os.symlink(real, src)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlink creation not permitted on this host")
+    with pytest.raises(mat.MaterializationError) as exc:
+        mat.materialize(source_root=r["mod_source_root"], target_root=r["target_root"],
+                        include_redteam_prompts=True)
+    assert exc.value.code == "symlink_rejected"
+
+
+def test_redteam_output_is_content_free(mat, redteam_repos):
+    r = redteam_repos
+    summary = mat.materialize(source_root=r["mod_source_root"], target_root=r["target_root"],
+                              include_redteam_prompts=True)
+    blob = json.dumps(summary)
+    for line in r["redteam_blob"].decode("utf-8").splitlines():
+        if line.strip():
+            assert line not in blob
+
+
+def test_backward_compat_without_flag_is_benchmark_only(mat, redteam_repos):
+    """Default orchestration (flag absent) processes only benchmark_v2."""
+    r = redteam_repos
+    summary = mat.materialize(source_root=r["mod_source_root"], target_root=r["target_root"])
+    assert set(summary["groups"]) == {"benchmark_v2"}
+    assert summary["include_redteam_prompts"] is False
+    assert not (r["target_root"] / "redteam" / "prompts.jsonl").exists()
+
+
+def test_backward_compat_cli_default_shape_unchanged(mat, redteam_repos, tmp_path):
+    """CLI without --include-redteam-prompts keeps the flat benchmark summary."""
+    r = redteam_repos
+    out = tmp_path / "s.json"
+    rc = mat.main(["--source-root", str(r["mod_source_root"]),
+                   "--target-root", str(r["target_root"]), "--summary-out", str(out)])
+    assert rc == 0
+    summary = json.loads(out.read_text(encoding="utf-8"))
+    # Old flat shape: top-level counts/files, no groups.
+    assert "counts" in summary and "groups" not in summary
+    assert not (r["target_root"] / "redteam" / "prompts.jsonl").exists()
+
+
+def test_cli_include_redteam_flag_grouped_shape(mat, redteam_repos, tmp_path):
+    r = redteam_repos
+    out = tmp_path / "s2.json"
+    rc = mat.main(["--source-root", str(r["mod_source_root"]),
+                   "--target-root", str(r["target_root"]),
+                   "--include-redteam-prompts", "--summary-out", str(out)])
+    assert rc == 0
+    summary = json.loads(out.read_text(encoding="utf-8"))
+    assert set(summary["groups"]) == {"benchmark_v2", "redteam_prompts"}
+    assert (r["target_root"] / "redteam" / "prompts.jsonl").exists()
