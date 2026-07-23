@@ -1,0 +1,363 @@
+"""Phase 12F tests for scripts/materialize_v2_frozen_artifacts.py.
+
+Every fixture is synthetic. No test reads, copies, parses or enumerates the real
+frozen benchmark artifacts, and no test executes development, validation,
+holdout or analysis.
+"""
+from __future__ import annotations
+
+import hashlib
+import importlib.util
+import json
+import os
+import stat
+import sys
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parent.parent
+SCRIPTS_DIR = ROOT / "scripts"
+
+
+def _load_module(name: str, filename: str):
+    spec = importlib.util.spec_from_file_location(name, SCRIPTS_DIR / filename)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture(scope="module")
+def mat():
+    return _load_module("v2_materialize_mod", "materialize_v2_frozen_artifacts.py")
+
+
+def _sha(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _write_manifest(bench_dir: Path, entries: list[dict], status: str = "final") -> Path:
+    manifests = bench_dir / "manifests"
+    manifests.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "benchmark_version": "v2",
+        "file_count": len(entries),
+        "files": entries,
+        "manifest_status": status,
+        "manifest_version": 1,
+    }
+    path = manifests / "benchmark-v2-manifest.json"
+    path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+    return path
+
+
+@pytest.fixture()
+def synthetic_repos(tmp_path):
+    """Build a synthetic source repo (with artifacts) and an empty target repo.
+
+    Artifacts are tiny synthetic byte blobs, never real benchmark content.
+    """
+    source_root = tmp_path / "source"
+    target_root = tmp_path / "target"
+    source_bench = source_root / "datasets" / "v2"
+    target_bench = target_root / "datasets" / "v2"
+    (source_bench / "cases").mkdir(parents=True)
+    (source_bench / "labels").mkdir(parents=True)
+    target_bench.mkdir(parents=True)
+
+    blobs = {
+        "cases/alpha.jsonl": b'{"synthetic": "alpha"}\n{"synthetic": "a2"}\n',
+        "cases/beta.jsonl": b'{"synthetic": "beta"}\n',
+        "labels/alpha.jsonl": b'{"label": 1}\n',
+        "small.json": b"{}",
+    }
+    entries = []
+    for rel, data in blobs.items():
+        p = source_bench / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(data)
+        entries.append({"path": rel, "sha256": _sha(data), "size_bytes": len(data)})
+
+    # Manifest lives in the TARGET repo (it is the tracked authority).
+    _write_manifest(target_bench, entries)
+    return {
+        "mod_source_root": source_root,
+        "target_root": target_root,
+        "source_bench": source_bench,
+        "target_bench": target_bench,
+        "entries": entries,
+        "blobs": blobs,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Successful atomic materialization
+# --------------------------------------------------------------------------- #
+def test_successful_materialization_copies_all_artifacts(mat, synthetic_repos):
+    r = synthetic_repos
+    summary = mat.materialize_frozen_artifacts(
+        source_root=r["mod_source_root"], target_root=r["target_root"]
+    )
+    assert summary["ok"] is True
+    assert summary["counts"]["materialized"] == 4
+    assert summary["counts"]["reused"] == 0
+    for rel, data in r["blobs"].items():
+        target = r["target_bench"] / rel
+        assert target.exists(), rel
+        assert target.read_bytes() == data
+
+
+def test_output_is_content_free(mat, synthetic_repos):
+    """The summary must carry only identities/actions, never record bytes."""
+    r = synthetic_repos
+    summary = mat.materialize_frozen_artifacts(
+        source_root=r["mod_source_root"], target_root=r["target_root"]
+    )
+    blob = json.dumps(summary)
+    for data in r["blobs"].values():
+        # No artifact payload substring should appear in the summary.
+        text = data.decode("utf-8")
+        for line in text.splitlines():
+            if line.strip():
+                assert line not in blob
+    for f in summary["files"]:
+        assert set(f).issubset(
+            {"path", "action", "sha256", "size_bytes", "expected_sha256", "expected_size_bytes"}
+        )
+
+
+# --------------------------------------------------------------------------- #
+# Dry run
+# --------------------------------------------------------------------------- #
+def test_dry_run_writes_nothing(mat, synthetic_repos):
+    r = synthetic_repos
+    summary = mat.materialize_frozen_artifacts(
+        source_root=r["mod_source_root"], target_root=r["target_root"], dry_run=True
+    )
+    assert summary["dry_run"] is True
+    assert summary["counts"]["would_materialize"] == 4
+    assert summary["counts"]["materialized"] == 0
+    for rel in r["blobs"]:
+        assert not (r["target_bench"] / rel).exists(), rel
+
+
+# --------------------------------------------------------------------------- #
+# Matching target reuse
+# --------------------------------------------------------------------------- #
+def test_matching_existing_target_is_reused_not_rewritten(mat, synthetic_repos):
+    r = synthetic_repos
+    # Pre-place one byte-identical target and capture its mtime_ns.
+    rel = "cases/alpha.jsonl"
+    target = r["target_bench"] / rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(r["blobs"][rel])
+    before_stat = target.stat()
+
+    summary = mat.materialize_frozen_artifacts(
+        source_root=r["mod_source_root"], target_root=r["target_root"]
+    )
+    assert summary["counts"]["reused"] == 1
+    assert summary["counts"]["materialized"] == 3
+    after = next(f for f in summary["files"] if f["path"] == rel)
+    assert after["action"] == "reused"
+    # File was not rewritten.
+    assert target.stat().st_mtime_ns == before_stat.st_mtime_ns
+
+
+# --------------------------------------------------------------------------- #
+# Target mismatch refusal (fail closed, no overwrite)
+# --------------------------------------------------------------------------- #
+def test_mismatching_existing_target_is_not_overwritten(mat, synthetic_repos):
+    r = synthetic_repos
+    rel = "cases/alpha.jsonl"
+    target = r["target_bench"] / rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tampered = b'{"synthetic": "TAMPERED"}\n'
+    target.write_bytes(tampered)
+
+    with pytest.raises(mat.MaterializationError) as exc:
+        mat.materialize_frozen_artifacts(
+            source_root=r["mod_source_root"], target_root=r["target_root"]
+        )
+    assert exc.value.code == "target_mismatch"
+    # The tampered target is preserved, never overwritten.
+    assert target.read_bytes() == tampered
+
+
+# --------------------------------------------------------------------------- #
+# Source hash mismatch
+# --------------------------------------------------------------------------- #
+def test_source_hash_mismatch_fails_closed(mat, synthetic_repos):
+    r = synthetic_repos
+    # Corrupt a source artifact so its bytes no longer match the manifest hash,
+    # keeping the same byte length so the size check passes and the hash check
+    # is what fires.
+    rel = "cases/alpha.jsonl"
+    src = r["source_bench"] / rel
+    original = src.read_bytes()
+    corrupted = bytearray(original)
+    corrupted[0] ^= 0xFF
+    src.write_bytes(bytes(corrupted))
+
+    with pytest.raises(mat.MaterializationError) as exc:
+        mat.materialize_frozen_artifacts(
+            source_root=r["mod_source_root"], target_root=r["target_root"]
+        )
+    assert exc.value.code == "source_hash_mismatch"
+    assert not (r["target_bench"] / rel).exists()
+
+
+def test_source_size_mismatch_fails_closed(mat, synthetic_repos):
+    r = synthetic_repos
+    rel = "cases/beta.jsonl"
+    src = r["source_bench"] / rel
+    src.write_bytes(src.read_bytes() + b"extra\n")
+    with pytest.raises(mat.MaterializationError) as exc:
+        mat.materialize_frozen_artifacts(
+            source_root=r["mod_source_root"], target_root=r["target_root"]
+        )
+    assert exc.value.code == "source_size_mismatch"
+
+
+# --------------------------------------------------------------------------- #
+# Missing artifact
+# --------------------------------------------------------------------------- #
+def test_missing_source_artifact_fails_closed(mat, synthetic_repos):
+    r = synthetic_repos
+    (r["source_bench"] / "cases/alpha.jsonl").unlink()
+    with pytest.raises(mat.MaterializationError) as exc:
+        mat.materialize_frozen_artifacts(
+            source_root=r["mod_source_root"], target_root=r["target_root"]
+        )
+    assert exc.value.code == "source_missing"
+
+
+# --------------------------------------------------------------------------- #
+# Exact manifest allowlist / extra-selected rejection
+# --------------------------------------------------------------------------- #
+def test_extra_selected_path_rejected(mat, synthetic_repos):
+    r = synthetic_repos
+    with pytest.raises(mat.MaterializationError) as exc:
+        mat.materialize_frozen_artifacts(
+            source_root=r["mod_source_root"],
+            target_root=r["target_root"],
+            only_paths=["cases/alpha.jsonl", "cases/not-in-manifest.jsonl"],
+        )
+    assert exc.value.code == "extra_selected"
+
+
+def test_only_paths_subset_materializes_allowlisted_only(mat, synthetic_repos):
+    r = synthetic_repos
+    summary = mat.materialize_frozen_artifacts(
+        source_root=r["mod_source_root"], target_root=r["target_root"],
+        only_paths=["cases/alpha.jsonl"],
+    )
+    assert summary["counts"]["materialized"] == 1
+    assert summary["counts"]["skipped_not_selected"] == 3
+    assert (r["target_bench"] / "cases/alpha.jsonl").exists()
+    assert not (r["target_bench"] / "cases/beta.jsonl").exists()
+
+
+# --------------------------------------------------------------------------- #
+# Path traversal / escape refusal
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("bad", ["../escape.jsonl", "cases/../../escape.jsonl", "/abs/escape.jsonl"])
+def test_manifest_path_traversal_rejected(mat, synthetic_repos, bad):
+    r = synthetic_repos
+    entries = list(r["entries"]) + [{"path": bad, "sha256": _sha(b"x"), "size_bytes": 1}]
+    _write_manifest(r["target_bench"], entries)
+    with pytest.raises(mat.MaterializationError) as exc:
+        mat.materialize_frozen_artifacts(
+            source_root=r["mod_source_root"], target_root=r["target_root"]
+        )
+    assert exc.value.code in {"path_traversal", "path_absolute", "path_shape"}
+
+
+# --------------------------------------------------------------------------- #
+# Symlink / reparse rejection (where testable)
+# --------------------------------------------------------------------------- #
+def test_symlinked_source_artifact_rejected(mat, synthetic_repos):
+    r = synthetic_repos
+    rel = "cases/alpha.jsonl"
+    src = r["source_bench"] / rel
+    real = r["source_bench"] / "cases" / "_real_alpha.bin"
+    real.write_bytes(r["blobs"][rel])
+    src.unlink()
+    try:
+        os.symlink(real, src)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlink creation not permitted on this host")
+    with pytest.raises(mat.MaterializationError) as exc:
+        mat.materialize_frozen_artifacts(
+            source_root=r["mod_source_root"], target_root=r["target_root"]
+        )
+    assert exc.value.code == "symlink_rejected"
+
+
+# --------------------------------------------------------------------------- #
+# Manifest status / structure guards
+# --------------------------------------------------------------------------- #
+def test_non_final_manifest_rejected(mat, synthetic_repos):
+    r = synthetic_repos
+    _write_manifest(r["target_bench"], r["entries"], status="candidate")
+    with pytest.raises(mat.MaterializationError) as exc:
+        mat.materialize_frozen_artifacts(
+            source_root=r["mod_source_root"], target_root=r["target_root"]
+        )
+    assert exc.value.code == "manifest_not_final"
+
+
+def test_duplicate_manifest_path_rejected(mat, synthetic_repos):
+    r = synthetic_repos
+    dup = r["entries"][0]
+    _write_manifest(r["target_bench"], list(r["entries"]) + [dict(dup)])
+    with pytest.raises(mat.MaterializationError) as exc:
+        mat.materialize_frozen_artifacts(
+            source_root=r["mod_source_root"], target_root=r["target_root"]
+        )
+    assert exc.value.code in {"manifest_duplicate", "manifest_count"}
+
+
+def test_bool_size_rejected(mat, synthetic_repos):
+    r = synthetic_repos
+    entries = list(r["entries"])
+    entries[0] = dict(entries[0], size_bytes=True)  # bool is a subclass of int
+    _write_manifest(r["target_bench"], entries)
+    with pytest.raises(mat.MaterializationError) as exc:
+        mat.materialize_frozen_artifacts(
+            source_root=r["mod_source_root"], target_root=r["target_root"]
+        )
+    assert exc.value.code == "manifest_size"
+
+
+# --------------------------------------------------------------------------- #
+# CLI surface + summary file
+# --------------------------------------------------------------------------- #
+def test_cli_main_writes_summary(mat, synthetic_repos, tmp_path):
+    r = synthetic_repos
+    out = tmp_path / "summary.json"
+    rc = mat.main([
+        "--source-root", str(r["mod_source_root"]),
+        "--target-root", str(r["target_root"]),
+        "--summary-out", str(out),
+    ])
+    assert rc == 0
+    summary = json.loads(out.read_text(encoding="utf-8"))
+    assert summary["ok"] is True
+    assert summary["counts"]["materialized"] == 4
+
+
+def test_cli_main_reports_error_code_on_failure(mat, synthetic_repos, tmp_path):
+    r = synthetic_repos
+    (r["source_bench"] / "cases/alpha.jsonl").unlink()
+    out = tmp_path / "err.json"
+    rc = mat.main([
+        "--source-root", str(r["mod_source_root"]),
+        "--target-root", str(r["target_root"]),
+        "--summary-out", str(out),
+    ])
+    assert rc == 1
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    assert payload["ok"] is False
+    assert payload["error_code"] == "source_missing"
