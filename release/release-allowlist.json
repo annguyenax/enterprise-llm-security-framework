@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "policy": "phase12g-release-allowlist-v1",
+  "base_sha": "409e5f3e0770d1bf908d217481994dac3e786c76",
+  "fail_closed": true,
+  "source_of_truth": "git ls-files (tracked) plus an explicit operator-supplied generated-file allowlist; ignored files are never packaged by discovery",
+  "required": {
+    "description": "Tracked repository content that is safe to distribute for academic handoff and release-candidate review.",
+    "classes": [
+      "tracked source code (*.py, *.ps1, *.ps1xml, *.sh)",
+      "tracked tests",
+      "tracked JSON/TOML/YAML/INI/CFG manifests and configuration (e.g. requirements.txt, redteam/prompts-manifest.json, datasets/v2/manifests/*.json)",
+      "Phase 12F documentation under docs/phase12f/** and other tracked docs/**",
+      "tracked Markdown/text corpus and design docs (e.g. datasets/**/*.md)",
+      "license and repository metadata safe for distribution (LICENSE*, README*, .gitignore, .gitattributes, .env.example/.env.sample/.env.template)"
+    ]
+  },
+  "optional": {
+    "description": "Included only when explicitly supplied by an operator via the generated-file allowlist, each pinned by SHA-256 and byte size.",
+    "classes": [
+      "safe generated dependency inventory (e.g. pip freeze output as dependency-inventory.txt)",
+      "safe operator-supplied test summaries (content-free totals only)"
+    ]
+  },
+  "prohibited": {
+    "description": "Never packaged, even if somehow tracked. Any match fails the build closed.",
+    "extensions": [
+      ".jsonl",
+      ".db",
+      ".sqlite",
+      ".sqlite3",
+      ".pem",
+      ".key",
+      ".p12",
+      ".pfx"
+    ],
+    "exact_names": [
+      "result.json",
+      "credentials.json",
+      "credential.json",
+      "secrets.json",
+      "id_rsa",
+      "id_ed25519"
+    ],
+    "env_files": {
+      "prohibit": ".env and any .env.* file",
+      "allow_exceptions": [".env.example", ".env.sample", ".env.template"]
+    },
+    "path_components": [
+      ".git",
+      ".venv",
+      "venv",
+      "env",
+      "__pycache__",
+      ".pytest_cache",
+      ".mypy_cache",
+      ".ruff_cache",
+      "node_modules",
+      ".idea",
+      ".vscode",
+      ".tmp",
+      ".pytest-tmp"
+    ],
+    "structural_classes": [
+      "every JSONL file (benchmark/holdout/validation/development records)",
+      "result.json and raw evaluation records",
+      "raw holdout/validation/development evidence",
+      "credentials and tokens",
+      ".env files (real, not example)",
+      "databases",
+      "caches",
+      ".git metadata",
+      "virtual environments",
+      "IDE state",
+      "temporary files",
+      "authorization files, start receipts and attempt roots",
+      "external audit working directories"
+    ],
+    "note": "Authorization files, receipts, attempt roots and external audit working directories live outside the repository and are untracked; they are therefore structurally excluded because the build sources only tracked repository files. The explicit checks above are defence-in-depth."
+  }
+}
