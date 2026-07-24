@@ -48,10 +48,10 @@ The following may land from other Phase 12G workstreams. Until integrated, treat
 
 | Item | Status label |
 |---|---|
-| Unified CI workflow that injects private sealed artifact bundles | **EXPECTED AFTER PHASE 12G INTEGRATION** |
-| Automated release archive job with signed checksums | **EXPECTED AFTER PHASE 12G INTEGRATION** |
-| One-command “faculty demo environment” bootstrap | **EXPECTED AFTER PHASE 12G INTEGRATION** |
-| Cross-OS matrix in CI (Linux + Windows long-path) | **EXPECTED AFTER PHASE 12G INTEGRATION** |
+| Unified CI workflow that injects private sealed artifact bundles | **EXPECTED AFTER PHASE 12G INTEGRATION** (public CI deliberately has no private-data access) |
+| Automated release archive job with signed checksums | **EXPECTED AFTER PHASE 12G INTEGRATION** (the release builder emits unsigned `SHA256SUMS.txt`; no signing job yet) |
+| One-command fresh-checkout bootstrap | **INTEGRATED** — `scripts/release/bootstrap_fresh_checkout.ps1` (commit-identity + clean-tree check, materializer delegation with `--include-redteam-prompts`, optional `.venv` junction, optional release-readiness) |
+| Cross-OS matrix in CI (Linux + Windows) | **INTEGRATED** — `.github/workflows/phase12g-release-gates.yml` runs an `ubuntu-latest` + `windows-latest` matrix (Python 3.11) |
 
 Do **not** document unmerged scripts as if they already exist under `scripts/` on this branch.
 
