@@ -3,6 +3,13 @@
 No function here parses a benchmark record or ``result.json``, and none prints
 file content. Errors are content-free and carry a stable machine-readable code.
 
+The release policy (``release/release-allowlist.json``, schema 3) is a **true
+closed-world allowlist**: every tracked path must match exactly one inclusion
+rule (REQUIRED or ALLOWED) or the build fails closed. There is no default-allow
+branch. Archive files are prohibited by default; only exact paths listed in
+``inclusion.allowed_archives`` are admitted, and only after the builder confirms
+every nested central-directory NAME (names only, never nested bytes) is safe.
+
 Control-file coverage rule (explicit, enforced by builder and verifier):
 
 * ``release-manifest.json.files`` lists exactly the payload entries (``repo/*``).
@@ -25,6 +32,7 @@ from typing import Any
 CHUNK = 65536
 HEX64 = frozenset("0123456789abcdef")
 MAX_FILE_BYTES = 64 * 1024 * 1024  # per-file snapshot ceiling
+MAX_NESTED_ENTRIES = 100000  # bound on names read from an allowed archive
 
 # Deterministic ZIP entry metadata.
 ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
@@ -37,14 +45,44 @@ SIZES_NAME = "FILE_SIZES.json"
 CONTROL_FILES = (MANIFEST_NAME, CHECKSUMS_NAME, SIZES_NAME)
 PAYLOAD_PREFIX = "repo/"
 POLICY_RELPATH = "release/release-allowlist.json"
-POLICY_SCHEMA_VERSION = 2
+POLICY_SCHEMA_VERSION = 3
+MANIFEST_SCHEMA_VERSION = 3
 
-_ALLOWED_POLICY_KEYS = frozenset(
-    {"schema_version", "policy_id", "fail_closed", "source_of_truth",
-     "prohibited", "required_present", "optional_generated"}
+# Closed-world classifications.
+CLASS_REQUIRED = "REQUIRED"
+CLASS_ALLOWED = "ALLOWED"
+CLASS_ALLOWED_ARCHIVE = "ALLOWED_ARCHIVE"
+CLASS_GENERATED = "GENERATED"
+INCLUSION_CLASSES = frozenset({CLASS_REQUIRED, CLASS_ALLOWED, CLASS_ALLOWED_ARCHIVE})
+PAYLOAD_CLASSES = frozenset({CLASS_REQUIRED, CLASS_ALLOWED, CLASS_ALLOWED_ARCHIVE, CLASS_GENERATED})
+SOURCE_VALUES = frozenset({"tracked", "generated"})
+
+# Exact manifest schema key sets (schema 3).
+MANIFEST_TOP_KEYS = frozenset(
+    {"schema_version", "repository", "policy", "counts",
+     "control_coverage", "content_controls", "zip_policy", "files"}
 )
-_ALLOWED_PROHIBITED_KEYS = frozenset({"extensions", "exact_names", "env", "path_components"})
-_ALLOWED_ENV_KEYS = frozenset({"prohibit_dotenv", "allow_exceptions"})
+REPO_KEYS = frozenset({"head", "branch", "base_sha"})
+POLICY_ID_KEYS = frozenset({"policy_id", "schema_version", "sha256"})
+COUNTS_KEYS = frozenset({"file_count", "tracked_count", "generated_count"})
+COVERAGE_KEYS = frozenset({"manifest_files", "sizes_covers", "checksums_covers"})
+CONTENT_CONTROL_KEYS = frozenset(
+    {"jsonl_included", "result_json_included", "credentials_included",
+     "databases_included", "git_metadata_included", "venv_included", "built_from"}
+)
+ZIP_POLICY_KEYS = frozenset({"entry_order", "timestamp", "permissions", "compression"})
+FILE_ENTRY_KEYS = frozenset({"archive_path", "path", "sha256", "size_bytes", "source", "classification"})
+SIZES_TOP_KEYS = frozenset({"schema_version", "files"})
+
+# Policy schema (schema 3) key sets.
+_POLICY_TOP_KEYS = frozenset(
+    {"schema_version", "policy_id", "fail_closed", "closed_world",
+     "source_of_truth", "inclusion", "prohibited", "optional_generated"}
+)
+_INCLUSION_KEYS = frozenset({"required_paths", "allowed_extensions", "allowed_exact_names", "allowed_archives"})
+_PROHIBITED_KEYS = frozenset({"extensions", "exact_names", "env", "path_components", "archive_extensions"})
+_ENV_KEYS = frozenset({"prohibit_dotenv", "allow_exceptions"})
+_ARCHIVE_ENTRY_KEYS = frozenset({"path", "reason"})
 
 
 class ReleaseError(Exception):
@@ -56,18 +94,29 @@ class ReleaseError(Exception):
         self.message = message
 
 
+class VerificationError(ReleaseError):
+    """A controlled verifier failure (subclass so ``except ReleaseError`` covers it)."""
+
+
 @dataclass(frozen=True)
 class ReleasePolicy:
     schema_version: int
     policy_id: str
+    required_paths: frozenset[str]
+    allowed_extensions: frozenset[str]
+    allowed_exact_names: frozenset[str]
+    allowed_archive_paths: frozenset[str]
     prohibited_extensions: frozenset[str]
     prohibited_exact_names: frozenset[str]
-    env_allow_exceptions: frozenset[str]
     prohibited_path_components: frozenset[str]
-    required_present: tuple[str, ...]
+    prohibited_archive_extensions: frozenset[str]
+    env_allow_exceptions: frozenset[str]
     sha256: str
 
 
+# --------------------------------------------------------------------------- #
+# Hash / type primitives
+# --------------------------------------------------------------------------- #
 def sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -106,8 +155,71 @@ def read_snapshot_bytes(path: Path) -> bytes:
     return data
 
 
+# --------------------------------------------------------------------------- #
+# Exact-schema validation helpers (used by the verifier and policy parser)
+# --------------------------------------------------------------------------- #
+def require_mapping(value: Any, label: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise VerificationError("schema_type", f"{label} must be an object")
+    return value
+
+
+def require_exact_keys(obj: Any, keys: frozenset[str], label: str) -> dict[str, Any]:
+    mapping = require_mapping(obj, label)
+    present = set(mapping)
+    missing = keys - present
+    if missing:
+        raise VerificationError("schema_missing_field", f"{label} is missing fields: {sorted(missing)}")
+    extra = present - keys
+    if extra:
+        raise VerificationError("schema_unexpected_field", f"{label} has unexpected fields: {sorted(extra)}")
+    return mapping
+
+
+def require_string(obj: dict[str, Any], key: str, label: str) -> str:
+    value = obj[key]
+    if type(value) is not str or not value:
+        raise VerificationError("schema_type", f"{label}.{key} must be a non-empty string")
+    return value
+
+
+def require_sha256(obj: dict[str, Any], key: str, label: str) -> str:
+    value = obj[key]
+    if not is_hex64(value):
+        raise VerificationError("schema_type", f"{label}.{key} must be a 64-hex SHA-256")
+    return value.lower()
+
+
+def require_non_negative_integer(obj: dict[str, Any], key: str, label: str) -> int:
+    value = obj[key]
+    # type(value) is int rejects bool (bool is a subclass of int).
+    if type(value) is not int or value < 0:
+        raise VerificationError("schema_type", f"{label}.{key} must be a non-negative integer (not bool)")
+    return value
+
+
+def require_boolean(obj: dict[str, Any], key: str, label: str) -> bool:
+    value = obj[key]
+    if type(value) is not bool:
+        raise VerificationError("schema_type", f"{label}.{key} must be a boolean")
+    return value
+
+
+def require_list(obj: dict[str, Any], key: str, label: str) -> list[Any]:
+    value = obj[key]
+    if not isinstance(value, list):
+        raise VerificationError("schema_type", f"{label}.{key} must be a list")
+    return value
+
+
+def require_normalized_relative_path(value: Any, label: str) -> str:
+    return validate_relative_posix(value, label=label)
+
+
+# --------------------------------------------------------------------------- #
+# JSON parsing (duplicate-key rejecting, controlled UTF-8/JSON errors)
+# --------------------------------------------------------------------------- #
 def _load_json_no_dupes(raw: str, label: str) -> Any:
-    """Parse JSON rejecting duplicate object keys."""
     def _hook(pairs):
         seen: set[str] = set()
         for key, _ in pairs:
@@ -121,87 +233,187 @@ def _load_json_no_dupes(raw: str, label: str) -> Any:
         raise ReleaseError("malformed_json", f"{label} is not valid JSON") from exc
 
 
-def _str_set(value: Any, label: str) -> frozenset[str]:
+def load_json_no_dupes(raw: bytes, label: str) -> Any:
+    """Public wrapper: parse JSON bytes rejecting duplicate keys and bad UTF-8."""
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ReleaseError("malformed_utf8", f"{label} is not valid UTF-8") from exc
+    return _load_json_no_dupes(text, label)
+
+
+def _casefold_str_set(value: Any, label: str) -> frozenset[str]:
     if not isinstance(value, list) or not all(isinstance(x, str) and x for x in value):
         raise ReleaseError("policy_schema", f"{label} must be a list of non-empty strings")
     lowered = [x.casefold() for x in value]
     if len(set(lowered)) != len(lowered):
-        raise ReleaseError("policy_conflict", f"{label} has duplicate entries")
+        raise ReleaseError("policy_conflict", f"{label} has case-colliding entries")
     return frozenset(lowered)
 
 
+def _exact_path_set(value: Any, label: str) -> frozenset[str]:
+    if not isinstance(value, list):
+        raise ReleaseError("policy_schema", f"{label} must be a list")
+    out: list[str] = []
+    for item in value:
+        out.append(validate_relative_posix(item, label=label))
+    folded = [p.casefold() for p in out]
+    if len(set(folded)) != len(folded):
+        raise ReleaseError("policy_conflict", f"{label} has case-colliding paths")
+    return frozenset(out)
+
+
+def _extension_set(value: Any, label: str) -> frozenset[str]:
+    exts = _casefold_str_set(value, label)
+    for ext in exts:
+        if not ext.startswith(".") or len(ext) < 2 or "*" in ext or "?" in ext or "/" in ext or "\\" in ext:
+            raise ReleaseError("policy_pattern", f"unsupported extension pattern in {label}: {ext}")
+    return exts
+
+
+def _component_set(value: Any, label: str) -> frozenset[str]:
+    comps = _casefold_str_set(value, label)
+    for comp in comps:
+        if "*" in comp or "?" in comp or "/" in comp or "\\" in comp:
+            raise ReleaseError("policy_pattern", f"unsupported path-component pattern in {label}: {comp}")
+    return comps
+
+
 def parse_release_policy(raw: bytes) -> ReleasePolicy:
-    """Validate the machine-consumable release policy. Fail closed on any defect."""
-    policy = _load_json_no_dupes(raw.decode("utf-8"), "release policy")
+    """Validate the closed-world release policy (schema 3). Fail closed on any defect."""
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ReleaseError("malformed_utf8", "release policy is not valid UTF-8") from exc
+    policy = _load_json_no_dupes(text, "release policy")
     if not isinstance(policy, dict):
         raise ReleaseError("policy_schema", "release policy must be a JSON object")
-    unknown = set(policy) - _ALLOWED_POLICY_KEYS
+    unknown = set(policy) - _POLICY_TOP_KEYS
     if unknown:
         raise ReleaseError("policy_unknown_key", f"release policy has unknown keys: {sorted(unknown)}")
-    if policy.get("schema_version") != POLICY_SCHEMA_VERSION:
+    for key in _POLICY_TOP_KEYS:
+        if key not in policy:
+            raise ReleaseError("policy_missing", f"release policy is missing required key: {key}")
+    if policy["schema_version"] != POLICY_SCHEMA_VERSION:
         raise ReleaseError("policy_schema", f"policy schema_version must be {POLICY_SCHEMA_VERSION}")
-    policy_id = policy.get("policy_id")
+    policy_id = policy["policy_id"]
     if not isinstance(policy_id, str) or not policy_id:
         raise ReleaseError("policy_schema", "policy_id must be a non-empty string")
-    if policy.get("fail_closed") is not True:
+    if policy["fail_closed"] is not True:
         raise ReleaseError("policy_schema", "policy fail_closed must be true")
+    if policy["closed_world"] is not True:
+        raise ReleaseError("policy_schema", "policy closed_world must be true")
+    if not isinstance(policy["source_of_truth"], str) or not policy["source_of_truth"]:
+        raise ReleaseError("policy_schema", "policy source_of_truth must be a non-empty string")
 
-    prohibited = policy.get("prohibited")
+    # --- inclusion ---
+    inclusion = policy["inclusion"]
+    if not isinstance(inclusion, dict):
+        raise ReleaseError("policy_schema", "policy.inclusion must be an object")
+    unknown_i = set(inclusion) - _INCLUSION_KEYS
+    if unknown_i:
+        raise ReleaseError("policy_unknown_key", f"inclusion has unknown keys: {sorted(unknown_i)}")
+    for key in _INCLUSION_KEYS:
+        if key not in inclusion:
+            raise ReleaseError("policy_missing", f"inclusion is missing required class: {key}")
+    required_paths = _exact_path_set(inclusion["required_paths"], "inclusion.required_paths")
+    allowed_extensions = _extension_set(inclusion["allowed_extensions"], "inclusion.allowed_extensions")
+    allowed_exact_names = _casefold_str_set(inclusion["allowed_exact_names"], "inclusion.allowed_exact_names")
+
+    archives_raw = inclusion["allowed_archives"]
+    if not isinstance(archives_raw, list):
+        raise ReleaseError("policy_schema", "inclusion.allowed_archives must be a list")
+    allowed_archive_list: list[str] = []
+    for item in archives_raw:
+        if not isinstance(item, dict) or set(item) != _ARCHIVE_ENTRY_KEYS:
+            raise ReleaseError("policy_schema", "each allowed_archives entry needs exactly path/reason")
+        apath = validate_relative_posix(item["path"], label="inclusion.allowed_archives.path")
+        if not isinstance(item["reason"], str) or not item["reason"].strip():
+            raise ReleaseError("policy_schema", "allowed_archives.reason must be a non-empty string")
+        allowed_archive_list.append(apath)
+    if len({p.casefold() for p in allowed_archive_list}) != len(allowed_archive_list):
+        raise ReleaseError("policy_conflict", "allowed_archives has case-colliding paths")
+    allowed_archive_paths = frozenset(allowed_archive_list)
+
+    # --- prohibited ---
+    prohibited = policy["prohibited"]
     if not isinstance(prohibited, dict):
         raise ReleaseError("policy_schema", "policy.prohibited must be an object")
-    unknown_p = set(prohibited) - _ALLOWED_PROHIBITED_KEYS
+    unknown_p = set(prohibited) - _PROHIBITED_KEYS
     if unknown_p:
         raise ReleaseError("policy_unknown_key", f"prohibited has unknown keys: {sorted(unknown_p)}")
-    for key in ("extensions", "exact_names", "path_components"):
+    for key in _PROHIBITED_KEYS:
         if key not in prohibited:
-            raise ReleaseError("policy_missing", f"policy.prohibited is missing required class: {key}")
-    extensions = _str_set(prohibited["extensions"], "prohibited.extensions")
-    for ext in extensions:
-        if not ext.startswith(".") or "*" in ext or "?" in ext or "/" in ext:
-            raise ReleaseError("policy_pattern", f"unsupported extension pattern: {ext}")
-    exact_names = _str_set(prohibited["exact_names"], "prohibited.exact_names")
-    path_components = _str_set(prohibited["path_components"], "prohibited.path_components")
-    for comp in path_components:
-        if "*" in comp or "?" in comp or "/" in comp:
-            raise ReleaseError("policy_pattern", f"unsupported path component pattern: {comp}")
+            raise ReleaseError("policy_missing", f"prohibited is missing required class: {key}")
+    prohibited_extensions = _extension_set(prohibited["extensions"], "prohibited.extensions")
+    prohibited_exact_names = _casefold_str_set(prohibited["exact_names"], "prohibited.exact_names")
+    prohibited_path_components = _component_set(prohibited["path_components"], "prohibited.path_components")
+    prohibited_archive_extensions = _extension_set(prohibited["archive_extensions"], "prohibited.archive_extensions")
 
-    env = prohibited.get("env")
+    env = prohibited["env"]
     if not isinstance(env, dict):
-        raise ReleaseError("policy_schema", "policy.prohibited.env must be an object")
-    if set(env) - _ALLOWED_ENV_KEYS:
+        raise ReleaseError("policy_schema", "prohibited.env must be an object")
+    if set(env) - _ENV_KEYS:
         raise ReleaseError("policy_unknown_key", "prohibited.env has unknown keys")
     if env.get("prohibit_dotenv") is not True:
         raise ReleaseError("policy_schema", "prohibited.env.prohibit_dotenv must be true")
-    env_allow = _str_set(env.get("allow_exceptions", []), "prohibited.env.allow_exceptions")
+    env_allow_exceptions = _casefold_str_set(env.get("allow_exceptions", []), "prohibited.env.allow_exceptions")
 
-    # Conflict: an env allow-exception must not also be a prohibited exact name.
-    if env_allow & exact_names:
-        raise ReleaseError("policy_conflict", "an env allow-exception is also a prohibited exact name")
-
-    required = policy.get("required_present")
-    if not isinstance(required, list) or not all(isinstance(x, str) and x for x in required):
-        raise ReleaseError("policy_schema", "required_present must be a list of non-empty strings")
-    if len(set(required)) != len(required):
-        raise ReleaseError("policy_conflict", "required_present has duplicate entries")
-
-    optional = policy.get("optional_generated")
+    # --- optional_generated ---
+    optional = policy["optional_generated"]
     if not isinstance(optional, dict) or optional.get("allowed") is not True:
         raise ReleaseError("policy_schema", "optional_generated.allowed must be true")
 
-    return ReleasePolicy(
-        schema_version=POLICY_SCHEMA_VERSION,
-        policy_id=policy_id,
-        prohibited_extensions=extensions,
-        prohibited_exact_names=exact_names,
-        env_allow_exceptions=env_allow,
-        prohibited_path_components=path_components,
-        required_present=tuple(required),
-        sha256=sha256_bytes(raw),
+    # --- cross-class disjointness (ambiguity is a policy-definition error) ---
+    if allowed_extensions & prohibited_extensions:
+        raise ReleaseError("ambiguous_policy_classification",
+                           "an extension is both allowed and prohibited")
+    if allowed_extensions & prohibited_archive_extensions:
+        raise ReleaseError("ambiguous_policy_classification",
+                           "an allowed extension is also a prohibited archive extension")
+    if allowed_exact_names & prohibited_exact_names:
+        raise ReleaseError("ambiguous_policy_classification",
+                           "an exact name is both allowed and prohibited")
+    if prohibited_extensions & prohibited_archive_extensions:
+        raise ReleaseError("policy_conflict", "an extension is both a general and an archive prohibition")
+    if env_allow_exceptions & prohibited_exact_names:
+        raise ReleaseError("policy_conflict", "an env allow-exception is also a prohibited exact name")
+    req_cf = {p.casefold() for p in required_paths}
+    arc_cf = {p.casefold() for p in allowed_archive_paths}
+    if req_cf & arc_cf:
+        raise ReleaseError("ambiguous_policy_classification",
+                           "a path is both a required path and an allowed archive")
+    # An allowed archive must actually carry a prohibited-by-default archive extension.
+    for apath in allowed_archive_paths:
+        suffix = PurePosixPath(apath).suffix.casefold()
+        if suffix not in prohibited_archive_extensions:
+            raise ReleaseError("policy_conflict",
+                               f"allowed archive lacks a recognised archive extension: {apath}")
+    # A required path must not itself be prohibited.
+    partial = ReleasePolicy(
+        schema_version=POLICY_SCHEMA_VERSION, policy_id=policy_id,
+        required_paths=required_paths, allowed_extensions=allowed_extensions,
+        allowed_exact_names=allowed_exact_names, allowed_archive_paths=allowed_archive_paths,
+        prohibited_extensions=prohibited_extensions, prohibited_exact_names=prohibited_exact_names,
+        prohibited_path_components=prohibited_path_components,
+        prohibited_archive_extensions=prohibited_archive_extensions,
+        env_allow_exceptions=env_allow_exceptions, sha256=sha256_bytes(raw),
     )
+    for rpath in required_paths:
+        if classify_prohibited(rpath, partial) is not None:
+            raise ReleaseError("ambiguous_policy_classification",
+                               f"a required path matches a prohibited rule: {rpath}")
+    return partial
 
 
+# --------------------------------------------------------------------------- #
+# Classification
+# --------------------------------------------------------------------------- #
 def classify_prohibited(relpath: str, policy: ReleasePolicy) -> str | None:
-    """Return a prohibited-class name if ``relpath`` is disallowed by ``policy``."""
+    """Return a prohibited-class label if ``relpath`` is disallowed, else None.
+
+    Archive extensions are treated here as prohibited-by-default; the caller is
+    responsible for exempting an exact ``allowed_archives`` path."""
     pure = PurePosixPath(relpath)
     parts_cf = tuple(part.casefold() for part in pure.parts)
     name_cf = pure.name.casefold()
@@ -211,6 +423,8 @@ def classify_prohibited(relpath: str, policy: ReleasePolicy) -> str | None:
             return f"path_component:{component}"
     if suffix_cf in policy.prohibited_extensions:
         return f"extension:{suffix_cf}"
+    if suffix_cf in policy.prohibited_archive_extensions:
+        return f"archive:{suffix_cf}"
     if name_cf in policy.prohibited_exact_names:
         return f"name:{name_cf}"
     if name_cf == ".env" or name_cf.startswith(".env."):
@@ -219,6 +433,68 @@ def classify_prohibited(relpath: str, policy: ReleasePolicy) -> str | None:
     return None
 
 
+def classify_tracked_path(relpath: str, policy: ReleasePolicy) -> str:
+    """Closed-world classification. Returns one of REQUIRED/ALLOWED/ALLOWED_ARCHIVE
+    or raises a fail-closed ``ReleaseError``. There is NO default-allow branch."""
+    rel = validate_relative_posix(relpath, label="path")
+    pure = PurePosixPath(rel)
+    name_cf = pure.name.casefold()
+    suffix_cf = pure.suffix.casefold()
+
+    # 1) Prohibited (non-archive) fails closed first.
+    for component in (part.casefold() for part in pure.parts):
+        if component in policy.prohibited_path_components:
+            raise ReleaseError("prohibited_artifact", f"{rel} is prohibited (path_component:{component})")
+    if suffix_cf in policy.prohibited_extensions:
+        raise ReleaseError("prohibited_artifact", f"{rel} is prohibited (extension:{suffix_cf})")
+    if name_cf in policy.prohibited_exact_names:
+        raise ReleaseError("prohibited_artifact", f"{rel} is prohibited (name:{name_cf})")
+    if (name_cf == ".env" or name_cf.startswith(".env.")) and name_cf not in policy.env_allow_exceptions:
+        raise ReleaseError("prohibited_artifact", f"{rel} is prohibited (env_file)")
+
+    # 2) Archive extensions are prohibited-by-default; only exact allowlisted archives pass.
+    if suffix_cf in policy.prohibited_archive_extensions:
+        if rel in policy.allowed_archive_paths:
+            return CLASS_ALLOWED_ARCHIVE
+        raise ReleaseError("prohibited_artifact", f"{rel} is a prohibited archive (archive:{suffix_cf})")
+
+    # 3) Deliberate inclusion rules (exactly one classification, by precedence).
+    if rel in policy.required_paths:
+        return CLASS_REQUIRED
+    if name_cf in policy.allowed_exact_names:
+        return CLASS_ALLOWED
+    if suffix_cf in policy.allowed_extensions:
+        return CLASS_ALLOWED
+
+    # 4) No inclusion rule matched -> fail closed.
+    raise ReleaseError("unclassified_tracked_path", f"tracked path matches no inclusion rule: {rel}")
+
+
+def scan_archive_names(archive_path: Path, policy: ReleasePolicy) -> list[str]:
+    """Enumerate an allowed archive's central-directory entry NAMES ONLY (never
+    extracts, never reads nested bytes) and fail closed if any nested name is
+    prohibited. Returns the nested names for the record."""
+    try:
+        with zipfile.ZipFile(archive_path, "r") as archive:
+            names = archive.namelist()
+    except (zipfile.BadZipFile, OSError) as exc:
+        raise ReleaseError("archive_unreadable", f"allowed archive is not a readable ZIP: {archive_path.name}") from exc
+    if len(names) > MAX_NESTED_ENTRIES:
+        raise ReleaseError("archive_too_many_entries", "allowed archive exceeds the nested-entry bound")
+    for nested in names:
+        normalized = nested.replace("\\", "/")
+        if normalized.endswith("/"):
+            continue  # directory entry
+        klass = classify_prohibited(normalized, policy)
+        if klass is not None:
+            raise ReleaseError("prohibited_nested_entry",
+                               f"allowed archive contains a prohibited nested name ({klass})")
+    return names
+
+
+# --------------------------------------------------------------------------- #
+# Path safety
+# --------------------------------------------------------------------------- #
 def validate_relative_posix(relpath: str, *, label: str) -> str:
     if not isinstance(relpath, str) or not relpath.strip():
         raise ReleaseError("path_shape", f"{label} must be a non-empty string")
@@ -239,6 +515,9 @@ def assert_within(root: Path, candidate: Path, *, label: str) -> None:
         raise ReleaseError("path_escape", f"{label} escapes the repository root") from exc
 
 
+# --------------------------------------------------------------------------- #
+# Deterministic ZIP + checksum text
+# --------------------------------------------------------------------------- #
 def deterministic_zip_bytes(files: dict[str, bytes]) -> bytes:
     import io
     buffer = io.BytesIO()
@@ -284,32 +563,50 @@ def parse_checksum_text(data: bytes) -> dict[str, str]:
 
 
 def read_zip_entries(zip_path: Path) -> dict[str, bytes]:
-    """Reopen a ZIP and return entry bytes, rejecting unsafe/duplicate paths.
-    Does not extract to the filesystem."""
-    with zipfile.ZipFile(zip_path, "r") as archive:
-        infos = archive.infolist()
-        names = [info.filename for info in infos]
-        if len(names) != len(set(names)):
-            raise ReleaseError("zip_duplicate", "ZIP contains duplicate entries")
-        result: dict[str, bytes] = {}
-        for info in infos:
-            name = info.filename
-            pure = PurePosixPath(name)
-            if name.startswith("/") or "\\" in name or pure.is_absolute() or ".." in pure.parts:
-                raise ReleaseError("zip_unsafe_path", "ZIP contains an unsafe path")
-            result[name] = archive.read(name)
-        return result
+    """Reopen a ZIP and return entry bytes, rejecting unsafe/duplicate/colliding
+    paths. Does not extract to the filesystem."""
+    try:
+        with zipfile.ZipFile(zip_path, "r") as archive:
+            infos = archive.infolist()
+            names = [info.filename for info in infos]
+            if len(names) != len(set(names)):
+                raise ReleaseError("zip_duplicate", "ZIP contains duplicate entries")
+            folded = [n.casefold() for n in names]
+            if len(folded) != len(set(folded)):
+                raise ReleaseError("zip_case_collision", "ZIP contains case-colliding entries")
+            result: dict[str, bytes] = {}
+            for info in infos:
+                name = info.filename
+                pure = PurePosixPath(name)
+                if (name.startswith("/") or "\\" in name or pure.is_absolute()
+                        or pure.drive or ".." in pure.parts):
+                    raise ReleaseError("zip_unsafe_path", "ZIP contains an unsafe path")
+                result[name] = archive.read(name)
+            return result
+    except zipfile.BadZipFile as exc:
+        raise ReleaseError("zip_malformed", "release ZIP is not a readable archive") from exc
 
 
-def load_json_no_dupes(raw: bytes, label: str) -> Any:
-    """Public wrapper: parse JSON bytes rejecting duplicate keys."""
-    return _load_json_no_dupes(raw.decode("utf-8"), label)
-
-
+# --------------------------------------------------------------------------- #
+# Atomic no-clobber publication
+# --------------------------------------------------------------------------- #
 def exclusive_write(path: Path, data: bytes) -> None:
     """Write bytes with exclusive create (atomic no-clobber). Fails if present."""
-    path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "xb") as handle:
         handle.write(data)
         handle.flush()
         os.fsync(handle.fileno())
+
+
+def hardlink_no_clobber(src: Path, dst: Path) -> None:
+    """Publish exact verified bytes by hard-linking src -> dst. No-clobber and
+    fail-closed: an existing destination, a cross-volume link, or any unsupported
+    hard-link behavior raises a controlled error. Never uses os.replace."""
+    if dst.exists():
+        raise ReleaseError("destination_exists", "final destination already exists")
+    try:
+        os.link(src, dst)
+    except FileExistsError as exc:
+        raise ReleaseError("destination_exists", "final destination already exists") from exc
+    except OSError as exc:
+        raise ReleaseError("hardlink_unsupported", "atomic hard-link publication is not supported here") from exc

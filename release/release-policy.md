@@ -1,24 +1,61 @@
 # Phase 12G — Release Policy
 
-**Policy:** `phase12g-release-allowlist-v2` (schema 2, machine-consumable; see
+**Policy:** `phase12g-release-allowlist-v3` (schema 3, machine-consumable; see
 `release/release-allowlist.json`).
 
 This policy governs the deterministic release candidate produced by
-`scripts/release/build_release_candidate.py`. It is **fail-closed**: any file
-that is not clearly REQUIRED or explicitly OPTIONAL, or that matches a PROHIBITED
-pattern, aborts the build.
+`scripts/release/build_release_candidate.py`. It is a **true closed-world
+allowlist**: every tracked path must match exactly one inclusion rule (REQUIRED
+or ALLOWED) or the build **fails closed**. There is **no default-allow branch**.
 
-## Mechanically authoritative
+## Closed-world classification (mechanically authoritative)
 
 The builder **loads and schema-validates** `release/release-allowlist.json` from
-the tracked repository and derives its prohibited/required classification
-**from that file** — it does not hard-code the rules. The policy's SHA-256 and
-schema version are recorded in `release-manifest.json`, and the verifier
-independently re-parses the policy embedded in the ZIP and confirms its SHA-256
-matches the manifest. Changing the policy therefore changes the release identity
-deterministically. Command-line input cannot broaden the policy; an
-operator-supplied generated-file allowlist is exact and remains subject to every
-prohibited rule.
+the tracked repository and classifies **every** path returned by `git ls-files`:
+
+1. A **PROHIBITED** match (extension, exact name, path component, `.env*`, or an
+   archive extension) fails the build immediately.
+2. A path listed in `inclusion.required_paths` is classified **REQUIRED** (and
+   must be tracked and present).
+3. A path listed in `inclusion.allowed_archives` (exact path) is classified
+   **ALLOWED_ARCHIVE** — see the nested-archive rule below.
+4. A basename in `inclusion.allowed_exact_names`, or a suffix in
+   `inclusion.allowed_extensions`, is classified **ALLOWED**.
+5. A path that matches **no** inclusion rule fails closed as
+   `unclassified_tracked_path`. A policy that declares overlapping/incompatible
+   rule classes fails as `ambiguous_policy_classification`.
+
+There is no logic equivalent to "include everything that is not prohibited".
+Unclassified tracked files block the release.
+
+The policy's SHA-256 and schema version are recorded in `release-manifest.json`
+(under `policy`), and the verifier independently re-parses the policy embedded in
+the ZIP and confirms its `policy_id`, `schema_version` and SHA-256 all match the
+manifest. Changing the policy therefore changes the release identity
+deterministically. Command-line input cannot broaden the policy or add inclusion
+rules; an operator-supplied generated-file allowlist is exact, classified
+`GENERATED`, and remains subject to every prohibited rule and the closed-world
+classifier.
+
+### Single policy snapshot
+
+The policy file is read **once**; the same bytes are parsed, hashed and packaged.
+The `policy_sha256` recorded in the manifest is the SHA-256 of exactly the bytes
+placed in the archive.
+
+## Archives (prohibited by default; fail-closed nested rule)
+
+Archive extensions (`.zip`, `.tar`, `.gz`, `.tgz`, `.bz2`, `.xz`, `.zst`, `.7z`,
+`.rar`) are **prohibited by default**. An archive is included only when its exact
+path appears in `inclusion.allowed_archives` **with a documented reason**. For
+each allowed archive the builder enumerates the central-directory entry **NAMES
+ONLY** (it never extracts and never reads nested file bytes) and fails closed if
+any nested name matches a prohibited rule. This never inspects raw benchmark
+`*.jsonl` or `result.json` content — only entry names.
+
+The single tracked archive `bao-cao-dinh-ky-01-ptit.zip` (LaTeX periodic-report
+source: `.tex`/`.bib`/`.sty`/figures) is classified this way by explicit operator
+decision.
 
 ## Control-file coverage (explicit)
 
@@ -28,45 +65,29 @@ prohibited rule.
 - `SHA256SUMS.txt` covers payload + manifest + `FILE_SIZES.json` (excludes
   `SHA256SUMS.txt` itself).
 
-The verifier enforces these three sets exactly and returns PASS only when every
-control and payload invariant holds; NOT_VERIFIABLE is never treated as PASS.
+The verifier enforces these three sets **exactly**, validates the manifest
+against an exact schema (every field and type, `type(x) is int` for sizes so a
+boolean is never accepted as a size), checks deterministic ZIP metadata, and
+returns PASS only when every invariant holds. A malformed candidate returns a
+content-free structured **FAIL** (never a traceback). **NOT_VERIFIABLE is never
+treated as PASS** and never uses the PASS exit code.
 
-## Source of truth
+## Verify before publication
 
-The release is built from **tracked Git files** (`git ls-files`) plus an
-**explicit operator-supplied generated-file allowlist**. Ignored files are never
-packaged by discovery. Because the benchmark `*.jsonl`, holdout evidence,
-authorization files, receipts, attempt roots and external audit directories are
-all either git-ignored or live outside the repository, they are **structurally
-excluded** — the build never enumerates the working tree for untracked content.
-
-## REQUIRED (packaged)
-
-- Tracked source code and tests.
-- Tracked manifests and configuration needed for review (`requirements.txt`,
-  `redteam/prompts-manifest.json`, `datasets/v2/manifests/*.json`, …).
-- Phase 12F documentation (`docs/phase12f/**`) and other tracked `docs/**`.
-- Tracked Markdown/text corpus and design docs (`datasets/**/*.md`).
-- License and repository metadata safe for distribution (`LICENSE*`, `README*`,
-  `.gitignore`, `.gitattributes`, `.env.example`).
-
-## OPTIONAL (only when explicitly supplied)
-
-Included only via the generated-file allowlist, each pinned by SHA-256 and byte
-size and re-checked at build time:
-
-- a safe generated dependency inventory (e.g. `pip freeze`),
-- operator-supplied content-free test summaries.
-
-An OPTIONAL file that fails its pinned hash/size, or matches a prohibited
-pattern, fails the build.
+The builder builds and fully verifies the candidate in a same-volume **staging**
+directory, requires verifier **PASS**, then publishes the **exact verified bytes**
+to the final destination via an **atomic no-clobber hard link** (`os.link`;
+never `os.replace`, no overwrite, no force). It rechecks the published ZIP's
+SHA-256 and size against the verified bytes and verifies the published ZIP again.
+A pre-publication failure leaves **no** final directory or ZIP; staging is always
+removed. The release path is `<output-dir>\release-candidate.zip`; **no sibling
+`<output-dir>.zip` is created**.
 
 ## PROHIBITED (never packaged; any match fails closed)
 
 - **Every `*.jsonl` file** — benchmark, holdout, validation and development
   records. A tracked JSONL is a hard error.
 - `result.json` and raw evaluation records.
-- Raw holdout / validation / development evidence.
 - Credentials and tokens; `*.pem`, `*.key`, `*.p12`, `*.pfx`,
   `credentials.json`, `secrets.json`, `id_rsa`, `id_ed25519`.
 - `.env` and any `.env.*` **except** `.env.example` / `.env.sample` /
@@ -75,16 +96,18 @@ pattern, fails the build.
 - Caches (`__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`).
 - `.git` metadata; virtual environments (`.venv`, `venv`, `env`); IDE state
   (`.idea`, `.vscode`); temporary files.
+- Any archive not on the exact `allowed_archives` list, and any allowed archive
+  containing a prohibited nested name.
 - Authorization files, start receipts, attempt roots, and external audit working
-  directories.
+  directories (git-ignored or outside the repository).
 
 ## Integrity guarantees
 
-The builder also rejects symlinks / reparse points, path traversal, absolute
-paths, files outside the repository, and duplicate logical paths; preserves
-UTF-8 bytes exactly; produces a deterministic ZIP and a standard
-`SHA256SUMS.txt`; and reopens and verifies the ZIP before publishing. It never
-parses benchmark records or `result.json`, and never prints record or secret
-content.
+The builder also rejects symlinks / reparse points, path traversal, absolute and
+drive-qualified paths, files outside the repository, and duplicate or
+case-colliding logical paths; preserves arbitrary bytes exactly (64 MiB per-file
+ceiling); and produces a deterministic ZIP plus a standard `SHA256SUMS.txt`. It
+never parses benchmark records or `result.json`, and never prints record or
+secret content.
 
 This policy does not itself constitute a Phase 12G PASS.

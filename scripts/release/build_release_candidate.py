@@ -1,49 +1,56 @@
-"""Deterministic Phase 12G release-candidate builder.
+"""Deterministic Phase 12G release-candidate builder (verify-before-publish).
 
 Builds a release ZIP from tracked Git files plus an explicit operator-supplied
-generated-file allowlist. Classification is driven by the tracked release policy
-``release/release-allowlist.json`` (schema 2), which the builder loads,
-schema-validates and enforces mechanically. Fail-closed: any prohibited pattern,
-unsafe path, symlink, tracked JSONL, dirty tree, missing required policy file, or
-existing output aborts the build.
+generated-file allowlist. Classification is driven by the tracked closed-world
+release policy ``release/release-allowlist.json`` (schema 3): EVERY tracked path
+must match exactly one inclusion rule (REQUIRED or ALLOWED) or the build fails
+closed as ``unclassified_tracked_path``. There is no default-allow branch.
 
-It never packages ignored files by discovery, never parses benchmark records or
-``result.json``, and never prints record or secret content. Each tracked file is
-read exactly once into a single in-memory snapshot that is both hashed and
-written to the ZIP. Output is a deterministic ZIP plus a canonical
-``release-manifest.json`` (recording the policy SHA-256 and schema), a standard
-``SHA256SUMS.txt`` and a ``FILE_SIZES.json``; the ZIP is reopened and verified
-before publication.
+The policy file is read ONCE; the same bytes are parsed, hashed and packaged.
+Each tracked file is read exactly once into a single in-memory snapshot that is
+both hashed and written to the ZIP. Archives are prohibited by default; only
+exact ``allowed_archives`` paths pass, and only after every nested entry NAME
+(names only) is confirmed safe.
+
+Publication order: build + verify a ZIP in a same-volume staging directory,
+require verifier PASS, then publish the exact verified bytes to the final
+destination with an atomic no-clobber hard link, recheck hash/size, and verify
+the published ZIP. A pre-publication failure leaves no final directory or ZIP.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from release_common import (  # type: ignore
-        CHECKSUMS_NAME, MANIFEST_NAME, PAYLOAD_PREFIX, POLICY_RELPATH, POLICY_SCHEMA_VERSION,
-        SIZES_NAME, ReleaseError, ReleasePolicy, assert_within, checksum_text, classify_prohibited,
-        deterministic_zip_bytes, exclusive_write, is_hex40, is_symlink_or_reparse,
-        parse_release_policy, read_snapshot_bytes, read_zip_entries, sha256_bytes,
-        validate_relative_posix,
+        CHECKSUMS_NAME, CLASS_ALLOWED_ARCHIVE, CLASS_GENERATED, MANIFEST_NAME,
+        MANIFEST_SCHEMA_VERSION, PAYLOAD_PREFIX, POLICY_RELPATH, SIZES_NAME,
+        ReleaseError, ReleasePolicy, assert_within, checksum_text, classify_tracked_path,
+        deterministic_zip_bytes, exclusive_write, hardlink_no_clobber, is_hex40,
+        is_symlink_or_reparse, parse_release_policy, read_snapshot_bytes, read_zip_entries,
+        scan_archive_names, sha256_bytes, validate_relative_posix,
     )
+    import verify_release_candidate as _verifier  # type: ignore
 else:
     from .release_common import (  # noqa: F401
-        CHECKSUMS_NAME, MANIFEST_NAME, PAYLOAD_PREFIX, POLICY_RELPATH, POLICY_SCHEMA_VERSION,
-        SIZES_NAME, ReleaseError, ReleasePolicy, assert_within, checksum_text, classify_prohibited,
-        deterministic_zip_bytes, exclusive_write, is_hex40, is_symlink_or_reparse,
-        parse_release_policy, read_snapshot_bytes, read_zip_entries, sha256_bytes,
-        validate_relative_posix,
+        CHECKSUMS_NAME, CLASS_ALLOWED_ARCHIVE, CLASS_GENERATED, MANIFEST_NAME,
+        MANIFEST_SCHEMA_VERSION, PAYLOAD_PREFIX, POLICY_RELPATH, SIZES_NAME,
+        ReleaseError, ReleasePolicy, assert_within, checksum_text, classify_tracked_path,
+        deterministic_zip_bytes, exclusive_write, hardlink_no_clobber, is_hex40,
+        is_symlink_or_reparse, parse_release_policy, read_snapshot_bytes, read_zip_entries,
+        scan_archive_names, sha256_bytes, validate_relative_posix,
     )
+    from . import verify_release_candidate as _verifier  # noqa: F401
 
 ZIP_NAME = "release-candidate.zip"
-MANIFEST_SCHEMA_VERSION = 2
 
 
 def _git(repo_root: Path, *args: str) -> str:
@@ -55,7 +62,6 @@ def _git(repo_root: Path, *args: str) -> str:
 
 
 def _clean_tree_state(repo_root: Path) -> str:
-    """Return the porcelain (tracked-only) status; empty means clean."""
     return _git(repo_root, "status", "--porcelain", "--untracked-files=no").strip()
 
 
@@ -64,19 +70,12 @@ def _tracked_files(repo_root: Path) -> list[str]:
     return sorted(item for item in raw.split("\0") if item)
 
 
-def _load_policy(repo_root: Path) -> ReleasePolicy:
-    policy_path = repo_root / POLICY_RELPATH
-    if not policy_path.is_file() or is_symlink_or_reparse(policy_path):
-        raise ReleaseError("policy_missing", "tracked release policy is missing or not a regular file")
-    return parse_release_policy(policy_path.read_bytes())
-
-
 def _load_generated_allowlist(path: Path) -> list[dict[str, Any]]:
     if is_symlink_or_reparse(path):
         raise ReleaseError("generated_allowlist", "generated allowlist is a symlink/reparse point")
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise ReleaseError("generated_allowlist", "generated allowlist is not valid UTF-8 JSON") from exc
     if not isinstance(payload, dict) or payload.get("schema_version") != 1:
         raise ReleaseError("generated_allowlist", "generated allowlist schema_version must be 1")
@@ -98,24 +97,174 @@ def _load_generated_allowlist(path: Path) -> list[dict[str, Any]]:
     return entries
 
 
-def _collect_entry(repo_root: Path, rel: str, policy: ReleasePolicy, *, source: str) -> dict[str, Any]:
-    rel = validate_relative_posix(rel, label="path")
-    prohibited = classify_prohibited(rel, policy)
-    if prohibited is not None:
-        raise ReleaseError("prohibited_artifact", f"{rel} is prohibited by policy ({prohibited})")
-    absolute = repo_root / Path(rel)
-    assert_within(repo_root, absolute, label=rel)
+def _reject_symlink_chain(repo_root: Path, rel: str) -> None:
     partial = repo_root
     for part in Path(rel).parts:
         partial = partial / part
         if partial.exists() and is_symlink_or_reparse(partial):
             raise ReleaseError("symlink_rejected", f"{rel} passes through a symlink/reparse point")
+
+
+def _collect_entry(repo_root: Path, rel: str, policy: ReleasePolicy, *, source: str,
+                   classification: str, snapshot: bytes) -> dict[str, Any]:
+    return {"path": rel, "sha256": sha256_bytes(snapshot), "size_bytes": len(snapshot),
+            "source": source, "classification": classification, "_bytes": snapshot}
+
+
+def _snapshot_tracked(repo_root: Path, rel: str, policy: ReleasePolicy,
+                      policy_bytes: bytes) -> dict[str, Any]:
+    rel = validate_relative_posix(rel, label="path")
+    classification = classify_tracked_path(rel, policy)  # fails closed if unclassified/prohibited
+    absolute = repo_root / Path(rel)
+    assert_within(repo_root, absolute, label=rel)
+    _reject_symlink_chain(repo_root, rel)
     if not absolute.is_file():
         raise ReleaseError("missing_source", f"declared file is absent: {rel}")
-    # SINGLE snapshot: the exact bytes hashed are the exact bytes zipped.
+    if classification == CLASS_ALLOWED_ARCHIVE:
+        scan_archive_names(absolute, policy)  # NAMES ONLY; fails closed on prohibited nested name
+    # SINGLE snapshot: reuse the exact policy bytes already read for the policy file.
+    if rel == POLICY_RELPATH:
+        data = policy_bytes
+    else:
+        data = read_snapshot_bytes(absolute)
+    return _collect_entry(repo_root, rel, policy, source="tracked",
+                          classification=classification, snapshot=data)
+
+
+def _snapshot_generated(repo_root: Path, declared: dict[str, Any],
+                        policy: ReleasePolicy) -> dict[str, Any]:
+    rel = validate_relative_posix(declared["path"], label="generated path")
+    classify_tracked_path(rel, policy)  # generated files still obey closed-world + prohibited
+    absolute = repo_root / Path(rel)
+    assert_within(repo_root, absolute, label=rel)
+    _reject_symlink_chain(repo_root, rel)
+    if not absolute.is_file():
+        raise ReleaseError("missing_source", f"declared generated file is absent: {rel}")
     data = read_snapshot_bytes(absolute)
-    return {"path": rel, "sha256": sha256_bytes(data), "size_bytes": len(data),
-            "source": source, "_bytes": data}
+    entry = _collect_entry(repo_root, rel, policy, source="generated",
+                           classification=CLASS_GENERATED, snapshot=data)
+    if entry["sha256"] != declared["sha256"] or entry["size_bytes"] != declared["size_bytes"]:
+        raise ReleaseError("generated_mismatch", f"generated file does not match its pin: {rel}")
+    return entry
+
+
+def _build_payload(*, repo_root: Path, expected_head: str | None, expected_branch: str | None,
+                   base_sha: str | None, generated_allowlist: Path | None) -> dict[str, Any]:
+    """Do all identity/classification/snapshot work and return the in-memory
+    ZIP bytes plus control bytes. No filesystem output is produced here."""
+    head_before = _git(repo_root, "rev-parse", "HEAD").strip()
+    if _clean_tree_state(repo_root) != "":
+        raise ReleaseError("dirty_tree", "repository working tree has tracked modifications")
+    branch = _git(repo_root, "rev-parse", "--abbrev-ref", "HEAD").strip()
+    if expected_head is not None and head_before != expected_head:
+        raise ReleaseError("identity_mismatch", "HEAD does not match --expected-head")
+    if expected_branch is not None and branch != expected_branch:
+        raise ReleaseError("identity_mismatch", "branch does not match --expected-branch")
+    if base_sha is not None and not is_hex40(base_sha):
+        raise ReleaseError("identity_format", "--base-sha is not a 40-hex commit id")
+
+    # Read the policy ONCE; parse/hash/package the same bytes.
+    policy_path = repo_root / POLICY_RELPATH
+    if not policy_path.is_file() or is_symlink_or_reparse(policy_path):
+        raise ReleaseError("policy_missing", "tracked release policy is missing or not a regular file")
+    policy_bytes = read_snapshot_bytes(policy_path)
+    policy = parse_release_policy(policy_bytes)
+    assert sha256_bytes(policy_bytes) == policy.sha256
+
+    tracked = _tracked_files(repo_root)
+    tracked_set = set(tracked)
+    if POLICY_RELPATH not in tracked_set:
+        raise ReleaseError("policy_untracked", "release policy path is not tracked by git")
+    for required in policy.required_paths:
+        if required not in tracked_set:
+            raise ReleaseError("policy_required_missing", f"required policy path not tracked: {required}")
+    tracked_jsonl = [rel for rel in tracked if rel.casefold().endswith(".jsonl")]
+    if tracked_jsonl:
+        raise ReleaseError("tracked_jsonl", f"tracked JSONL is prohibited: {tracked_jsonl[:3]}")
+
+    entries: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for rel in tracked:
+        entry = _snapshot_tracked(repo_root, rel, policy, policy_bytes)
+        key = entry["path"].casefold()
+        if key in seen:
+            raise ReleaseError("duplicate_logical_path", f"duplicate logical path: {entry['path']}")
+        seen.add(key)
+        entries.append(entry)
+
+    generated_entries: list[dict[str, Any]] = []
+    if generated_allowlist is not None:
+        for declared in _load_generated_allowlist(generated_allowlist.expanduser().resolve()):
+            entry = _snapshot_generated(repo_root, declared, policy)
+            key = entry["path"].casefold()
+            if key in seen:
+                raise ReleaseError("duplicate_logical_path", f"generated path duplicates a tracked path: {entry['path']}")
+            seen.add(key)
+            generated_entries.append(entry)
+
+    # Re-check identity + clean tree AFTER snapshot; fail closed on concurrent mutation.
+    if _git(repo_root, "rev-parse", "HEAD").strip() != head_before:
+        raise ReleaseError("source_changed", "repository HEAD changed during snapshot preparation")
+    if _git(repo_root, "rev-parse", "--abbrev-ref", "HEAD").strip() != branch:
+        raise ReleaseError("source_changed", "repository branch changed during snapshot preparation")
+    if _clean_tree_state(repo_root) != "":
+        raise ReleaseError("source_changed", "repository changed during snapshot preparation")
+
+    all_entries = sorted(entries + generated_entries, key=lambda item: item["path"])
+    payload: dict[str, bytes] = {f"{PAYLOAD_PREFIX}{e['path']}": e["_bytes"] for e in all_entries}
+
+    manifest = {
+        "schema_version": MANIFEST_SCHEMA_VERSION,
+        "repository": {"head": head_before, "branch": branch, "base_sha": base_sha},
+        "policy": {"policy_id": policy.policy_id, "schema_version": policy.schema_version,
+                   "sha256": policy.sha256},
+        "counts": {"file_count": len(all_entries), "tracked_count": len(entries),
+                   "generated_count": len(generated_entries)},
+        "control_coverage": {
+            "manifest_files": "payload entries only (repo/*)",
+            "sizes_covers": "payload + manifest (excludes SHA256SUMS.txt and FILE_SIZES.json)",
+            "checksums_covers": "payload + manifest + FILE_SIZES.json (excludes SHA256SUMS.txt)",
+        },
+        "content_controls": {
+            "jsonl_included": False, "result_json_included": False,
+            "credentials_included": False, "databases_included": False,
+            "git_metadata_included": False, "venv_included": False,
+            "built_from": "git ls-files + explicit generated allowlist; closed-world policy-enforced",
+        },
+        "zip_policy": {"entry_order": "lexical", "timestamp": "1980-01-01T00:00:00",
+                       "permissions": "0644", "compression": "deflate-9"},
+        "files": [
+            {"archive_path": f"{PAYLOAD_PREFIX}{e['path']}", "path": e["path"],
+             "sha256": e["sha256"], "size_bytes": e["size_bytes"],
+             "source": e["source"], "classification": e["classification"]}
+            for e in all_entries
+        ],
+    }
+    manifest_bytes = (json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=False) + "\n").encode("utf-8")
+    payload[MANIFEST_NAME] = manifest_bytes
+
+    sizes_payload = {name: len(data) for name, data in payload.items()}
+    sizes = {"schema_version": 1, "files": dict(sorted(sizes_payload.items()))}
+    sizes_bytes = (json.dumps(sizes, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    payload[SIZES_NAME] = sizes_bytes
+
+    payload[CHECKSUMS_NAME] = checksum_text(payload)
+
+    zip_bytes = deterministic_zip_bytes(payload)
+    return {
+        "zip_bytes": zip_bytes, "manifest_bytes": manifest_bytes,
+        "sizes_bytes": sizes_bytes, "checksums_bytes": payload[CHECKSUMS_NAME],
+        "payload": payload, "policy": policy,
+        "head": head_before, "branch": branch,
+        "payload_count": len(all_entries), "control_count": 3,
+    }
+
+
+def _verify_zip_pass(zip_path: Path, *, stage: str) -> None:
+    report = _verifier.verify_release_candidate(zip_path)
+    if report.get("status") != "PASS":
+        raise ReleaseError("verify_before_publish",
+                           f"{stage} verification did not PASS (status={report.get('status')})")
 
 
 def build_release_candidate(
@@ -138,135 +287,75 @@ def build_release_candidate(
     if zip_path.exists():
         raise ReleaseError("output_reuse", "release ZIP already exists")
 
-    # Clean-tree + identity BEFORE snapshot.
-    head_before = _git(repo_root, "rev-parse", "HEAD").strip()
-    clean_before = _clean_tree_state(repo_root) == ""
-    if not clean_before:
-        raise ReleaseError("dirty_tree", "repository working tree has tracked modifications")
-    branch = _git(repo_root, "rev-parse", "--abbrev-ref", "HEAD").strip()
-    if expected_head is not None and head_before != expected_head:
-        raise ReleaseError("identity_mismatch", "HEAD does not match --expected-head")
-    if expected_branch is not None and branch != expected_branch:
-        raise ReleaseError("identity_mismatch", "branch does not match --expected-branch")
-    if base_sha is not None and not is_hex40(base_sha):
-        raise ReleaseError("identity_format", "--base-sha is not a 40-hex commit id")
+    built = _build_payload(
+        repo_root=repo_root, expected_head=expected_head, expected_branch=expected_branch,
+        base_sha=base_sha, generated_allowlist=generated_allowlist,
+    )
+    zip_bytes = built["zip_bytes"]
+    verified_sha = sha256_bytes(zip_bytes)
+    verified_size = len(zip_bytes)
 
-    policy = _load_policy(repo_root)
+    staging_dir: Path | None = None
+    created_output = False
+    try:
+        # 1) Build the candidate ONLY in a same-volume staging directory.
+        staging_dir = Path(tempfile.mkdtemp(prefix=".rc-stage-", dir=str(output_dir.parent)))
+        staging_zip = staging_dir / ZIP_NAME
+        exclusive_write(staging_zip, zip_bytes)
+        exclusive_write(staging_dir / MANIFEST_NAME, built["manifest_bytes"])
+        exclusive_write(staging_dir / SIZES_NAME, built["sizes_bytes"])
+        exclusive_write(staging_dir / CHECKSUMS_NAME, checksum_text({
+            ZIP_NAME: zip_bytes, MANIFEST_NAME: built["manifest_bytes"], SIZES_NAME: built["sizes_bytes"],
+        }))
 
-    tracked = _tracked_files(repo_root)
-    tracked_set = set(tracked)
-    # Policy required-present files must actually be tracked.
-    for required in policy.required_present:
-        if validate_relative_posix(required, label="required_present") not in tracked_set:
-            raise ReleaseError("policy_required_missing", f"required policy file not tracked: {required}")
-    tracked_jsonl = [rel for rel in tracked if rel.casefold().endswith(".jsonl")]
-    if tracked_jsonl:
-        raise ReleaseError("tracked_jsonl", f"tracked JSONL is prohibited: {tracked_jsonl[:3]}")
+        # 2) Fully verify the staged ZIP; require PASS before any publication.
+        if sha256_bytes(staging_zip.read_bytes()) != verified_sha:
+            raise ReleaseError("staging_mismatch", "staged ZIP bytes differ from the in-memory build")
+        _verify_zip_pass(staging_zip, stage="staging")
 
-    entries: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for rel in tracked:
-        entry = _collect_entry(repo_root, rel, policy, source="tracked")
-        key = entry["path"].casefold()
-        if key in seen:
-            raise ReleaseError("duplicate_logical_path", f"duplicate logical path: {entry['path']}")
-        seen.add(key)
-        entries.append(entry)
+        # 3) Publish the EXACT verified bytes atomically (no-clobber hard link).
+        output_dir.mkdir(parents=True, exist_ok=False)
+        created_output = True
+        hardlink_no_clobber(staging_zip, zip_path)
+        exclusive_write(output_dir / MANIFEST_NAME, built["manifest_bytes"])
+        exclusive_write(output_dir / SIZES_NAME, built["sizes_bytes"])
+        exclusive_write(output_dir / CHECKSUMS_NAME, checksum_text({
+            ZIP_NAME: zip_bytes, MANIFEST_NAME: built["manifest_bytes"], SIZES_NAME: built["sizes_bytes"],
+        }))
 
-    generated_entries: list[dict[str, Any]] = []
-    if generated_allowlist is not None:
-        for declared in _load_generated_allowlist(generated_allowlist.expanduser().resolve()):
-            entry = _collect_entry(repo_root, declared["path"], policy, source="generated")
-            if entry["sha256"] != declared["sha256"] or entry["size_bytes"] != declared["size_bytes"]:
-                raise ReleaseError("generated_mismatch", f"generated file does not match its pin: {declared['path']}")
-            key = entry["path"].casefold()
-            if key in seen:
-                raise ReleaseError("duplicate_logical_path", f"generated path duplicates a tracked path: {declared['path']}")
-            seen.add(key)
-            generated_entries.append(entry)
+        # 4) Recheck published bytes equal the verified bytes, then verify again.
+        final_bytes = zip_path.read_bytes()
+        if sha256_bytes(final_bytes) != verified_sha or len(final_bytes) != verified_size:
+            raise ReleaseError("publication_mismatch", "published ZIP bytes differ from the verified ZIP")
+        _verify_zip_pass(zip_path, stage="published")
 
-    # Re-check clean-tree AFTER snapshot; fail closed on concurrent mutation.
-    head_after = _git(repo_root, "rev-parse", "HEAD").strip()
-    if head_after != head_before or _clean_tree_state(repo_root) != "":
-        raise ReleaseError("source_changed", "repository changed during snapshot preparation")
+        # 5) Reopen and confirm entries match the in-memory payload.
+        reopened = read_zip_entries(zip_path)
+        if set(reopened) != set(built["payload"]):
+            raise ReleaseError("zip_verification", "published ZIP entry set is inconsistent after reopen")
+        for name, data in built["payload"].items():
+            if sha256_bytes(reopened[name]) != sha256_bytes(data):
+                raise ReleaseError("zip_verification", "published ZIP entry bytes changed after reopen")
+    except BaseException:
+        if created_output and output_dir.exists():
+            shutil.rmtree(output_dir, ignore_errors=True)
+        raise
+    finally:
+        if staging_dir is not None and staging_dir.exists():
+            shutil.rmtree(staging_dir, ignore_errors=True)
 
-    all_entries = sorted(entries + generated_entries, key=lambda item: item["path"])
-    payload: dict[str, bytes] = {f"{PAYLOAD_PREFIX}{e['path']}": e["_bytes"] for e in all_entries}
-
-    manifest = {
-        "schema_version": MANIFEST_SCHEMA_VERSION,
-        "policy_id": policy.policy_id,
-        "policy_schema_version": policy.schema_version,
-        "policy_sha256": policy.sha256,
-        "repo_head": head_before,
-        "repo_branch": branch,
-        "base_sha": base_sha,
-        "expected_head": expected_head,
-        "expected_branch": expected_branch,
-        "file_count": len(all_entries),
-        "tracked_count": len(entries),
-        "generated_count": len(generated_entries),
-        "control_files": {
-            "manifest": MANIFEST_NAME, "checksums": CHECKSUMS_NAME, "sizes": SIZES_NAME,
-            "coverage": {
-                "manifest_files": "payload entries only (repo/*)",
-                "sizes_covers": "payload + manifest (excludes SHA256SUMS.txt and FILE_SIZES.json)",
-                "checksums_covers": "payload + manifest + FILE_SIZES.json (excludes SHA256SUMS.txt)",
-            },
-        },
-        "files": [
-            {"archive_path": f"{PAYLOAD_PREFIX}{e['path']}", "path": e["path"],
-             "sha256": e["sha256"], "size_bytes": e["size_bytes"], "source": e["source"]}
-            for e in all_entries
-        ],
-        "content_controls": {
-            "jsonl_included": False, "result_json_included": False,
-            "credentials_included": False, "databases_included": False,
-            "git_metadata_included": False, "venv_included": False,
-            "built_from": "git ls-files + explicit generated allowlist; policy-enforced",
-        },
-        "zip_policy": {"entry_order": "lexical", "timestamp": "1980-01-01T00:00:00",
-                       "permissions": "0644", "compression": "deflate-9"},
-    }
-    manifest_bytes = (json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=False) + "\n").encode("utf-8")
-    payload[MANIFEST_NAME] = manifest_bytes
-
-    # FILE_SIZES covers payload + manifest (not itself, not SHA256SUMS).
-    sizes_payload = {name: len(data) for name, data in payload.items()}
-    sizes = {"schema_version": 1, "files": dict(sorted(sizes_payload.items()))}
-    sizes_bytes = (json.dumps(sizes, indent=2, sort_keys=True) + "\n").encode("utf-8")
-    payload[SIZES_NAME] = sizes_bytes
-
-    # SHA256SUMS covers payload + manifest + FILE_SIZES (not itself).
-    payload[CHECKSUMS_NAME] = checksum_text(payload)
-
-    zip_bytes = deterministic_zip_bytes(payload)
-
-    output_dir.mkdir(parents=True, exist_ok=False)
-    exclusive_write(zip_path, zip_bytes)
-    exclusive_write(output_dir / MANIFEST_NAME, manifest_bytes)
-    exclusive_write(output_dir / SIZES_NAME, sizes_bytes)
-    exclusive_write(output_dir / CHECKSUMS_NAME, checksum_text({
-        ZIP_NAME: zip_bytes, MANIFEST_NAME: manifest_bytes, SIZES_NAME: sizes_bytes,
-    }))
-
-    # Reopen and verify the ZIP against the in-memory payload.
-    reopened = read_zip_entries(zip_path)
-    if set(reopened) != set(payload):
-        raise ReleaseError("zip_verification", "ZIP entry allowlist is inconsistent after reopen")
-    for name, data in payload.items():
-        if sha256_bytes(reopened[name]) != sha256_bytes(data):
-            raise ReleaseError("zip_verification", "ZIP entry bytes changed after reopen")
-
+    policy = built["policy"]
     return {
         "schema_version": 1, "tool": "build_release_candidate", "ok": True,
-        "repo_head": head_before, "repo_branch": branch,
-        "policy_id": policy.policy_id, "policy_sha256": policy.sha256,
+        "repo_head": built["head"], "repo_branch": built["branch"],
+        "policy_id": policy.policy_id, "policy_schema_version": policy.schema_version,
+        "policy_sha256": policy.sha256,
         "output_dir": str(output_dir), "zip_path": str(zip_path),
-        "zip_sha256": sha256_bytes(zip_bytes), "zip_size_bytes": len(zip_bytes),
-        "zip_entry_count": len(payload), "payload_count": len(all_entries),
+        "zip_sha256": verified_sha, "zip_size_bytes": verified_size,
+        "zip_entry_count": len(built["payload"]), "payload_count": built["payload_count"],
         "control_count": 3,
-        "clean_tree_before": clean_before, "clean_tree_after": True,
+        "verified_before_publish": True, "published_atomically": True,
+        "clean_tree_before": True, "clean_tree_after": True,
     }
 
 

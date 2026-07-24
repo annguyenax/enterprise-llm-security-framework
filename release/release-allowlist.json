@@ -1,8 +1,43 @@
 {
-  "schema_version": 2,
-  "policy_id": "phase12g-release-allowlist-v2",
+  "schema_version": 3,
+  "policy_id": "phase12g-release-allowlist-v3",
   "fail_closed": true,
-  "source_of_truth": "git ls-files (tracked) plus an explicit operator-supplied generated-file allowlist; ignored files are never packaged by discovery",
+  "closed_world": true,
+  "source_of_truth": "git ls-files (tracked) plus an explicit operator-supplied generated-file allowlist; ignored files are never packaged by discovery. Every tracked path must match exactly one inclusion rule (REQUIRED or ALLOWED) or the build fails closed as unclassified_tracked_path.",
+  "inclusion": {
+    "required_paths": [
+      "datasets/v2/manifests/benchmark-v2-manifest.json",
+      "redteam/prompts-manifest.json",
+      "release/release-allowlist.json",
+      "release/release-policy.md"
+    ],
+    "allowed_extensions": [
+      ".md",
+      ".py",
+      ".tex",
+      ".ps1",
+      ".json",
+      ".png",
+      ".jpeg",
+      ".bib",
+      ".sty",
+      ".yml",
+      ".yaml",
+      ".txt"
+    ],
+    "allowed_exact_names": [
+      ".gitignore",
+      ".gitattributes",
+      ".gitkeep",
+      ".env.example"
+    ],
+    "allowed_archives": [
+      {
+        "path": "bao-cao-dinh-ky-01-ptit.zip",
+        "reason": "Tracked LaTeX periodic-report source archive (figures and .tex/.bib/.sty assets). Explicitly classified by operator decision. The builder enumerates its central-directory entry NAMES ONLY (never extracts, never reads nested bytes) and fails closed if any nested name matches a prohibited rule."
+      }
+    ]
+  },
   "prohibited": {
     "extensions": [
       ".jsonl",
@@ -44,16 +79,21 @@
       ".vscode",
       ".tmp",
       ".pytest-tmp"
+    ],
+    "archive_extensions": [
+      ".zip",
+      ".tar",
+      ".gz",
+      ".tgz",
+      ".bz2",
+      ".xz",
+      ".zst",
+      ".7z",
+      ".rar"
     ]
   },
-  "required_present": [
-    "datasets/v2/manifests/benchmark-v2-manifest.json",
-    "redteam/prompts-manifest.json",
-    "release/release-allowlist.json",
-    "release/release-policy.md"
-  ],
   "optional_generated": {
     "allowed": true,
-    "note": "Operator-supplied generated files, each pinned by SHA-256 and byte size, still subject to every prohibited rule above. The CLI cannot broaden the prohibited classification."
+    "note": "Operator-supplied generated files, each pinned by SHA-256 and byte size, are classified GENERATED and remain subject to every prohibited rule above. The CLI cannot broaden classification or add inclusion rules."
   }
 }

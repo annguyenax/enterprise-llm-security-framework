@@ -27,21 +27,31 @@ def common():
 
 
 @pytest.fixture(scope="session")
-def builder():
-    return _load("g12_build_release", "build_release_candidate.py")
+def verifier():
+    # Load the verifier BEFORE the builder so the builder's `import
+    # verify_release_candidate` resolves to the same module object.
+    return _load("verify_release_candidate", "verify_release_candidate.py")
 
 
 @pytest.fixture(scope="session")
-def verifier():
-    return _load("g12_verify_release", "verify_release_candidate.py")
+def builder(verifier):
+    return _load("g12_build_release", "build_release_candidate.py")
 
 
-def valid_policy(required_present):
-    """A minimal valid schema-2 policy JSON string."""
-    return json.dumps({
-        "schema_version": 2,
-        "policy_id": "phase12g-test-policy-v2",
+def valid_policy_obj(required_paths, *, allowed_archives=None):
+    """A minimal valid closed-world schema-3 policy as a dict."""
+    return {
+        "schema_version": 3,
+        "policy_id": "phase12g-test-policy-v3",
         "fail_closed": True,
+        "closed_world": True,
+        "source_of_truth": "git ls-files (tracked) plus explicit generated allowlist",
+        "inclusion": {
+            "required_paths": list(required_paths),
+            "allowed_extensions": [".md", ".py", ".txt", ".json"],
+            "allowed_exact_names": [".gitignore", ".gitkeep", ".env.example"],
+            "allowed_archives": list(allowed_archives or []),
+        },
         "prohibited": {
             "extensions": [".jsonl", ".db", ".sqlite", ".sqlite3", ".pem", ".key", ".p12", ".pfx"],
             "exact_names": ["result.json", "credentials.json", "credential.json",
@@ -50,10 +60,14 @@ def valid_policy(required_present):
             "path_components": [".git", ".venv", "venv", "env", "__pycache__",
                                ".pytest_cache", ".mypy_cache", ".ruff_cache", "node_modules",
                                ".idea", ".vscode", ".tmp", ".pytest-tmp"],
+            "archive_extensions": [".zip", ".tar", ".gz", ".tgz", ".bz2", ".xz", ".zst", ".7z", ".rar"],
         },
-        "required_present": list(required_present),
         "optional_generated": {"allowed": True},
-    }, indent=2)
+    }
+
+
+def valid_policy(required_paths, *, allowed_archives=None):
+    return json.dumps(valid_policy_obj(required_paths, allowed_archives=allowed_archives), indent=2)
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -68,13 +82,14 @@ def _git(repo: Path, *args: str) -> str:
 @pytest.fixture()
 def synthetic_repo(tmp_path):
     """A committed git repo with tracked source/docs, a .gitignore, and a valid
-    machine-consumable release policy that references only files it contains."""
+    closed-world release policy that references only files it contains. Every
+    tracked file matches an inclusion rule."""
     repo = tmp_path / "repo"
     repo.mkdir()
     _git(repo, "init", "-q")
     (repo / ".gitignore").write_text("*.jsonl\n.env\n*.db\n.venv/\n", encoding="utf-8")
     (repo / "README.md").write_text("# Synthetic repo\n", encoding="utf-8")
-    (repo / "requirements.txt").write_text("pytest\n", encoding="utf-8")
+    (repo / "notes.txt").write_text("notes\n", encoding="utf-8")
     (repo / ".env.example").write_text("TOKEN=REPLACE_ME\n", encoding="utf-8")
     (repo / "src").mkdir()
     (repo / "src" / "app.py").write_text("print('hello')\n", encoding="utf-8")
@@ -92,3 +107,8 @@ def git(synthetic_repo):
     def _call(*args: str) -> str:
         return _git(synthetic_repo, *args)
     return _call
+
+
+def write_policy(repo: Path, obj) -> None:
+    (repo / "release" / "release-allowlist.json").write_text(
+        json.dumps(obj, indent=2), encoding="utf-8")

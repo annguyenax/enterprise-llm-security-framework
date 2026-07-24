@@ -77,16 +77,35 @@ powershell -File scripts\release\bootstrap_fresh_checkout.ps1 `
 ```
 
 The builder writes the ZIP as **`<OUTPUT_DIR>\release-candidate.zip`** (inside
-the output directory). It does **not** create a sibling `<OUTPUT_DIR>.zip`. The
-release classification is enforced from the tracked policy
-`release/release-allowlist.json`, whose SHA-256 and schema are recorded in the
-ZIP's `release-manifest.json` and re-validated by the verifier.
+the output directory). It does **not** create a sibling `<OUTPUT_DIR>.zip`.
 
+- **Closed-world policy.** Classification is enforced from the tracked policy
+  `release/release-allowlist.json` (schema 3), whose `policy_id`, schema version
+  and SHA-256 are recorded in the ZIP's `release-manifest.json` and re-validated
+  by the verifier. **Every** tracked file must match exactly one inclusion rule
+  (REQUIRED or ALLOWED); an **unclassified tracked file blocks the release**.
+  There is no default-allow branch. Archives are prohibited by default; only
+  exact allow-listed archives pass, after a names-only nested-entry safety scan.
+- **Malformed candidates return a structured FAIL.** The verifier converts every
+  candidate-controlled parsing failure into a content-free result and never emits
+  a traceback; it enforces an exact manifest schema (including `type(x) is int`
+  so a boolean is never accepted as a size) and deterministic ZIP metadata.
+  **NOT_VERIFIABLE is never treated as PASS.**
+- **Verification occurs before publication.** The builder builds and fully
+  verifies the candidate in a same-volume staging directory, requires verifier
+  PASS, then publishes the exact verified bytes with an **atomic no-clobber hard
+  link** (never `os.replace`, no overwrite, no force), rechecks the published
+  hash/size, and verifies the published ZIP again. A pre-publication failure
+  leaves no final directory or ZIP. **Old candidate directories are historical
+  and are never overwritten.**
 - **Vulnerability status is `NOT_CHECKED`** — the dependency inventory queries no
   index or vulnerability service and makes no vulnerability-free claim.
 - **Public CI is not equivalent to the private full suite** — the public
   workflow runs synthetic tests only and cannot access the git-ignored private
   benchmark artifacts.
+
+Phase 12E.4 remains **exploratory / diagnostic evidence only**; nothing above
+adds an evaluation metric or a security-effectiveness claim.
 
 ---
 
