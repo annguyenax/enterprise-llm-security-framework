@@ -47,6 +47,29 @@
 8. Archive code + docs + sealed artifact bundle hashes.  
 9. Tag only after maintainer sign-off.
 
+### 3a. Actual release tooling commands (build + verify)
+
+Before step 6, build and independently verify the deterministic release
+candidate with the integrated CLIs (see also `docs/final/05` §4a).
+
+The Phase 12G release tooling is integrated on this branch. The builder writes
+exactly `<OUTPUT_DIR>\release-candidate.zip` (no sibling `<OUTPUT_DIR>.zip`),
+classifies every tracked path under the disjoint closed-world policy, verifies a
+staged ZIP, then publishes the exact verified bytes with an atomic no-clobber
+hard link. Old candidate directories are historical and must not be overwritten.
+
+```powershell
+# Build (disjoint closed-world policy-enforced, content-free, verify-before-publish)
+python scripts\release\build_release_candidate.py `
+  --repo-root <REPO> --output-dir <OUTPUT_DIR> `
+  [--expected-head <SHA>] [--expected-branch <BRANCH>] [--base-sha <SHA>] `
+  [--generated-allowlist <JSON>] [--summary-out <JSON>]
+
+# Independently verify the built candidate (PASS / FAIL / NOT_VERIFIABLE)
+python scripts\release\verify_release_candidate.py --zip <OUTPUT_DIR>\release-candidate.zip `
+  [--expected-policy-sha256 <SHA256>] [--expected-policy-id <ID>] [--expected-head <SHA>]
+```
+
 ---
 
 ## 4. Audit procedure

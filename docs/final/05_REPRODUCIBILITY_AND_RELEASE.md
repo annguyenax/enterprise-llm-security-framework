@@ -79,18 +79,32 @@ powershell -File scripts\release\bootstrap_fresh_checkout.ps1 `
 The builder writes the ZIP as **`<OUTPUT_DIR>\release-candidate.zip`** (inside
 the output directory). It does **not** create a sibling `<OUTPUT_DIR>.zip`.
 
-- **Closed-world policy.** Classification is enforced from the tracked policy
-  `release/release-allowlist.json` (schema 3), whose `policy_id`, schema version
-  and SHA-256 are recorded in the ZIP's `release-manifest.json` and re-validated
-  by the verifier. **Every** tracked file must match exactly one inclusion rule
-  (REQUIRED or ALLOWED); an **unclassified tracked file blocks the release**.
-  There is no default-allow branch. Archives are prohibited by default; only
-  exact allow-listed archives pass, after a names-only nested-entry safety scan.
+- **Disjoint closed-world policy.** Classification is enforced from the tracked
+  policy `release/release-allowlist.json` (schema 4), whose `policy_id`, schema
+  version and SHA-256 are recorded in the ZIP's `release-manifest.json` and
+  re-validated by the verifier. Every tracked path is classified by **counting**
+  the inclusion rules it matches: exactly one permitted match includes it and
+  records its class + **unique rule ID** + matched form; zero matches, more than
+  one match, or a permitted-plus-prohibited match all **fail closed**. The rules
+  are **mechanically disjoint** (no two rules can match the same path — the four
+  REQUIRED paths are excluded from the broad extension rules), so overlap is
+  never hidden by precedence. There is no default-allow branch; an unclassified
+  tracked file blocks the release.
+- **Snapshot-bound archive safety.** Archives are prohibited by default; an
+  allowed archive is inspected from the **exact bound snapshot bytes** that are
+  hashed and packaged (names/metadata only — never extracted, never nested
+  content). One shared inspector applies identical resource limits in the builder
+  and the verifier, and the **verifier independently re-inspects** the packaged
+  archive bytes rather than trusting the recorded metadata.
 - **Malformed candidates return a structured FAIL.** The verifier converts every
-  candidate-controlled parsing failure into a content-free result and never emits
-  a traceback; it enforces an exact manifest schema (including `type(x) is int`
-  so a boolean is never accepted as a size) and deterministic ZIP metadata.
-  **NOT_VERIFIABLE is never treated as PASS.**
+  candidate-controlled parsing failure (including unsupported/encrypted
+  compression and outer-ZIP resource exhaustion) into a content-free result and
+  never emits a traceback; it enforces an **exact manifest schema at every level**
+  (`type(x) is int` so a boolean or float is never accepted where an integer is
+  required; canonical `control_coverage`/`zip_policy` values; reconciled counts;
+  REQUIRED-path presence; and — when a trusted expected identity is supplied — an
+  anchored policy identity) and deterministic ZIP metadata. **NOT_VERIFIABLE is
+  never treated as PASS.**
 - **Verification occurs before publication.** The builder builds and fully
   verifies the candidate in a same-volume staging directory, requires verifier
   PASS, then publishes the exact verified bytes with an **atomic no-clobber hard

@@ -1,99 +1,46 @@
 {
-  "schema_version": 3,
-  "policy_id": "phase12g-release-allowlist-v3",
+  "schema_version": 4,
+  "policy_id": "phase12g-release-allowlist-v4",
   "fail_closed": true,
   "closed_world": true,
-  "source_of_truth": "git ls-files (tracked) plus an explicit operator-supplied generated-file allowlist; ignored files are never packaged by discovery. Every tracked path must match exactly one inclusion rule (REQUIRED or ALLOWED) or the build fails closed as unclassified_tracked_path.",
-  "inclusion": {
-    "required_paths": [
-      "datasets/v2/manifests/benchmark-v2-manifest.json",
-      "redteam/prompts-manifest.json",
-      "release/release-allowlist.json",
-      "release/release-policy.md"
-    ],
-    "allowed_extensions": [
-      ".md",
-      ".py",
-      ".tex",
-      ".ps1",
-      ".json",
-      ".png",
-      ".jpeg",
-      ".bib",
-      ".sty",
-      ".yml",
-      ".yaml",
-      ".txt"
-    ],
-    "allowed_exact_names": [
-      ".gitignore",
-      ".gitattributes",
-      ".gitkeep",
-      ".env.example"
-    ],
-    "allowed_archives": [
-      {
-        "path": "bao-cao-dinh-ky-01-ptit.zip",
-        "reason": "Tracked LaTeX periodic-report source archive (figures and .tex/.bib/.sty assets). Explicitly classified by operator decision. The builder enumerates its central-directory entry NAMES ONLY (never extracts, never reads nested bytes) and fails closed if any nested name matches a prohibited rule."
-      }
-    ]
-  },
+  "disjoint": true,
+  "source_of_truth": "git ls-files (tracked) plus an explicit operator-supplied generated-file allowlist; ignored files are never packaged by discovery. Every tracked path must match exactly one inclusion rule after exclusions, or the build fails closed. Rules are mechanically disjoint: no two rules can match the same path.",
+  "archive_inspection_version": 1,
+  "inclusion_rules": [
+    {"rule_id": "req-benchmark-manifest", "class": "REQUIRED", "form": "exact_path", "value": "datasets/v2/manifests/benchmark-v2-manifest.json", "exclude_exact_paths": []},
+    {"rule_id": "req-redteam-manifest", "class": "REQUIRED", "form": "exact_path", "value": "redteam/prompts-manifest.json", "exclude_exact_paths": []},
+    {"rule_id": "req-release-allowlist", "class": "REQUIRED", "form": "exact_path", "value": "release/release-allowlist.json", "exclude_exact_paths": []},
+    {"rule_id": "req-release-policy", "class": "REQUIRED", "form": "exact_path", "value": "release/release-policy.md", "exclude_exact_paths": []},
+    {"rule_id": "allow-ext-md", "class": "ALLOWED", "form": "extension", "value": ".md", "exclude_exact_paths": ["release/release-policy.md"]},
+    {"rule_id": "allow-ext-json", "class": "ALLOWED", "form": "extension", "value": ".json", "exclude_exact_paths": ["datasets/v2/manifests/benchmark-v2-manifest.json", "redteam/prompts-manifest.json", "release/release-allowlist.json"]},
+    {"rule_id": "allow-ext-py", "class": "ALLOWED", "form": "extension", "value": ".py", "exclude_exact_paths": []},
+    {"rule_id": "allow-ext-tex", "class": "ALLOWED", "form": "extension", "value": ".tex", "exclude_exact_paths": []},
+    {"rule_id": "allow-ext-ps1", "class": "ALLOWED", "form": "extension", "value": ".ps1", "exclude_exact_paths": []},
+    {"rule_id": "allow-ext-png", "class": "ALLOWED", "form": "extension", "value": ".png", "exclude_exact_paths": []},
+    {"rule_id": "allow-ext-jpeg", "class": "ALLOWED", "form": "extension", "value": ".jpeg", "exclude_exact_paths": []},
+    {"rule_id": "allow-ext-bib", "class": "ALLOWED", "form": "extension", "value": ".bib", "exclude_exact_paths": []},
+    {"rule_id": "allow-ext-sty", "class": "ALLOWED", "form": "extension", "value": ".sty", "exclude_exact_paths": []},
+    {"rule_id": "allow-ext-yml", "class": "ALLOWED", "form": "extension", "value": ".yml", "exclude_exact_paths": []},
+    {"rule_id": "allow-ext-yaml", "class": "ALLOWED", "form": "extension", "value": ".yaml", "exclude_exact_paths": []},
+    {"rule_id": "allow-ext-txt", "class": "ALLOWED", "form": "extension", "value": ".txt", "exclude_exact_paths": []},
+    {"rule_id": "allow-name-gitignore", "class": "ALLOWED", "form": "exact_name", "value": ".gitignore", "exclude_exact_paths": []},
+    {"rule_id": "allow-name-gitattributes", "class": "ALLOWED", "form": "exact_name", "value": ".gitattributes", "exclude_exact_paths": []},
+    {"rule_id": "allow-name-gitkeep", "class": "ALLOWED", "form": "exact_name", "value": ".gitkeep", "exclude_exact_paths": []},
+    {"rule_id": "allow-name-env-example", "class": "ALLOWED", "form": "exact_name", "value": ".env.example", "exclude_exact_paths": []},
+    {"rule_id": "allow-archive-baocao", "class": "ALLOWED_ARCHIVE", "form": "archive_path", "value": "bao-cao-dinh-ky-01-ptit.zip", "exclude_exact_paths": []}
+  ],
   "prohibited": {
-    "extensions": [
-      ".jsonl",
-      ".db",
-      ".sqlite",
-      ".sqlite3",
-      ".pem",
-      ".key",
-      ".p12",
-      ".pfx"
-    ],
-    "exact_names": [
-      "result.json",
-      "credentials.json",
-      "credential.json",
-      "secrets.json",
-      "id_rsa",
-      "id_ed25519"
-    ],
+    "extensions": [".jsonl", ".db", ".sqlite", ".sqlite3", ".pem", ".key", ".p12", ".pfx"],
+    "exact_names": ["result.json", "credentials.json", "credential.json", "secrets.json", "id_rsa", "id_ed25519"],
     "env": {
       "prohibit_dotenv": true,
-      "allow_exceptions": [
-        ".env.example",
-        ".env.sample",
-        ".env.template"
-      ]
+      "allow_exceptions": [".env.example", ".env.sample", ".env.template"]
     },
-    "path_components": [
-      ".git",
-      ".venv",
-      "venv",
-      "env",
-      "__pycache__",
-      ".pytest_cache",
-      ".mypy_cache",
-      ".ruff_cache",
-      "node_modules",
-      ".idea",
-      ".vscode",
-      ".tmp",
-      ".pytest-tmp"
-    ],
-    "archive_extensions": [
-      ".zip",
-      ".tar",
-      ".gz",
-      ".tgz",
-      ".bz2",
-      ".xz",
-      ".zst",
-      ".7z",
-      ".rar"
-    ]
+    "path_components": [".git", ".venv", "venv", "env", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", "node_modules", ".idea", ".vscode", ".tmp", ".pytest-tmp"],
+    "archive_extensions": [".zip", ".tar", ".gz", ".tgz", ".bz2", ".xz", ".zst", ".7z", ".rar"]
   },
   "optional_generated": {
     "allowed": true,
-    "note": "Operator-supplied generated files, each pinned by SHA-256 and byte size, are classified GENERATED and remain subject to every prohibited rule above. The CLI cannot broaden classification or add inclusion rules."
+    "note": "Operator-supplied generated files, each pinned by SHA-256 and byte size, are classified GENERATED and remain subject to the same disjoint closed-world classifier and every prohibited rule. The CLI cannot broaden classification or add inclusion rules."
   }
 }

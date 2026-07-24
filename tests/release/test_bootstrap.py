@@ -98,6 +98,9 @@ def test_bootstrap_materializer_failure_propagates_and_cleans_up(tmp_path):
     head = _init_repo(target)
     venv_src = tmp_path / "venvsrc"
     venv_src.mkdir()
+    sentinel = venv_src / "Scripts"
+    sentinel.mkdir()
+    (sentinel / "python.exe").write_text("stub\n", encoding="utf-8")
     # No materializer script in this synthetic target -> materializer step fails.
     # Failure must propagate (ok False, non-zero exit) AND the temporary junction
     # must still be created and then removed (cleanup does not mask the failure).
@@ -114,3 +117,5 @@ def test_bootstrap_materializer_failure_propagates_and_cleans_up(tmp_path):
     assert summary["ok"] is False
     assert summary["materializer_invoked"] is False
     assert res.returncode != 0
+    # Source venv survives junction cleanup (cleanup deletes only the reparse link).
+    assert (sentinel / "python.exe").read_text(encoding="utf-8") == "stub\n"
