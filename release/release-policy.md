@@ -1,12 +1,35 @@
 # Phase 12G — Release Policy
 
-**Base:** `409e5f3e0770d1bf908d217481994dac3e786c76` · **Policy:**
-`phase12g-release-allowlist-v1` (see `release/release-allowlist.json`).
+**Policy:** `phase12g-release-allowlist-v2` (schema 2, machine-consumable; see
+`release/release-allowlist.json`).
 
 This policy governs the deterministic release candidate produced by
 `scripts/release/build_release_candidate.py`. It is **fail-closed**: any file
 that is not clearly REQUIRED or explicitly OPTIONAL, or that matches a PROHIBITED
 pattern, aborts the build.
+
+## Mechanically authoritative
+
+The builder **loads and schema-validates** `release/release-allowlist.json` from
+the tracked repository and derives its prohibited/required classification
+**from that file** — it does not hard-code the rules. The policy's SHA-256 and
+schema version are recorded in `release-manifest.json`, and the verifier
+independently re-parses the policy embedded in the ZIP and confirms its SHA-256
+matches the manifest. Changing the policy therefore changes the release identity
+deterministically. Command-line input cannot broaden the policy; an
+operator-supplied generated-file allowlist is exact and remains subject to every
+prohibited rule.
+
+## Control-file coverage (explicit)
+
+- `release-manifest.json.files` lists exactly the payload entries (`repo/*`).
+- `FILE_SIZES.json.files` covers payload + manifest (excludes `FILE_SIZES.json`
+  and `SHA256SUMS.txt`).
+- `SHA256SUMS.txt` covers payload + manifest + `FILE_SIZES.json` (excludes
+  `SHA256SUMS.txt` itself).
+
+The verifier enforces these three sets exactly and returns PASS only when every
+control and payload invariant holds; NOT_VERIFIABLE is never treated as PASS.
 
 ## Source of truth
 

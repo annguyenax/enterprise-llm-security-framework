@@ -55,6 +55,39 @@ The following may land from other Phase 12G workstreams. Until integrated, treat
 
 Do **not** document unmerged scripts as if they already exist under `scripts/` on this branch.
 
+### 4a. Integrated release tooling (actual CLIs)
+
+The Phase 12G release tooling is integrated in this tree. Derived from
+`--help` / source:
+
+```powershell
+# Build a deterministic release candidate (policy-enforced, content-free)
+python scripts\release\build_release_candidate.py `
+  --repo-root <REPO> --output-dir <OUTPUT_DIR> `
+  [--expected-head <SHA>] [--expected-branch <BRANCH>] [--base-sha <SHA>] `
+  [--generated-allowlist <JSON>] [--summary-out <JSON>]
+
+# Verify a built candidate (PASS / FAIL / NOT_VERIFIABLE)
+python scripts\release\verify_release_candidate.py --zip <ZIP> [--output <JSON>]
+
+# Bootstrap a fresh checkout (delegates to the integrated materializer)
+powershell -File scripts\release\bootstrap_fresh_checkout.ps1 `
+  -SourceRepo <SRC> -TargetCheckout <TGT> -ExpectedCommit <SHA> `
+  [-CreateVenvJunction -VenvSource <VENV>] [-ReleaseReadiness -BaseTemp <SHORT>] [-DryRun]
+```
+
+The builder writes the ZIP as **`<OUTPUT_DIR>\release-candidate.zip`** (inside
+the output directory). It does **not** create a sibling `<OUTPUT_DIR>.zip`. The
+release classification is enforced from the tracked policy
+`release/release-allowlist.json`, whose SHA-256 and schema are recorded in the
+ZIP's `release-manifest.json` and re-validated by the verifier.
+
+- **Vulnerability status is `NOT_CHECKED`** — the dependency inventory queries no
+  index or vulnerability service and makes no vulnerability-free claim.
+- **Public CI is not equivalent to the private full suite** — the public
+  workflow runs synthetic tests only and cannot access the git-ignored private
+  benchmark artifacts.
+
 ---
 
 ## 5. Evidence root layout (external to git)

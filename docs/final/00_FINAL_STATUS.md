@@ -89,7 +89,7 @@ Unsupported aggregate holdout metrics from that attempt are **not** final thesis
 ## 6. What remains (open program items)
 
 1. Explicit thesis decision: non-holdout primary claims **or** new governance-valid blind/independent evaluation.  
-2. Optional Phase 12G integration of CI/private-artifact workflows (**EXPECTED AFTER PHASE 12G INTEGRATION**).  
+2. Public Phase 12G CI/policy gates and release tooling are **INTEGRATED**; only the private-artifact CI delivery channel and an automated signed-checksum archive job remain **EXPECTED AFTER PHASE 12G INTEGRATION**.  
 3. Secrets/license/archive freeze for public or faculty delivery.  
 4. Demo dry-run on the defense machine.  
 5. Maintainer final signature on claims matrix.

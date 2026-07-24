@@ -113,7 +113,10 @@ try {
                  "--include-redteam-prompts")
     if ($DryRun) { $matArgs += "--dry-run" }
     & $python @matArgs | Out-Null
-    if ($LASTEXITCODE -ne 0) { Stop-Bootstrap "materializer failed (exit $LASTEXITCODE)" }
+    $materializerExit = $LASTEXITCODE
+    $summary.materializer_exit = $materializerExit
+    # Native-command failure MUST propagate (use $LASTEXITCODE, not $?).
+    if ($materializerExit -ne 0) { $script:code = $materializerExit; Stop-Bootstrap "materializer failed (exit $materializerExit)" }
     $summary.materializer_invoked = $true
     $summary.steps += "materializer completed"
 
@@ -126,18 +129,23 @@ try {
         if ([string]::IsNullOrWhiteSpace($BaseTemp)) { Stop-Bootstrap "BaseTemp is required for release readiness" }
         $verify = Join-Path $TargetCheckout "scripts\verify_phase.ps1"
         & powershell -ExecutionPolicy Bypass -File $verify -ReleaseReadiness -BaseTemp $BaseTemp | Out-Null
+        $readinessExit = $LASTEXITCODE
         $summary.release_readiness_run = $true
-        $summary.release_readiness_exit = $LASTEXITCODE
-        $summary.steps += "release readiness completed (exit $LASTEXITCODE)"
+        $summary.release_readiness_exit = $readinessExit
+        # Native-command failure MUST propagate (use $LASTEXITCODE, not $?).
+        if ($readinessExit -ne 0) { $script:code = $readinessExit; Stop-Bootstrap "release readiness failed (exit $readinessExit)" }
+        $summary.steps += "release readiness completed (exit $readinessExit)"
     }
 
-    $summary.ok = $true
+    # Success disposition only after every selected required step passed.
     $code = 0
 }
 catch {
     if ($_.Exception.Message -ne "STOP") {
         $summary.steps += ("error: " + $_.Exception.Message)
     }
+    # Preserve the first meaningful failure code; never lower it to success.
+    if ($code -eq 0) { $code = 1 }
 }
 finally {
     if ($junctionMade -and (Test-Path $junctionPath)) {
@@ -145,9 +153,17 @@ finally {
             Remove-Item -LiteralPath $junctionPath -Recurse -Force -ErrorAction Stop
             $summary.junction_removed = $true
         } catch {
+            $summary.steps += ("cleanup error: could not remove temporary junction " + $junctionPath)
             Write-Warning ("could not remove temporary junction: " + $junctionPath)
+            # A cleanup failure affects integrity; escalate but never mask an
+            # earlier failure code.
+            if ($code -eq 0) { $code = 3 }
         }
     }
+    # ok is derived from the final exit code, so it can never be true after a
+    # failed required step or a failed cleanup.
+    $summary.ok = ($code -eq 0)
+    $summary.exit_code = $code
     $summary.steps = @($summary.steps)
     Write-Output ($summary | ConvertTo-Json -Depth 6)
     exit $code

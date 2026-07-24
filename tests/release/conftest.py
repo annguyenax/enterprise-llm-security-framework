@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -21,6 +22,11 @@ def _load(name: str, filename: str):
 
 
 @pytest.fixture(scope="session")
+def common():
+    return _load("g12_release_common", "release_common.py")
+
+
+@pytest.fixture(scope="session")
 def builder():
     return _load("g12_build_release", "build_release_candidate.py")
 
@@ -30,21 +36,39 @@ def verifier():
     return _load("g12_verify_release", "verify_release_candidate.py")
 
 
+def valid_policy(required_present):
+    """A minimal valid schema-2 policy JSON string."""
+    return json.dumps({
+        "schema_version": 2,
+        "policy_id": "phase12g-test-policy-v2",
+        "fail_closed": True,
+        "prohibited": {
+            "extensions": [".jsonl", ".db", ".sqlite", ".sqlite3", ".pem", ".key", ".p12", ".pfx"],
+            "exact_names": ["result.json", "credentials.json", "credential.json",
+                            "secrets.json", "id_rsa", "id_ed25519"],
+            "env": {"prohibit_dotenv": True, "allow_exceptions": [".env.example", ".env.sample", ".env.template"]},
+            "path_components": [".git", ".venv", "venv", "env", "__pycache__",
+                               ".pytest_cache", ".mypy_cache", ".ruff_cache", "node_modules",
+                               ".idea", ".vscode", ".tmp", ".pytest-tmp"],
+        },
+        "required_present": list(required_present),
+        "optional_generated": {"allowed": True},
+    }, indent=2)
+
+
 def _git(repo: Path, *args: str) -> str:
-    result = subprocess.run(
+    return subprocess.run(
         ["git", "-C", str(repo),
-         "-c", "user.email=phase12g@example.invalid",
-         "-c", "user.name=Phase12G Test",
-         "-c", "commit.gpgsign=false",
-         *args],
+         "-c", "user.email=phase12g@example.invalid", "-c", "user.name=Phase12G Test",
+         "-c", "commit.gpgsign=false", *args],
         capture_output=True, text=True, check=True,
-    )
-    return result.stdout
+    ).stdout
 
 
 @pytest.fixture()
 def synthetic_repo(tmp_path):
-    """A small committed git repo with tracked source + docs and a .gitignore."""
+    """A committed git repo with tracked source/docs, a .gitignore, and a valid
+    machine-consumable release policy that references only files it contains."""
     repo = tmp_path / "repo"
     repo.mkdir()
     _git(repo, "init", "-q")
@@ -54,11 +78,10 @@ def synthetic_repo(tmp_path):
     (repo / ".env.example").write_text("TOKEN=REPLACE_ME\n", encoding="utf-8")
     (repo / "src").mkdir()
     (repo / "src" / "app.py").write_text("print('hello')\n", encoding="utf-8")
-    (repo / "docs").mkdir()
-    (repo / "docs" / "guide.md").write_text("# Guide\n", encoding="utf-8")
-    manifests = repo / "datasets" / "v2" / "manifests"
-    manifests.mkdir(parents=True)
-    (manifests / "benchmark-v2-manifest.json").write_text('{"manifest_status":"final"}\n', encoding="utf-8")
+    (repo / "release").mkdir()
+    required = ["release/release-allowlist.json", "release/release-policy.md"]
+    (repo / "release" / "release-allowlist.json").write_text(valid_policy(required), encoding="utf-8")
+    (repo / "release" / "release-policy.md").write_text("# policy\n", encoding="utf-8")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "initial")
     return repo
