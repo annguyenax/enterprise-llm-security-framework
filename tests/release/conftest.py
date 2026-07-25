@@ -167,3 +167,9 @@ def git(synthetic_repo):
     def _call(*args: str) -> str:
         return _git(synthetic_repo, *args)
     return _call
+
+
+@pytest.fixture()
+def policy_file(synthetic_repo):
+    """The EXTERNAL trusted policy file (the tracked policy in the synthetic repo)."""
+    return synthetic_repo / "release" / "release-allowlist.json"

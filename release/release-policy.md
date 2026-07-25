@@ -64,6 +64,39 @@ names, and malformed archives — **names/metadata only, never nested content**.
 The single tracked archive `bao-cao-dinh-ky-01-ptit.zip` (LaTeX periodic-report
 source) is classified this way by explicit operator decision.
 
+## Mandatory external trust anchor (verification)
+
+A candidate can never establish its own trust root. The verifier returns **PASS
+only** when an **external trusted policy file** is supplied independently of the
+candidate (`--expected-policy-file`): the verifier reads those trusted bytes,
+schema-validates them, uses them for payload classification, and requires the
+candidate-embedded policy bytes and the manifest policy identity to equal them
+exactly. A trusted SHA alone (`--expected-policy-sha256`), or no anchor at all,
+yields **NOT_VERIFIABLE — never PASS** (a candidate-self-consistency audit only,
+with a non-PASS exit code). There is no `candidate_anchored` PASS mode. The
+builder verifies both the staged and the published ZIP against the exact tracked
+policy file it loaded.
+
+When **generated files are present**, PASS additionally requires an external
+trusted generated-allowlist anchor (`--expected-generated-sha256`, the SHA-256 of
+the operator-supplied generated allowlist); without it the result is
+NOT_VERIFIABLE. The manifest encodes a canonical `generated` object
+(`{"count": N, "allowlist_sha256": …}`); the zero-generated state is exactly
+`{"count": 0, "allowlist_sha256": null}`. A generated row must carry
+`source="generated"`, `classification="GENERATED"`, the reserved generated
+rule ID and `rule_form="generated"` together; tracked rows may carry none of
+those markers.
+
+## Content-free failure contract
+
+Candidate-controlled values (entry/nested names, paths, manifest/policy/rule/
+branch strings, malformed JSON/Unicode, OS/zip exception text) are **never**
+emitted in findings, summaries, stderr or exceptions. Every parser/ZIP/filesystem
+failure is converted at a single boundary into a structured result carrying only
+a stable reason code, `content_free: true`, and safe identifiers (ordinal index,
+count, or the SHA-256 of the offending value). Uncontrolled tracebacks and raw
+exception messages are suppressed.
+
 ## Control-file coverage (explicit)
 
 - `release-manifest.json.files` lists exactly the payload entries (`repo/*`).

@@ -79,6 +79,17 @@ powershell -File scripts\release\bootstrap_fresh_checkout.ps1 `
 The builder writes the ZIP as **`<OUTPUT_DIR>\release-candidate.zip`** (inside
 the output directory). It does **not** create a sibling `<OUTPUT_DIR>.zip`.
 
+- **Mandatory external trust anchor.** The verifier returns **PASS only** when an
+  external trusted policy file is supplied (`--expected-policy-file`); the
+  candidate-embedded policy and manifest identity must equal those trusted bytes,
+  which are used for classification. A trusted SHA alone, or no anchor, yields
+  **NOT_VERIFIABLE, never PASS** — a candidate cannot self-anchor. When generated
+  files are present, PASS also requires an external generated-allowlist anchor.
+  The default `verify_release_candidate.py` invocation therefore requires
+  `--expected-policy-file`.
+- **Content-free failures.** Candidate-controlled names/paths/strings are never
+  emitted in failure output; findings carry only stable reason codes,
+  `content_free: true`, and safe indices/hashes. No raw values or tracebacks.
 - **Disjoint closed-world policy.** Classification is enforced from the tracked
   policy `release/release-allowlist.json` (schema 4), whose `policy_id`, schema
   version and SHA-256 are recorded in the ZIP's `release-manifest.json` and

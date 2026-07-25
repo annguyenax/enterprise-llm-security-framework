@@ -3,7 +3,7 @@
 **Document class:** Phase 12G maintainer / thesis handoff  
 **Implementation base (security-effectiveness candidate freeze):** `93ad09ddea90eb9712e82f3df5beacbd94399b9a`  
 **Phase 12F accepted integration HEAD:** `409e5f3e0770d1bf908d217481994dac3e786c76`  
-**This documentation branch:** `phase-12g-grok-final-docs`  
+**This documentation branch:** `phase-12g-integration` (docs authored on `phase-12g-grok-final-docs`)\
 **This package:** documentation only under `docs/final/**`
 
 ---

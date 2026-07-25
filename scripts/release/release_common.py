@@ -70,7 +70,7 @@ CONTROL_FILES = (MANIFEST_NAME, CHECKSUMS_NAME, SIZES_NAME)
 PAYLOAD_PREFIX = "repo/"
 POLICY_RELPATH = "release/release-allowlist.json"
 POLICY_SCHEMA_VERSION = 4
-MANIFEST_SCHEMA_VERSION = 4
+MANIFEST_SCHEMA_VERSION = 5
 BUILDER_TOOL = "build_release_candidate"
 
 # Closed-world classifications and rule forms.
@@ -103,9 +103,10 @@ ZIP_POLICY_CANON = {
 
 # Exact manifest schema key sets (schema 4).
 MANIFEST_TOP_KEYS = frozenset(
-    {"schema_version", "builder", "repository", "policy", "counts",
+    {"schema_version", "builder", "repository", "policy", "generated", "counts",
      "control_coverage", "content_controls", "zip_policy", "files"}
 )
+GENERATED_MANIFEST_KEYS = frozenset({"count", "allowlist_sha256"})
 BUILDER_KEYS = frozenset({"tool", "manifest_schema_version", "archive_inspection_version"})
 REPO_KEYS = frozenset({"head", "branch", "base_sha"})
 POLICY_ID_KEYS = frozenset({"policy_id", "schema_version", "sha256"})
@@ -190,6 +191,12 @@ class ReleasePolicy:
 # --------------------------------------------------------------------------- #
 def sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def value_sha256(value: object) -> str:
+    """Content-free digest of a candidate-controlled value for safe reporting.
+    Never returns the raw value; used so findings can identify without leaking."""
+    return hashlib.sha256(repr(value).encode("utf-8", "replace")).hexdigest()
 
 
 def is_hex64(value: object) -> bool:
@@ -402,11 +409,11 @@ def _parse_inclusion_rule(raw: Any) -> InclusionRule:
     if not isinstance(rule_id, str) or not rule_id.strip():
         raise ReleaseError("policy_schema", "rule_id must be a non-empty string")
     klass = obj["class"]
-    if klass not in INCLUSION_CLASSES:
-        raise ReleaseError("policy_schema", f"invalid rule class: {klass}")
+    if not isinstance(klass, str) or klass not in INCLUSION_CLASSES:
+        raise ReleaseError("policy_schema", "invalid rule class")
     form = obj["form"]
-    if form not in RULE_FORMS:
-        raise ReleaseError("policy_schema", f"invalid rule form: {form}")
+    if not isinstance(form, str) or form not in RULE_FORMS:
+        raise ReleaseError("policy_schema", "invalid rule form")
     value = obj["value"]
     if not isinstance(value, str) or not value:
         raise ReleaseError("policy_schema", "rule value must be a non-empty string")
@@ -431,7 +438,8 @@ def _parse_inclusion_rule(raw: Any) -> InclusionRule:
     elif form == FORM_EXACT_NAME:
         if klass != CLASS_ALLOWED:
             raise ReleaseError("policy_schema", "exact_name rule must be ALLOWED")
-        if "/" in value or "\\" in value or value in ("", ".", ".."):
+        if ("/" in value or "\\" in value or ":" in value or value in ("", ".", "..")
+                or any(ch in _CONTROL_CHARS for ch in value)):
             raise ReleaseError("policy_schema", "exact_name value must be a bare filename")
         value = value.casefold()
     return InclusionRule(rule_id=rule_id, klass=klass, form=form, value=value,
