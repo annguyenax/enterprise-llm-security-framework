@@ -467,26 +467,6 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _emit(report: dict[str, Any], output) -> int:
-    """Serialize + write the report through one content-free boundary."""
-    try:
-        text = json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False)
-    except Exception:
-        print(json.dumps({"tool": "verify_release_candidate", "status": "FAIL",
-                          "content_free": True, "findings": [{"code": "output_serialization_failure",
-                          "content_free": True}]}), file=sys.stderr)
-        return 1
-    if output is not None:
-        try:
-            Path(output).write_text(text + "\n", encoding="utf-8")
-        except Exception:
-            print('{"tool":"verify_release_candidate","status":"FAIL","content_free":true,'
-                  '"findings":[{"code":"output_write_failure","content_free":true}]}', file=sys.stderr)
-            return 1
-    print(text)
-    return {"PASS": 0, "NOT_VERIFIABLE": 2}.get(report.get("status"), 1)
-
-
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
@@ -497,7 +477,10 @@ def main(argv: list[str] | None = None) -> int:
             expected_generated_sha256=args.expected_generated_sha256)
     except Exception:  # complete boundary (KeyboardInterrupt/SystemExit still propagate)
         report = _fail("verification_internal_failure")
-    return _emit(report, args.output)
+    exit_code = {"PASS": 0, "NOT_VERIFIABLE": 2}.get(report.get("status"), 1)
+    # THE infallible public emitter: the terminal write itself is inside the boundary.
+    return rc.emit_public_result(report, output_path=args.output, primary_stream=sys.stdout,
+                                 fallback_stream=sys.stderr, exit_code=exit_code)
 
 
 if __name__ == "__main__":

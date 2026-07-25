@@ -106,15 +106,23 @@ the output directory). It does **not** create a sibling `<OUTPUT_DIR>.zip`.
   emitted, and the **builder success summary carries no raw HEAD/branch/policy ID**.
   Both CLIs catch ordinary exceptions at the public boundary and map them to stable
   codes; no raw values, absolute paths, usernames or tracebacks.
-- **Canonical ZIP structure (raw-validated).** One shared contract validates the
-  outer ZIP at the byte level: single-disk EOCD, no trailing bytes, no
-  ZIP64/multi-disk, canonical per-entry flags/versions/attributes/timestamps, empty
-  comments/extra, and local/central header agreement.
-- **Cross-platform path safety.** One authoritative validator rejects
-  drive (`C:`), colon/NTFS-ADS, UNC, backslash, traversal, repeated separators,
-  control chars, reserved device names and whitespace-ambiguous components across
-  every path channel (declaration, manifest, checksum/size keys, outer ZIP entries,
-  nested archive names).
+- **Canonical, gap-free ZIP structure (raw-validated).** One shared contract
+  validates the outer ZIP at the byte level with **complete gap-free byte coverage**
+  (local records contiguous from offset 0 to the central directory to a single-disk
+  EOCD at EOF): no prefix/gap/padding/trailing bytes, and therefore
+  archive-extra-data, digital-signature, ZIP64 and any unaccounted records are
+  rejected. Per-entry canonical flags/versions/attributes and the **DOS timestamp
+  parsed from both local and central headers** must be canonical and agree; a
+  compressed-size ceiling is applied before reading.
+- **Cross-platform path safety (incl. nested archives).** One authoritative
+  validator — used for the declaration, manifest, checksum/size keys, outer ZIP
+  entries **and nested-archive member names** — rejects drive (`C:`), colon/NTFS-ADS,
+  UNC, backslash, traversal, `./`, repeated separators, control/NUL/DEL, reserved
+  device names, and whitespace/normalization-ambiguous components.
+- **Infallible public emission.** Builder and verifier output flows through one
+  shared emitter whose terminal write is inside the failure boundary: a stdout/
+  stderr/output-file failure yields a nonzero exit and a fixed content-free fallback
+  (or no output when both streams fail) — never a traceback, never PASS semantics.
 - **Disjoint closed-world policy.** Classification is enforced from the tracked
   policy `release/release-allowlist.json` (schema 4), whose `policy_id`, schema
   version and SHA-256 are recorded in the ZIP's `release-manifest.json` and

@@ -101,26 +101,57 @@ a mutation of (or deletion of) the source file after snapshot creation cannot
 affect verification. The verifier CLI reads each `--expected-*-file` once and
 constructs the snapshot before touching any candidate byte.
 
-## Canonical ZIP structure (raw-validated)
+## Canonical, gap-free ZIP structure (raw-validated)
 
 The release ZIP is validated at the raw byte level against one canonical contract
-shared by builder and verifier: exactly one single-disk EOCD with an empty comment
-and **no trailing bytes**, no ZIP64/multi-disk/digital-signature records, and per
-entry the exact canonical values — version-made-by/needed, general-purpose flags
-(zero, ASCII names), compression, empty extra/comment, zero disk-start and
-internal attributes, canonical external attributes and fixed timestamp — with
-**local-header/central-directory agreement** (name, flags, compression, CRC and
-sizes). Any deviation fails closed before PASS; no bytes are echoed.
+shared by builder and verifier. It must consist of exactly: canonical local file
+records and their compressed data, one contiguous central directory, and one
+single-disk EOCD ending at EOF — **with complete, gap-free byte coverage**. The
+parser proves the local records start at offset 0, are ordered and contiguous
+(each ends where the next begins), and end exactly at the central-directory
+offset, which ends exactly at the EOCD. There are **no prefix bytes, no gaps, no
+padding, no trailing bytes**, and therefore no room for an archive-extra-data
+record, a digital-signature record, a ZIP64 EOCD/locator, or any unaccounted
+bytes — all of which are rejected (`zip_archive_extra_data`, `zip_digital_signature`,
+`zip_unaccounted_bytes`, `zip_record_gap`).
 
-## Cross-platform path safety
+Per entry the exact canonical values are enforced — version-made-by/needed,
+general-purpose flags (zero, ASCII names), compression, empty extra/comment, zero
+disk-start and internal attributes, canonical external attributes — and the
+**deterministic DOS timestamp is parsed from both the local header and the central
+directory**: each must equal the canonical value and equal each other
+(`zip_local_timestamp`, `zip_central_timestamp`,
+`zip_local_central_timestamp_mismatch`). Local↔central agreement is required for
+name, flags, compression, CRC and sizes. A compressed-size ceiling is applied
+before the candidate is read. Any deviation fails closed before PASS; no raw
+bytes/offsets are echoed.
 
-One authoritative validator governs every path (policy rules, generated
-declaration, manifest payloads, checksum/size keys, outer ZIP entries and nested
-archive names). It rejects absolute/leading-slash, backslash, **any colon
-(drive `C:` and NTFS ADS `file:stream`)**, UNC (`//`/`\\`), repeated separators,
-`.`/`..`, control/NUL/DEL characters, trailing slash, whitespace-ambiguous
-components, and Windows reserved device names (with or without extension),
-case-insensitively.
+## Cross-platform path safety (one validator, including nested archives)
+
+One authoritative validator governs **every** path — policy rules, generated
+declaration, manifest payloads, checksum/size keys, outer ZIP entries **and
+nested-archive member names** (which route through the same validator, not a
+weaker nested-only one). It validates raw `/`-split segments directly (so
+`./x`, `a//b` and leading `./` cannot slip past `PurePosixPath` normalization) and
+rejects absolute/leading-slash, backslash, **any colon (drive `C:` and NTFS ADS
+`file:stream`)**, UNC (`//`/`\\`), repeated separators, `.`/`..`, control/NUL/DEL
+characters, trailing slash, whitespace-ambiguous or trailing-dot components, and
+Windows reserved device names (with or without extension), case-insensitively; and
+it rejects any input whose normalized form differs from the supplied logical
+identity. Nested archive inspection additionally rejects a file/directory logical
+collision. Every unsafe nested name yields the single content-free code
+`archive_unsafe_name`.
+
+## Infallible content-free public emission
+
+All builder and verifier public output flows through one shared emitter that
+serializes to immutable bytes first, then performs the terminal write **inside**
+the failure boundary. A primary stream/`--output` write or flush failure is
+converted to a fixed content-free fallback on the alternate stream and a nonzero
+exit; when both streams fail it returns nonzero without raising and without
+producing output. An output-write failure never yields PASS exit semantics, the
+fallback never interpolates any candidate/exception value, and
+`KeyboardInterrupt`/`SystemExit` still propagate.
 
 ## Contradictory trust anchors fail closed
 

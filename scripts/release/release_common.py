@@ -47,6 +47,7 @@ MAX_FILE_BYTES = 64 * 1024 * 1024  # per-file snapshot ceiling
 # Outer release-ZIP resource bounds.
 MAX_ZIP_ENTRIES = 20000
 MAX_ZIP_TOTAL_UNCOMPRESSED = 512 * 1024 * 1024
+MAX_CANDIDATE_ZIP_BYTES = 256 * 1024 * 1024  # compressed candidate ceiling (before any read)
 
 # Allowed-archive inspection limits (shared by builder and verifier).
 ARCHIVE_INSPECTION_VERSION = 1
@@ -72,6 +73,13 @@ _EOCD_SIG = b"PK\x05\x06"
 _CD_SIG = b"PK\x01\x02"
 _LH_SIG = b"PK\x03\x04"
 _ZIP64_EOCD_LOCATOR_SIG = b"PK\x06\x07"
+_ZIP64_EOCD_SIG = b"PK\x06\x06"
+_ARCHIVE_EXTRA_DATA_SIG = b"PK\x06\x08"
+_DIGITAL_SIGNATURE_SIG = b"PK\x05\x05"
+# Canonical DOS timestamp derived from the deterministic ZIP_TIMESTAMP.
+_ZY, _ZMO, _ZD, _ZH, _ZMI, _ZS = ZIP_TIMESTAMP
+ZIP_DOS_TIME = (_ZH << 11) | (_ZMI << 5) | (_ZS // 2)
+ZIP_DOS_DATE = ((_ZY - 1980) << 9) | (_ZMO << 5) | _ZD
 
 MANIFEST_NAME = "release-manifest.json"
 CHECKSUMS_NAME = "SHA256SUMS.txt"
@@ -464,20 +472,22 @@ def validate_relative_posix(relpath: str, *, label: str) -> str:
         raise ReleaseError("path_absolute", f"{label} must be relative")
     if relpath.endswith("/"):
         raise ReleaseError("path_shape", f"{label} must not be a directory entry")
-    if "//" in relpath:  # repeated separators (PurePosixPath would collapse them)
-        raise ReleaseError("path_traversal", f"{label} has repeated separators")
+    # Validate RAW segments directly (PurePosixPath collapses '.', '//' and leading
+    # './', so parts alone is insufficient).
+    segments = relpath.split("/")
+    for seg in segments:
+        if seg in ("", ".", ".."):
+            raise ReleaseError("path_traversal", f"{label} has an empty/dot component")
+        if seg != seg.strip() or seg.endswith(".") or seg.endswith(" "):
+            raise ReleaseError("path_whitespace", f"{label} has an ambiguous component")
+        base = seg.split(".", 1)[0].upper()
+        if base in _RESERVED_DEVICE_NAMES:
+            raise ReleaseError("path_reserved_name", f"{label} uses a reserved device name")
     pure = PurePosixPath(relpath)
     if pure.is_absolute() or pure.drive or pure.root:
         raise ReleaseError("path_absolute", f"{label} must be relative")
-    parts = pure.parts
-    if any(part in ("", ".", "..") for part in parts):
-        raise ReleaseError("path_traversal", f"{label} has an unsafe component")
-    for part in parts:
-        if part != part.strip() or part.endswith(".") or part.endswith(" "):
-            raise ReleaseError("path_whitespace", f"{label} has an ambiguous component")
-        base = part.split(".", 1)[0].upper()
-        if base in _RESERVED_DEVICE_NAMES:
-            raise ReleaseError("path_reserved_name", f"{label} uses a reserved device name")
+    if tuple(pure.parts) != tuple(segments):  # normalization would change the logical identity
+        raise ReleaseError("path_noncanonical", f"{label} is not in canonical form")
     return pure.as_posix()
 
 
@@ -830,33 +840,25 @@ def classification_summary(paths: list[str], policy: ReleasePolicy) -> dict[str,
 # --------------------------------------------------------------------------- #
 # Shared allowed-archive inspection (snapshot-bound; builder + verifier)
 # --------------------------------------------------------------------------- #
-def _validate_archive_member_name(name: str) -> int:
-    """Validate one nested entry name (names only). Returns its depth. Fails
-    closed on any unsafe shape. Never reads nested content."""
+def _validate_archive_member_name(name: str) -> tuple[str, bool, int]:
+    """Validate one nested entry name via THE authoritative cross-platform path
+    validator (same contract as outer release paths). A single trailing slash is a
+    directory entry; the remaining logical path is validated identically. Returns
+    (normalized_logical_path, is_dir, depth). Never reads nested content."""
     if not isinstance(name, str) or not name:
         raise ReleaseError("archive_invalid_name", "archive entry name is empty")
-    if any(ch in _CONTROL_CHARS for ch in name):
-        raise ReleaseError("archive_control_char", "archive entry name has control characters")
-    if "\\" in name:
-        raise ReleaseError("archive_backslash", "archive entry name has a backslash")
-    if ":" in name:
-        raise ReleaseError("archive_drive", "archive entry name has a colon (drive/ADS)")
-    stripped = name[:-1] if name.endswith("/") else name
-    if not stripped:
-        raise ReleaseError("archive_invalid_name", "archive entry name is only a slash")
-    pure = PurePosixPath(stripped)
-    if pure.is_absolute() or stripped.startswith("/"):
-        raise ReleaseError("archive_absolute", "archive entry name is absolute")
-    if pure.drive:
-        raise ReleaseError("archive_drive", "archive entry name is drive-qualified")
-    if stripped.startswith("//"):
-        raise ReleaseError("archive_unc", "archive entry name is UNC-like")
-    parts = pure.parts
-    if any(p in ("", ".", "..") for p in parts):
-        raise ReleaseError("archive_traversal", "archive entry name has traversal/empty components")
-    if len(parts) > MAX_ARCHIVE_DEPTH:
+    is_dir = name.endswith("/")
+    stripped = name[:-1] if is_dir else name
+    if not stripped or stripped.endswith("/"):
+        raise ReleaseError("archive_invalid_name", "archive entry name has an empty component")
+    try:
+        norm = validate_relative_posix(stripped, label="archive entry")
+    except ReleaseError as exc:  # map every path_* code to a single content-free archive code
+        raise ReleaseError("archive_unsafe_name", "allowed archive has an unsafe nested name") from exc
+    depth = len(PurePosixPath(norm).parts)
+    if depth > MAX_ARCHIVE_DEPTH:
         raise ReleaseError("archive_depth", "archive entry name is too deep")
-    return len(parts)
+    return norm, is_dir, depth
 
 
 def inspect_archive_bytes(data: bytes, policy: ReleasePolicy, *, rule_id: str,
@@ -884,6 +886,8 @@ def inspect_archive_bytes(data: bytes, policy: ReleasePolicy, *, rule_id: str,
             total_name = 0
             max_name = 0
             max_depth = 0
+            file_logical: set[str] = set()
+            dir_logical: set[str] = set()
             for info in infos:
                 if info.flag_bits & 0x1:
                     raise ReleaseError("archive_encrypted", "allowed archive has an encrypted entry")
@@ -896,14 +900,17 @@ def inspect_archive_bytes(data: bytes, policy: ReleasePolicy, *, rule_id: str,
                 total_name += nb
                 if total_name > MAX_TOTAL_NAME_BYTES:
                     raise ReleaseError("archive_total_names_too_long", "nested entry names exceed the total limit")
-                depth = _validate_archive_member_name(name)
+                norm, is_dir, depth = _validate_archive_member_name(name)  # shared authoritative validator
+                (dir_logical if is_dir else file_logical).add(norm.casefold())
                 max_depth = max(max_depth, depth)
                 max_name = max(max_name, nb)
-                if not name.endswith("/"):
-                    if classify_prohibited_absolute(name, policy) is not None:
+                if not is_dir:
+                    if classify_prohibited_absolute(norm, policy) is not None:
                         raise ReleaseError("archive_prohibited_nested", "allowed archive has a prohibited nested name")
-                    if PurePosixPath(name).suffix.casefold() in policy.prohibited_archive_extensions:
+                    if PurePosixPath(norm).suffix.casefold() in policy.prohibited_archive_extensions:
                         raise ReleaseError("archive_nested_archive", "allowed archive contains a nested archive")
+            if file_logical & dir_logical:
+                raise ReleaseError("archive_file_dir_collision", "a nested name is both a file and a directory")
     except zipfile.BadZipFile as exc:
         raise ReleaseError("archive_malformed", "allowed archive is not a readable ZIP") from exc
     except (NotImplementedError, RuntimeError) as exc:
@@ -989,14 +996,17 @@ def validate_zip_structure(data: bytes) -> None:
         raise ReleaseError("zip_zip64", "ZIP64 sentinel values present")
     if etot > MAX_ZIP_ENTRIES:
         raise ReleaseError("zip_too_many_entries", "release ZIP has too many entries")
+    if not (0 <= cdoff <= cdoff + cdsize <= eocd):
+        raise ReleaseError("zip_structure", "central-directory bounds are invalid")
     if cdoff + cdsize != eocd:
         raise ReleaseError("zip_structure", "central directory does not end exactly at EOCD")
     off = cdoff
     names: list[str] = []
+    local_records: list[tuple[int, int]] = []  # (start, end) of each local record
     for _ in range(etot):
         if off + 46 > eocd or data[off:off + 4] != _CD_SIG:
             raise ReleaseError("zip_structure", "malformed central-directory header")
-        (vmb, vn, flags, comp, _mt, _md, crc, csz, usz, nl, el, cl,
+        (vmb, vn, flags, comp, cmt, cmd, crc, csz, usz, nl, el, cl,
          dstart, iattr, eattr, loff) = struct.unpack("<HHHHHHIIIHHHHHII", data[off + 4:off + 46])
         end = off + 46 + nl + el + cl
         if end > eocd:
@@ -1010,6 +1020,8 @@ def validate_zip_structure(data: bytes) -> None:
             raise ReleaseError("zip_flags", "non-canonical general-purpose flags")
         if comp not in SUPPORTED_COMPRESSION:
             raise ReleaseError("zip_unsupported_compression", "non-canonical compression method")
+        if cmt != ZIP_DOS_TIME or cmd != ZIP_DOS_DATE:
+            raise ReleaseError("zip_central_timestamp", "non-canonical central DOS timestamp")
         if el != 0 or cl != 0:
             raise ReleaseError("zip_noncanonical_metadata", "central header has extra/comment bytes")
         if dstart != ZIP_DISK_CANONICAL:
@@ -1023,15 +1035,23 @@ def validate_zip_structure(data: bytes) -> None:
         except UnicodeDecodeError as exc:
             raise ReleaseError("zip_nonascii_name", "non-ASCII entry name with canonical flags") from exc
         validate_relative_posix(name, label="zip entry")
-        # Local header agreement.
-        if loff + 30 > cdoff or data[loff:loff + 4] != _LH_SIG:
+        # Local header agreement (including DOS timestamp parsed from raw local bytes).
+        if not (0 <= loff <= loff + 30 <= cdoff) or data[loff:loff + 4] != _LH_SIG:
             raise ReleaseError("zip_structure", "malformed local header")
-        (lvn, lflags, lcomp, _lmt, _lmd, lcrc, lcsz, lusz, lnl, lel) = struct.unpack(
+        (lvn, lflags, lcomp, lmt, lmd, lcrc, lcsz, lusz, lnl, lel) = struct.unpack(
             "<HHHHHIIIHH", data[loff + 4:loff + 30])
         lname = data[loff + 30:loff + 30 + lnl]
         if (lvn != vn or lflags != flags or lcomp != comp or lcrc != crc
                 or lcsz != csz or lusz != usz or lname != raw_name or lel != 0):
             raise ReleaseError("zip_local_central_mismatch", "local header disagrees with central directory")
+        if lmt != ZIP_DOS_TIME or lmd != ZIP_DOS_DATE:
+            raise ReleaseError("zip_local_timestamp", "non-canonical local DOS timestamp")
+        if lmt != cmt or lmd != cmd:
+            raise ReleaseError("zip_local_central_timestamp_mismatch", "local/central DOS timestamp disagree")
+        local_end = loff + 30 + lnl + lel + csz
+        if local_end > cdoff:
+            raise ReleaseError("zip_structure", "local record overruns the central directory")
+        local_records.append((loff, local_end))
         names.append(name)
         off = end
     if off != eocd:
@@ -1040,16 +1060,47 @@ def validate_zip_structure(data: bytes) -> None:
         raise ReleaseError("zip_duplicate", "duplicate entry names")
     if len({x.casefold() for x in names}) != len(names):
         raise ReleaseError("zip_case_collision", "case-colliding entry names")
+    # Prove complete, gap-free byte coverage of the local-record region [0, cdoff):
+    # ordered, contiguous, non-overlapping, starting at 0 and ending exactly at cdoff.
+    # Any gap is an archive-extra-data / digital-signature / unaccounted-bytes record.
+    cursor = 0
+    for start, rec_end in sorted(local_records):
+        if start != cursor:
+            sig = data[cursor:cursor + 4]
+            if sig == _ARCHIVE_EXTRA_DATA_SIG:
+                raise ReleaseError("zip_archive_extra_data", "archive-extra-data record present")
+            if sig == _DIGITAL_SIGNATURE_SIG or sig == _ZIP64_EOCD_SIG or sig == _ZIP64_EOCD_LOCATOR_SIG:
+                raise ReleaseError("zip_digital_signature", "unsupported structural record present")
+            raise ReleaseError("zip_record_gap" if start > cursor else "zip_unaccounted_bytes",
+                               "unaccounted bytes between local records")
+        cursor = rec_end
+    if cursor != cdoff:
+        sig = data[cursor:cursor + 4]
+        if sig == _ARCHIVE_EXTRA_DATA_SIG:
+            raise ReleaseError("zip_archive_extra_data", "archive-extra-data record before central directory")
+        if sig in (_DIGITAL_SIGNATURE_SIG, _ZIP64_EOCD_SIG, _ZIP64_EOCD_LOCATOR_SIG):
+            raise ReleaseError("zip_digital_signature", "unsupported structural record before central directory")
+        raise ReleaseError("zip_unaccounted_bytes", "unaccounted bytes before the central directory")
 
 
 def read_zip_entries(zip_path: Path) -> dict[str, bytes]:
     """Reopen a ZIP and return entry bytes, applying outer resource bounds, the
     canonical raw-structure contract and safe-path validation. Never extracts.
     Maps unsupported/encrypted/malformed archives to controlled ReleaseError."""
+    p = Path(zip_path)
     try:
-        raw = Path(zip_path).read_bytes()
+        size = p.stat().st_size
+    except OSError as exc:
+        raise ReleaseError("candidate_io_failure", "release ZIP could not be stat'd") from exc
+    if size > MAX_CANDIDATE_ZIP_BYTES:  # ceiling BEFORE any allocation/read
+        raise ReleaseError("zip_too_large", "candidate ZIP exceeds the size ceiling")
+    try:
+        with open(p, "rb") as handle:
+            raw = handle.read(MAX_CANDIDATE_ZIP_BYTES + 1)
     except OSError as exc:
         raise ReleaseError("candidate_io_failure", "release ZIP could not be read") from exc
+    if len(raw) > MAX_CANDIDATE_ZIP_BYTES:
+        raise ReleaseError("zip_too_large", "candidate ZIP exceeds the size ceiling")
     validate_zip_structure(raw)  # canonical EOCD/central/local metadata, single-disk, safe names
     try:
         with zipfile.ZipFile(io.BytesIO(raw), "r") as archive:
@@ -1112,3 +1163,60 @@ def hardlink_no_clobber(src: Path, dst: Path) -> None:
         raise ReleaseError("destination_exists", "final destination already exists") from exc
     except OSError as exc:
         raise ReleaseError("hardlink_unsupported", "atomic hard-link publication is not supported here") from exc
+
+
+# --------------------------------------------------------------------------- #
+# Infallible content-free public emission
+# --------------------------------------------------------------------------- #
+# Precomputed fixed ASCII fallback — no dynamic interpolation of any value.
+PUBLIC_OUTPUT_FAILURE_BYTES = (
+    b'{\n  "content_free": true,\n  "error_code": "public_output_failure",\n'
+    b'  "schema_version": 1,\n  "status": "FAIL",\n  "tool": "release"\n}\n'
+)
+
+
+def _write_stream_bytes(stream, data: bytes) -> bool:
+    """Write bytes to a text/binary stream, flushing. Returns True on success,
+    False on ANY ordinary failure (never raises for ordinary errors).
+    KeyboardInterrupt/SystemExit (BaseException) still propagate."""
+    try:
+        buffer = getattr(stream, "buffer", None)
+        if buffer is not None:
+            buffer.write(data)
+            buffer.flush()
+        else:
+            stream.write(data.decode("ascii", "replace"))
+            stream.flush()
+        return True
+    except Exception:
+        return False
+
+
+def emit_public_result(payload: dict, *, output_path, primary_stream, fallback_stream,
+                       exit_code: int) -> int:
+    """THE single content-free public emitter. Serializes to immutable bytes first,
+    then writes the optional output file and the primary stream; on ANY write/flush
+    failure it emits a fixed content-free fallback on the alternate stream (never
+    reusing candidate/exception text) and returns a nonzero exit code. When both
+    streams fail it returns nonzero WITHOUT raising and WITHOUT producing output. An
+    output-write failure never yields PASS exit semantics."""
+    try:
+        data = (json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True) + "\n").encode("utf-8")
+    except Exception:
+        if not _write_stream_bytes(primary_stream, PUBLIC_OUTPUT_FAILURE_BYTES):
+            _write_stream_bytes(fallback_stream, PUBLIC_OUTPUT_FAILURE_BYTES)
+        return max(exit_code, 1)
+    if output_path is not None:
+        try:
+            with open(output_path, "wb") as handle:
+                handle.write(data)
+                handle.flush()
+        except Exception:
+            if not _write_stream_bytes(primary_stream, PUBLIC_OUTPUT_FAILURE_BYTES):
+                _write_stream_bytes(fallback_stream, PUBLIC_OUTPUT_FAILURE_BYTES)
+            return max(exit_code, 1)
+    if _write_stream_bytes(primary_stream, data):
+        return exit_code
+    # Primary stream failed: fixed content-free fallback on the alternate stream.
+    _write_stream_bytes(fallback_stream, PUBLIC_OUTPUT_FAILURE_BYTES)
+    return max(exit_code, 1)

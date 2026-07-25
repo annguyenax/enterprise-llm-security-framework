@@ -731,7 +731,7 @@ def test_archive_traversal_nested_name_direct(common, synthetic_repo):
     with pytest.raises(common.ReleaseError) as e:
         common.inspect_archive_bytes(data, pol, rule_id="r",
                                      payload_sha=common.sha256_bytes(data), payload_size=len(data))
-    assert e.value.code == "archive_traversal"
+    assert e.value.code == "archive_unsafe_name"
 
 
 def test_archive_encrypted_entry_fails(common, synthetic_repo):
@@ -990,19 +990,19 @@ def test_archive_case_collision_fails(common, apol):
 def test_archive_absolute_name_fails(common, apol):
     with pytest.raises(common.ReleaseError) as e:
         _inspect(common, apol, make_zip({"/etc/x.tex": b"1"}))
-    assert e.value.code in {"archive_absolute", "archive_traversal"}
+    assert e.value.code == "archive_unsafe_name"
 
 
 def test_archive_drive_name_fails(common, apol):
     with pytest.raises(common.ReleaseError) as e:
         _inspect(common, apol, make_zip({"C:/x.tex": b"1"}))
-    assert e.value.code in {"archive_drive", "archive_backslash"}
+    assert e.value.code == "archive_unsafe_name"
 
 
 def test_archive_control_char_name_fails(common, apol):
     with pytest.raises(common.ReleaseError) as e:
         _inspect(common, apol, make_zip({"bad\x01name.tex": b"1"}))
-    assert e.value.code == "archive_control_char"
+    assert e.value.code == "archive_unsafe_name"
 
 
 def test_archive_prohibited_nested_fails(common, apol):
@@ -1300,3 +1300,232 @@ def test_verifier_internal_exception_content_free(verifier, monkeypatch, built_z
     assert r["status"] == "FAIL" and r["content_free"] is True
     assert any(f["code"] in {"verification_internal_failure", "candidate_unsupported_feature"} for f in r["findings"])
     assert "ADMIN" not in json.dumps(r) and "token" not in json.dumps(r)
+
+
+# =========================================================================== #
+# V7 Phase C — infallible public emission
+# =========================================================================== #
+class _FailStream:
+    """A stream whose write/flush always raise an ordinary exception."""
+    def __init__(self):
+        self.buffer = self
+    def write(self, *a, **k):
+        raise OSError(28, "No space left on device", r"C:\Users\ADMIN\out.json")
+    def flush(self):
+        raise OSError(28, "No space left on device")
+
+
+class _CaptureStream:
+    def __init__(self):
+        import io as _io
+        self.buffer = _io.BytesIO()
+    def write(self, s):
+        self.buffer.write(s.encode() if isinstance(s, str) else s)
+    def flush(self):
+        pass
+
+
+def test_emit_normal_success(common):
+    prim = _CaptureStream(); fb = _CaptureStream()
+    rc_code = common.emit_public_result({"status": "PASS", "content_free": True}, output_path=None,
+                                        primary_stream=prim, fallback_stream=fb, exit_code=0)
+    assert rc_code == 0 and b'"status": "PASS"' in prim.buffer.getvalue()
+
+
+def test_emit_primary_write_failure_falls_back_nonzero(common):
+    fb = _CaptureStream()
+    rc_code = common.emit_public_result({"status": "PASS"}, output_path=None,
+                                        primary_stream=_FailStream(), fallback_stream=fb, exit_code=0)
+    assert rc_code != 0  # a PASS whose output failed must NOT keep PASS exit semantics
+    assert b"public_output_failure" in fb.buffer.getvalue()
+    assert b"ADMIN" not in fb.buffer.getvalue() and b"out.json" not in fb.buffer.getvalue()
+
+
+def test_emit_double_stream_failure_nonthrowing(common):
+    # Both streams fail: must not raise, must return nonzero, output may be absent.
+    rc_code = common.emit_public_result({"status": "PASS"}, output_path=None,
+                                        primary_stream=_FailStream(), fallback_stream=_FailStream(), exit_code=0)
+    assert rc_code != 0
+
+
+def test_emit_output_file_write_failure_nonzero(common, tmp_path):
+    prim = _CaptureStream(); fb = _CaptureStream()
+    bad_output = tmp_path / "nope" / "deep" / "out.json"  # parent dirs do not exist
+    rc_code = common.emit_public_result({"status": "PASS"}, output_path=bad_output,
+                                        primary_stream=prim, fallback_stream=fb, exit_code=0)
+    assert rc_code != 0
+    assert b"public_output_failure" in prim.buffer.getvalue() + fb.buffer.getvalue()
+
+
+def test_emit_serialization_failure_nonzero(common):
+    fb = _CaptureStream()
+    class _Unser:
+        pass
+    rc_code = common.emit_public_result({"x": _Unser()}, output_path=None,
+                                        primary_stream=_FailStream(), fallback_stream=fb, exit_code=0)
+    assert rc_code != 0 and b"public_output_failure" in fb.buffer.getvalue()
+
+
+def test_verifier_cli_normal_pass_emission(verifier, built_zip, policy_file, capsys):
+    rc_code = verifier.main(["--zip", str(built_zip), "--expected-policy-file", str(policy_file)])
+    assert rc_code == 0
+    out = capsys.readouterr().out
+    assert '"status": "PASS"' in out
+
+
+def test_builder_cli_stdout_write_failure_nonzero(builder, synthetic_repo, tmp_path, monkeypatch):
+    # Force the terminal write itself to fail; the emitter must return nonzero and not raise.
+    monkeypatch.setattr(builder.sys, "stdout", _FailStream())
+    monkeypatch.setattr(builder.sys, "stderr", _FailStream())
+    rc_code = builder.main(["--repo-root", str(synthetic_repo), "--output-dir", str(tmp_path / "out")])
+    assert rc_code != 0  # no traceback escaped; nonzero returned
+
+
+# =========================================================================== #
+# V7 Phase E — gap-free ZIP layout / archive-extra-data
+# =========================================================================== #
+def _insert_before_central(common, data: bytes, insert: bytes) -> bytes:
+    import struct
+    eocd = data.rfind(b"PK\x05\x06")
+    disk, cddisk, ethis, etot, cdsize, cdoff, clen = struct.unpack("<HHHHIIH", data[eocd + 4:eocd + 22])
+    new = bytearray(data[:cdoff] + insert + data[cdoff:])
+    new_eocd = eocd + len(insert)
+    struct.pack_into("<I", new, new_eocd + 16, cdoff + len(insert))  # patch EOCD cd offset
+    return bytes(new)
+
+
+def test_zip_archive_extra_data_before_central_fails(common):
+    aed = b"PK\x06\x08" + (0).to_bytes(4, "little")  # archive-extra-data, zero-length payload
+    data = _insert_before_central(common, _canon(common), aed)
+    with pytest.raises(common.ReleaseError) as e:
+        common.validate_zip_structure(data)
+    assert e.value.code == "zip_archive_extra_data"
+
+
+def test_zip_archive_extra_data_nonzero_payload_fails(common):
+    aed = b"PK\x06\x08" + (8).to_bytes(4, "little") + b"HIDDENxx"
+    data = _insert_before_central(common, _canon(common), aed)
+    with pytest.raises(common.ReleaseError) as e:
+        common.validate_zip_structure(data)
+    assert e.value.code == "zip_archive_extra_data"
+
+
+def test_zip_digital_signature_before_central_fails(common):
+    ds = b"PK\x05\x05" + (0).to_bytes(2, "little")
+    data = _insert_before_central(common, _canon(common), ds)
+    with pytest.raises(common.ReleaseError) as e:
+        common.validate_zip_structure(data)
+    assert e.value.code == "zip_digital_signature"
+
+
+def test_zip_unaccounted_bytes_before_central_fails(common):
+    data = _insert_before_central(common, _canon(common), b"UNACCOUNTED-PADDING")
+    with pytest.raises(common.ReleaseError) as e:
+        common.validate_zip_structure(data)
+    assert e.value.code in {"zip_unaccounted_bytes", "zip_record_gap"}
+
+
+def test_zip_prefix_bytes_fails(common):
+    with pytest.raises(common.ReleaseError):
+        common.validate_zip_structure(b"PREFIX" + _canon(common))
+
+
+def test_zip_extra_data_signature_inside_file_data_no_false_positive(common):
+    # A file whose CONTENT contains the archive-extra-data signature must still pass.
+    payload = b"PK\x06\x08" + b"\x00" * 64
+    data = common.deterministic_zip_bytes({"repo/a.txt": payload, "b.json": b"{}"})
+    common.validate_zip_structure(data)  # no raise
+
+
+# =========================================================================== #
+# V7 Phase G — local/central timestamp agreement
+# =========================================================================== #
+def _patch_first_local_dostime(data: bytes, value: int) -> bytes:
+    import struct
+    loff = data.find(b"PK\x03\x04")
+    out = bytearray(data)
+    struct.pack_into("<H", out, loff + 10, value)  # local mod-time field
+    return bytes(out)
+
+
+def _patch_first_central_dostime(data: bytes, value: int) -> bytes:
+    import struct
+    coff = data.find(b"PK\x01\x02")
+    out = bytearray(data)
+    struct.pack_into("<H", out, coff + 12, value)  # central mod-time field
+    return bytes(out)
+
+
+def test_zip_local_timestamp_mutation_fails(common):
+    data = _patch_first_local_dostime(_canon(common), 0x1234)
+    with pytest.raises(common.ReleaseError) as e:
+        common.validate_zip_structure(data)
+    assert e.value.code in {"zip_local_timestamp", "zip_local_central_timestamp_mismatch"}
+
+
+def test_zip_central_timestamp_mutation_fails(common):
+    data = _patch_first_central_dostime(_canon(common), 0x1234)
+    with pytest.raises(common.ReleaseError) as e:
+        common.validate_zip_structure(data)
+    assert e.value.code in {"zip_central_timestamp", "zip_local_central_timestamp_mismatch"}
+
+
+def test_verifier_path_local_timestamp_mutation_cannot_pass(verifier, built_zip, tmp_path, policy_file):
+    # Full verifier path: mutate only a local DOS-time byte in the published-shape ZIP.
+    data = _patch_first_local_dostime(built_zip.read_bytes(), 0x0001)
+    dst = tmp_path / "ts.zip"; dst.write_bytes(data)
+    r = _vr(verifier, dst, policy_file)
+    assert r["status"] == "FAIL"
+    assert any(f["code"] in {"zip_local_timestamp", "zip_local_central_timestamp_mismatch"} for f in r["findings"])
+
+
+# =========================================================================== #
+# V7 Phase I — unified nested-archive path safety
+# =========================================================================== #
+@pytest.mark.parametrize("bad", [
+    "C:/payload.txt", "C:payload.txt", "file.txt:stream", "//server/share/file",
+    "../file", "a/../file", "./file", "a//file",
+    "CON.txt", "AUX", "LPT9.log", " a/file", "a /file",
+])
+def test_nested_archive_unsafe_name_rejected(common, apol, bad):
+    data = make_zip({bad: b"x", "ok.tex": b"y"})
+    with pytest.raises(common.ReleaseError) as e:
+        common.inspect_archive_bytes(data, apol, rule_id="r",
+                                     payload_sha=common.sha256_bytes(data), payload_size=len(data))
+    assert e.value.code in {"archive_unsafe_name", "archive_backslash", "archive_control_char",
+                            "archive_prohibited_nested", "archive_nested_archive"}
+
+
+def test_nested_repeated_separator_rejected(common, apol):
+    data = make_zip({"a//b.tex": b"x"})
+    with pytest.raises(common.ReleaseError) as e:
+        common.inspect_archive_bytes(data, apol, rule_id="r",
+                                     payload_sha=common.sha256_bytes(data), payload_size=len(data))
+    assert e.value.code == "archive_unsafe_name"
+
+
+def test_nested_reserved_device_name_rejected(common, apol):
+    data = make_zip({"dir/CON.tex": b"x"})
+    with pytest.raises(common.ReleaseError) as e:
+        common.inspect_archive_bytes(data, apol, rule_id="r",
+                                     payload_sha=common.sha256_bytes(data), payload_size=len(data))
+    assert e.value.code == "archive_unsafe_name"
+
+
+def test_nested_canonical_safe_names_pass(common, apol):
+    data = make_zip({"fig/a.tex": b"1", "b.bib": b"2", "sub/dir/c.sty": b"3"})
+    meta = common.inspect_archive_bytes(data, apol, rule_id="r",
+                                        payload_sha=common.sha256_bytes(data), payload_size=len(data))
+    assert meta["result"] == "SAFE"
+
+
+# =========================================================================== #
+# V7 Phase J — raw ZIP resource bound before read
+# =========================================================================== #
+def test_read_zip_entries_byte_ceiling(common, tmp_path, monkeypatch):
+    monkeypatch.setattr(common, "MAX_CANDIDATE_ZIP_BYTES", 64)
+    big = tmp_path / "big.zip"
+    big.write_bytes(_canon(common) + b"x" * 200)  # exceeds the ceiling
+    with pytest.raises(common.ReleaseError) as e:
+        common.read_zip_entries(big)
+    assert e.value.code == "zip_too_large"

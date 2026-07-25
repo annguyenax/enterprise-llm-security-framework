@@ -37,7 +37,7 @@ if __package__ in (None, ""):
         CONTROL_COVERAGE_CANON, GENERATED_RULE_ID, MANIFEST_NAME, MANIFEST_SCHEMA_VERSION,
         PAYLOAD_PREFIX, POLICY_RELPATH, SIZES_NAME, ZIP_POLICY_CANON, ReleaseError, ReleasePolicy,
         assert_within, checksum_text, classify_path, classification_summary, deterministic_zip_bytes,
-        exclusive_write, hardlink_no_clobber, inspect_archive_bytes, is_hex40, is_symlink_or_reparse,
+        emit_public_result, exclusive_write, hardlink_no_clobber, inspect_archive_bytes, is_hex40, is_symlink_or_reparse,
         parse_generated_declaration, parse_release_policy, read_snapshot_bytes, read_zip_entries,
         sha256_bytes, trusted_generated_snapshot_from_bytes, trusted_policy_snapshot_from_bytes,
         validate_relative_posix,
@@ -49,7 +49,7 @@ else:
         CONTROL_COVERAGE_CANON, GENERATED_RULE_ID, MANIFEST_NAME, MANIFEST_SCHEMA_VERSION,
         PAYLOAD_PREFIX, POLICY_RELPATH, SIZES_NAME, ZIP_POLICY_CANON, ReleaseError, ReleasePolicy,
         assert_within, checksum_text, classify_path, classification_summary, deterministic_zip_bytes,
-        exclusive_write, hardlink_no_clobber, inspect_archive_bytes, is_hex40, is_symlink_or_reparse,
+        emit_public_result, exclusive_write, hardlink_no_clobber, inspect_archive_bytes, is_hex40, is_symlink_or_reparse,
         parse_generated_declaration, parse_release_policy, read_snapshot_bytes, read_zip_entries,
         sha256_bytes, trusted_generated_snapshot_from_bytes, trusted_policy_snapshot_from_bytes,
         validate_relative_posix,
@@ -386,23 +386,12 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _emit(payload: dict, summary_out, *, to_stderr: bool) -> int:
-    """Serialize + write builder output through one content-free boundary."""
-    try:
-        text = json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False)
-    except Exception:
-        print('{"tool":"build_release_candidate","ok":false,"content_free":true,'
-              '"error_code":"output_serialization_failure"}', file=sys.stderr)
-        return 1
-    if summary_out is not None:
-        try:
-            Path(summary_out).write_text(text + "\n", encoding="utf-8")
-        except Exception:
-            print('{"tool":"build_release_candidate","ok":false,"content_free":true,'
-                  '"error_code":"output_write_failure"}', file=sys.stderr)
-            return 1
-    print(text, file=sys.stderr if to_stderr else sys.stdout)
-    return 1 if to_stderr else 0
+def _emit(payload: dict, summary_out, *, success: bool) -> int:
+    """Emit builder output through THE infallible content-free emitter. Success ->
+    stdout primary (exit 0); failure -> stderr primary (exit 1)."""
+    primary, fallback = (sys.stdout, sys.stderr) if success else (sys.stderr, sys.stdout)
+    return emit_public_result(payload, output_path=summary_out, primary_stream=primary,
+                              fallback_stream=fallback, exit_code=0 if success else 1)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -416,12 +405,12 @@ def main(argv: list[str] | None = None) -> int:
     except ReleaseError as exc:
         # Content-free: emit only the stable code, never the message.
         return _emit({"schema_version": 1, "tool": BUILDER_TOOL, "ok": False,
-                      "error_code": exc.code, "content_free": True}, args.summary_out, to_stderr=True)
+                      "error_code": exc.code, "content_free": True}, args.summary_out, success=False)
     except Exception:  # complete boundary; KeyboardInterrupt/SystemExit still propagate
         return _emit({"schema_version": 1, "tool": BUILDER_TOOL, "ok": False,
                       "error_code": "builder_internal_failure", "content_free": True},
-                     args.summary_out, to_stderr=True)
-    return _emit(summary, args.summary_out, to_stderr=False)
+                     args.summary_out, success=False)
+    return _emit(summary, args.summary_out, success=True)
 
 
 if __name__ == "__main__":
