@@ -119,3 +119,41 @@ def test_bootstrap_materializer_failure_propagates_and_cleans_up(tmp_path):
     assert res.returncode != 0
     # Source venv survives junction cleanup (cleanup deletes only the reparse link).
     assert (sentinel / "python.exe").read_text(encoding="utf-8") == "stub\n"
+
+
+# --------------------------------------------------------------------------- #
+# Phase O (V6): behavioral ReleaseReadiness-failure propagation with stubs
+# --------------------------------------------------------------------------- #
+def test_bootstrap_release_readiness_failure_propagates(tmp_path):
+    target = tmp_path / "target"
+    head = _init_repo(target)
+    (target / "scripts").mkdir()
+    # Stub materializer: exits 0, stages nothing.
+    (target / "scripts" / "materialize_v2_frozen_artifacts.py").write_text(
+        "import sys\nsys.exit(0)\n", encoding="utf-8")
+    # Stub verify_phase.ps1: fails when -ReleaseReadiness is requested.
+    (target / "scripts" / "verify_phase.ps1").write_text(
+        "param([switch]$ReleaseReadiness,[string]$BaseTemp)\n"
+        "if ($ReleaseReadiness) { exit 7 } else { exit 0 }\n", encoding="utf-8")
+    _run_git = ["git", "-C", str(target), "-c", "user.email=t@t.invalid",
+                "-c", "user.name=t", "-c", "commit.gpgsign=false"]
+    subprocess.run(_run_git + ["add", "-A"], check=True, capture_output=True)
+    subprocess.run(_run_git + ["commit", "-q", "-m", "stubs"], check=True, capture_output=True)
+    head = subprocess.run(["git", "-C", str(target), "rev-parse", "HEAD"],
+                          capture_output=True, text=True, check=True).stdout.strip()
+    venv_src = tmp_path / "venvsrc" / "Scripts"; venv_src.mkdir(parents=True)
+    (venv_src / "python.exe").write_text("stub\n", encoding="utf-8")
+    bt = tmp_path / "bt"
+    res = _run(["-SourceRepo", str(tmp_path), "-TargetCheckout", str(target),
+                "-ExpectedCommit", head, "-CreateVenvJunction",
+                "-VenvSource", str(tmp_path / "venvsrc"),
+                "-ReleaseReadiness", "-BaseTemp", str(bt)])
+    summary = _last_json(res.stdout)
+    assert summary["materializer_invoked"] is True
+    assert summary["release_readiness_run"] is True
+    assert summary["release_readiness_exit"] == 7   # nonzero readiness propagates
+    assert summary["ok"] is False                    # success not emitted after failure
+    assert summary["junction_removed"] is True       # cleanup ran in finally
+    assert not (target / ".venv").exists()
+    assert res.returncode != 0
+    assert (venv_src / "python.exe").read_text(encoding="utf-8") == "stub\n"  # source venv intact

@@ -188,48 +188,43 @@ def _check_zip_metadata(zip_path: Path) -> list[dict[str, Any]]:
     return findings
 
 
-def _load_trusted_policy(expected_policy_file, expected_policy_sha256):
-    """Return (trust_mode, trusted_bytes_or_None, trusted_policy_or_None,
-    trusted_sha_or_None). Never trusts the candidate. Contradictory file+SHA
-    anchors fail closed."""
-    if expected_policy_file is not None:
-        path = Path(expected_policy_file).expanduser()
-        if rc.is_symlink_or_reparse(path) or not path.is_file():
-            raise rc.VerificationError("trusted_policy_unreadable", "external policy file is missing")
-        try:
-            trusted_bytes = path.read_bytes()
-        except OSError as exc:
-            raise rc.VerificationError("trusted_policy_unreadable", "external policy file unreadable") from exc
-        trusted_policy = rc.parse_release_policy(trusted_bytes)  # FAIL if malformed
+def _load_trusted_policy(trusted_policy, expected_policy_file, expected_policy_sha256):
+    """Return (trust_mode, snapshot_or_None, trusted_sha_or_None). Accepts an
+    immutable TrustedPolicySnapshot object (preferred) or reads a file ONCE into
+    such a snapshot. Never reopens a path per-call. Contradictory file/SHA fails."""
+    snapshot = None
+    if trusted_policy is not None:
+        snapshot = trusted_policy  # already an immutable snapshot object
+    elif expected_policy_file is not None:
+        snapshot = rc.load_trusted_policy_snapshot(expected_policy_file)  # read once
+    if snapshot is not None:
         if expected_policy_sha256 is not None and (
                 not rc.is_hex64(expected_policy_sha256)
-                or expected_policy_sha256.lower() != trusted_policy.sha256):
+                or expected_policy_sha256.lower() != snapshot.sha256):
             raise rc.VerificationError("contradictory_policy_anchor", "policy file and SHA disagree")
-        return "external_file", trusted_bytes, trusted_policy, trusted_policy.sha256
+        return "external_file", snapshot, snapshot.sha256
     if expected_policy_sha256 is not None:
         if not rc.is_hex64(expected_policy_sha256):
             raise rc.VerificationError("trusted_policy_sha_invalid", "expected policy sha is malformed")
-        return "hash_only", None, None, expected_policy_sha256.lower()
-    return "unanchored", None, None, None
+        return "hash_only", None, expected_policy_sha256.lower()
+    return "unanchored", None, None
 
 
-def _load_trusted_generated(expected_generated_file, expected_generated_sha256):
-    """Return (gen_mode, mapping_or_None, gen_sha_or_None). Parses an EXTERNAL
-    trusted generated declaration; contradictory file+SHA anchors fail closed."""
-    if expected_generated_file is not None:
-        path = Path(expected_generated_file).expanduser()
-        if rc.is_symlink_or_reparse(path) or not path.is_file():
-            raise rc.VerificationError("trusted_generated_unreadable", "external generated declaration is missing")
-        try:
-            raw = path.read_bytes()
-        except OSError as exc:
-            raise rc.VerificationError("trusted_generated_unreadable", "external generated declaration unreadable") from exc
-        mapping, gen_sha = rc.parse_generated_declaration(raw)  # FAIL if malformed
+def _load_trusted_generated(trusted_generated, expected_generated_file, expected_generated_sha256):
+    """Return (gen_mode, snapshot_or_None, gen_sha_or_None). Accepts an immutable
+    TrustedGeneratedSnapshot or reads a declaration file ONCE. Contradictory
+    file/SHA fails closed."""
+    snapshot = None
+    if trusted_generated is not None:
+        snapshot = trusted_generated
+    elif expected_generated_file is not None:
+        snapshot = rc.load_trusted_generated_snapshot(expected_generated_file)  # read once
+    if snapshot is not None:
         if expected_generated_sha256 is not None and (
                 not rc.is_hex64(expected_generated_sha256)
-                or expected_generated_sha256.lower() != gen_sha):
+                or expected_generated_sha256.lower() != snapshot.sha256):
             raise rc.VerificationError("contradictory_generated_anchor", "generated file and SHA disagree")
-        return "external_file", mapping, gen_sha
+        return "external_file", snapshot, snapshot.sha256
     if expected_generated_sha256 is not None:
         if not rc.is_hex64(expected_generated_sha256):
             raise rc.VerificationError("trusted_generated_sha_invalid", "expected generated sha is malformed")
@@ -237,17 +232,20 @@ def _load_trusted_generated(expected_generated_file, expected_generated_sha256):
     return "none", None, None
 
 
-def _verify(zip_path: Path, expected_policy_file, expected_policy_sha256, expected_policy_id,
-            expected_head, expected_generated_file, expected_generated_sha256) -> dict[str, Any]:
-    zip_path = zip_path.expanduser().resolve()
+def _verify(zip_path, trusted_policy, trusted_generated, expected_policy_file, expected_policy_sha256,
+            expected_policy_id, expected_head, expected_generated_file, expected_generated_sha256) -> dict[str, Any]:
+    zip_path = Path(zip_path).expanduser().resolve()
     if rc.is_symlink_or_reparse(zip_path) or not zip_path.is_file():
         return _fail("zip_input")
 
-    # Establish the external trust anchors BEFORE trusting any candidate byte.
-    trust_mode, trusted_bytes, trusted_policy, trusted_sha = _load_trusted_policy(
-        expected_policy_file, expected_policy_sha256)
-    gen_mode, gen_mapping, gen_sha = _load_trusted_generated(
-        expected_generated_file, expected_generated_sha256)
+    # Establish the external trust anchors (immutable snapshots) BEFORE any candidate byte.
+    trust_mode, policy_snapshot, trusted_sha = _load_trusted_policy(
+        trusted_policy, expected_policy_file, expected_policy_sha256)
+    gen_mode, gen_snapshot, gen_sha = _load_trusted_generated(
+        trusted_generated, expected_generated_file, expected_generated_sha256)
+    trusted_bytes = policy_snapshot.raw_bytes if policy_snapshot is not None else None
+    trusted_parsed = policy_snapshot.parsed_policy if policy_snapshot is not None else None
+    gen_mapping = gen_snapshot.as_dict() if gen_snapshot is not None else None
 
     entries = rc.read_zip_entries(zip_path)  # bounded; ReleaseError -> caught by caller
     findings: list[dict[str, Any]] = []
@@ -335,6 +333,15 @@ def _verify(zip_path: Path, expected_policy_file, expected_policy_sha256, expect
         else:
             not_verifiable.append({"code": "generated_anchor_missing", "content_free": True,
                                    "message": "generated payloads present but no external generated declaration supplied"})
+    else:
+        # Zero-generated state: no supplied generated anchor may be silently ignored.
+        if gen_mode == "external_file":
+            # A supplied declaration must be the exact canonical empty declaration.
+            if gen_snapshot.mapping != ():
+                findings.append(_f("generated_declaration_nonempty_in_zero_state"))
+        elif gen_mode == "hash_only":
+            not_verifiable.append({"code": "generated_hash_only", "content_free": True,
+                                   "message": "a generated SHA was supplied without a declaration file"})
 
     # Policy anchoring + payload reclassification.
     embedded_policy = None
@@ -356,7 +363,7 @@ def _verify(zip_path: Path, expected_policy_file, expected_policy_sha256, expect
                     findings.append(_f("policy_bytes_mismatch"))
                 if embedded_policy.sha256 != trusted_sha:
                     findings.append(_f("policy_untrusted"))
-                classify_policy = trusted_policy
+                classify_policy = trusted_parsed
             elif trust_mode == "hash_only":
                 if embedded_policy.sha256 != trusted_sha:
                     findings.append(_f("policy_untrusted"))
@@ -408,6 +415,7 @@ def _verify(zip_path: Path, expected_policy_file, expected_policy_sha256, expect
     else:
         status = "PASS"
     extra: dict[str, Any] = {"policy_trust": trust_mode, "generated_trust": gen_mode,
+                             "immutable_trust_snapshot": policy_snapshot is not None,
                              "generated_count": facts["generated_count"], "payload_count": len(payload),
                              "control_count": len(control), "entry_count": len(entries)}
     if head_matched is not None:  # only a trusted boolean, never the raw candidate HEAD
@@ -415,26 +423,28 @@ def _verify(zip_path: Path, expected_policy_file, expected_policy_sha256, expect
     return _report(status, findings, not_verifiable, **extra)
 
 
-def verify_release_candidate(zip_path: Path, *, expected_policy_file=None,
-                             expected_policy_sha256: str | None = None,
-                             expected_policy_id: str | None = None,
-                             expected_head: str | None = None,
+def verify_release_candidate(zip_path, *, trusted_policy=None, trusted_generated=None,
+                             expected_policy_file=None, expected_policy_sha256: str | None = None,
+                             expected_policy_id: str | None = None, expected_head: str | None = None,
                              expected_generated_file=None,
                              expected_generated_sha256: str | None = None) -> dict[str, Any]:
     """Top-level entry: never raises for candidate-controlled input. Maps every
     parsing failure to a content-free structured FAIL (or NOT_VERIFIABLE). No
-    candidate-controlled value is ever placed in the returned report."""
+    candidate-controlled value is ever placed in the returned report. Accepts
+    immutable TrustedPolicySnapshot / TrustedGeneratedSnapshot objects (preferred,
+    from the builder) or external file paths (CLI)."""
     try:
-        return _verify(zip_path, expected_policy_file, expected_policy_sha256, expected_policy_id,
-                       expected_head, expected_generated_file, expected_generated_sha256)
+        return _verify(zip_path, trusted_policy, trusted_generated, expected_policy_file,
+                       expected_policy_sha256, expected_policy_id, expected_head,
+                       expected_generated_file, expected_generated_sha256)
     except rc.ReleaseError as exc:  # includes VerificationError, JSON/UTF-8/ZIP/duplicate-key/resource
         return _fail(exc.code)
     except (KeyError, TypeError, ValueError):
         return _fail("candidate_schema_invalid")
     except (NotImplementedError, RuntimeError):
         return _fail("candidate_unsupported_feature")
-    except OSError:
-        return _fail("candidate_io_failure")
+    except Exception:  # complete public boundary; never leak an unexpected traceback
+        return _fail("verification_internal_failure")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -457,22 +467,37 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _emit(report: dict[str, Any], output) -> int:
+    """Serialize + write the report through one content-free boundary."""
+    try:
+        text = json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False)
+    except Exception:
+        print(json.dumps({"tool": "verify_release_candidate", "status": "FAIL",
+                          "content_free": True, "findings": [{"code": "output_serialization_failure",
+                          "content_free": True}]}), file=sys.stderr)
+        return 1
+    if output is not None:
+        try:
+            Path(output).write_text(text + "\n", encoding="utf-8")
+        except Exception:
+            print('{"tool":"verify_release_candidate","status":"FAIL","content_free":true,'
+                  '"findings":[{"code":"output_write_failure","content_free":true}]}', file=sys.stderr)
+            return 1
+    print(text)
+    return {"PASS": 0, "NOT_VERIFIABLE": 2}.get(report.get("status"), 1)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    report = verify_release_candidate(
-        args.zip, expected_policy_file=args.expected_policy_file,
-        expected_policy_sha256=args.expected_policy_sha256, expected_policy_id=args.expected_policy_id,
-        expected_head=args.expected_head, expected_generated_file=args.expected_generated_file,
-        expected_generated_sha256=args.expected_generated_sha256)
-    text = json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False)
-    if args.output is not None:
-        args.output.write_text(text + "\n", encoding="utf-8")
-    print(text)
-    if report["status"] == "PASS":
-        return 0
-    if report["status"] == "NOT_VERIFIABLE":
-        return 2
-    return 1
+    try:
+        report = verify_release_candidate(
+            args.zip, expected_policy_file=args.expected_policy_file,
+            expected_policy_sha256=args.expected_policy_sha256, expected_policy_id=args.expected_policy_id,
+            expected_head=args.expected_head, expected_generated_file=args.expected_generated_file,
+            expected_generated_sha256=args.expected_generated_sha256)
+    except Exception:  # complete boundary (KeyboardInterrupt/SystemExit still propagate)
+        report = _fail("verification_internal_failure")
+    return _emit(report, args.output)
 
 
 if __name__ == "__main__":

@@ -62,6 +62,16 @@ SUPPORTED_COMPRESSION = frozenset({zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED})
 ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 ZIP_CREATE_SYSTEM = 3  # unix
 ZIP_EXTERNAL_ATTR = (0o100644 & 0xFFFF) << 16
+# Canonical raw ZIP structure values (as produced by deterministic_zip_bytes).
+ZIP_VERSION_NEEDED = 20
+ZIP_VERSION_MADE_BY = (ZIP_CREATE_SYSTEM << 8) | 20  # 788
+ZIP_FLAGS_CANONICAL = 0
+ZIP_INTERNAL_ATTR_CANONICAL = 0
+ZIP_DISK_CANONICAL = 0
+_EOCD_SIG = b"PK\x05\x06"
+_CD_SIG = b"PK\x01\x02"
+_LH_SIG = b"PK\x03\x04"
+_ZIP64_EOCD_LOCATOR_SIG = b"PK\x06\x07"
 
 MANIFEST_NAME = "release-manifest.json"
 CHECKSUMS_NAME = "SHA256SUMS.txt"
@@ -143,6 +153,11 @@ _ENV_KEYS = frozenset({"prohibit_dotenv", "allow_exceptions"})
 _OPTIONAL_GENERATED_KEYS = frozenset({"allowed", "note"})
 
 _CONTROL_CHARS = frozenset(chr(c) for c in range(32)) | {chr(127)}
+_RESERVED_DEVICE_NAMES = frozenset(
+    {"CON", "PRN", "AUX", "NUL"}
+    | {f"COM{i}" for i in range(1, 10)}
+    | {f"LPT{i}" for i in range(1, 10)}
+)
 
 
 class ReleaseError(Exception):
@@ -172,6 +187,28 @@ class Classification:
     classification: str
     rule_id: str
     rule_form: str
+
+
+@dataclass(frozen=True)
+class TrustedPolicySnapshot:
+    """An immutable trusted policy: exact bytes + SHA-256 + parsed semantics, bound
+    together once. Consumed by both staged and published verification so no mutable
+    pathname is reread between calls."""
+    raw_bytes: bytes
+    sha256: str
+    parsed_policy: "ReleasePolicy"
+
+
+@dataclass(frozen=True)
+class TrustedGeneratedSnapshot:
+    """An immutable trusted generated declaration: exact bytes + SHA-256 + parsed
+    path->(sha256,size) mapping, bound together once."""
+    raw_bytes: bytes
+    sha256: str
+    mapping: tuple[tuple[str, str, int], ...]  # (path, sha256, size_bytes), sorted
+
+    def as_dict(self) -> dict[str, tuple[str, int]]:
+        return {p: (s, z) for p, s, z in self.mapping}
 
 
 @dataclass(frozen=True)
@@ -375,20 +412,72 @@ def parse_generated_declaration(raw: bytes) -> tuple[dict[str, tuple[str, int]],
 
 
 # --------------------------------------------------------------------------- #
+# Immutable trust snapshots (read a trusted file ONCE; bind bytes+sha+semantics)
+# --------------------------------------------------------------------------- #
+def trusted_policy_snapshot_from_bytes(raw: bytes) -> TrustedPolicySnapshot:
+    return TrustedPolicySnapshot(raw_bytes=raw, sha256=sha256_bytes(raw),
+                                 parsed_policy=parse_release_policy(raw))
+
+
+def trusted_generated_snapshot_from_bytes(raw: bytes) -> TrustedGeneratedSnapshot:
+    mapping, sha = parse_generated_declaration(raw)
+    ordered = tuple((p, s, z) for p, (s, z) in sorted(mapping.items()))
+    return TrustedGeneratedSnapshot(raw_bytes=raw, sha256=sha, mapping=ordered)
+
+
+def _read_trusted_bytes(path: object, code: str) -> bytes:
+    p = Path(path).expanduser()
+    if is_symlink_or_reparse(p) or not p.is_file():
+        raise VerificationError(code, "external trusted file is missing")
+    try:
+        return p.read_bytes()
+    except OSError as exc:
+        raise VerificationError(code, "external trusted file unreadable") from exc
+
+
+def load_trusted_policy_snapshot(path: object) -> TrustedPolicySnapshot:
+    return trusted_policy_snapshot_from_bytes(_read_trusted_bytes(path, "trusted_policy_unreadable"))
+
+
+def load_trusted_generated_snapshot(path: object) -> TrustedGeneratedSnapshot:
+    return trusted_generated_snapshot_from_bytes(_read_trusted_bytes(path, "trusted_generated_unreadable"))
+
+
+# --------------------------------------------------------------------------- #
 # Path safety
 # --------------------------------------------------------------------------- #
 def validate_relative_posix(relpath: str, *, label: str) -> str:
+    """THE authoritative cross-platform safe-relative-path validator. Shared by the
+    policy parser, generated declaration, manifest, checksum/size parsers, outer
+    ZIP entries and nested archive names. Rejects drive/colon/ADS/UNC/backslash,
+    control chars, traversal, reserved device names, and whitespace-ambiguous
+    components. Never uses only PurePosixPath.is_absolute()."""
     if not isinstance(relpath, str) or not relpath.strip():
         raise ReleaseError("path_shape", f"{label} must be a non-empty string")
     if "\\" in relpath:
-        raise ReleaseError("path_shape", f"{label} must use POSIX separators")
+        raise ReleaseError("path_backslash", f"{label} must use POSIX separators")
+    if ":" in relpath:  # drive (C:) and NTFS alternate data stream (file:stream)
+        raise ReleaseError("path_colon", f"{label} must not contain a colon")
     if any(ch in _CONTROL_CHARS for ch in relpath):
-        raise ReleaseError("path_shape", f"{label} contains control characters")
+        raise ReleaseError("path_control_char", f"{label} contains control characters")
+    if relpath.startswith("/"):
+        raise ReleaseError("path_absolute", f"{label} must be relative")
+    if relpath.endswith("/"):
+        raise ReleaseError("path_shape", f"{label} must not be a directory entry")
+    if "//" in relpath:  # repeated separators (PurePosixPath would collapse them)
+        raise ReleaseError("path_traversal", f"{label} has repeated separators")
     pure = PurePosixPath(relpath)
     if pure.is_absolute() or pure.drive or pure.root:
         raise ReleaseError("path_absolute", f"{label} must be relative")
-    if any(part in ("", ".", "..") for part in pure.parts):
+    parts = pure.parts
+    if any(part in ("", ".", "..") for part in parts):
         raise ReleaseError("path_traversal", f"{label} has an unsafe component")
+    for part in parts:
+        if part != part.strip() or part.endswith(".") or part.endswith(" "):
+            raise ReleaseError("path_whitespace", f"{label} has an ambiguous component")
+        base = part.split(".", 1)[0].upper()
+        if base in _RESERVED_DEVICE_NAMES:
+            raise ReleaseError("path_reserved_name", f"{label} uses a reserved device name")
     return pure.as_posix()
 
 
@@ -750,13 +839,15 @@ def _validate_archive_member_name(name: str) -> int:
         raise ReleaseError("archive_control_char", "archive entry name has control characters")
     if "\\" in name:
         raise ReleaseError("archive_backslash", "archive entry name has a backslash")
+    if ":" in name:
+        raise ReleaseError("archive_drive", "archive entry name has a colon (drive/ADS)")
     stripped = name[:-1] if name.endswith("/") else name
     if not stripped:
         raise ReleaseError("archive_invalid_name", "archive entry name is only a slash")
     pure = PurePosixPath(stripped)
     if pure.is_absolute() or stripped.startswith("/"):
         raise ReleaseError("archive_absolute", "archive entry name is absolute")
-    if pure.drive or (len(stripped) >= 2 and stripped[1] == ":"):
+    if pure.drive:
         raise ReleaseError("archive_drive", "archive entry name is drive-qualified")
     if stripped.startswith("//"):
         raise ReleaseError("archive_unc", "archive entry name is UNC-like")
@@ -872,12 +963,96 @@ def parse_checksum_text(data: bytes) -> dict[str, str]:
     return result
 
 
+def validate_zip_structure(data: bytes) -> None:
+    """Read-only raw-structure validation of the outer release ZIP: one canonical
+    single-disk EOCD with no trailing bytes/ZIP64/multi-disk, and per-entry
+    central+local headers with the exact canonical flags/versions/attributes and
+    local/central agreement. Names-only path safety. Fails closed with content-free
+    reason codes. Never extracts."""
+    import struct
+    n = len(data)
+    if n < 22:
+        raise ReleaseError("zip_structure", "release ZIP is too small to be canonical")
+    eocd = data.rfind(_EOCD_SIG)
+    if eocd < 0 or eocd + 22 > n:
+        raise ReleaseError("zip_structure", "no End-Of-Central-Directory record")
+    disk, cddisk, ethis, etot, cdsize, cdoff, clen = struct.unpack("<HHHHIIH", data[eocd + 4:eocd + 22])
+    if clen != 0:
+        raise ReleaseError("zip_comment_nonempty", "EOCD records a non-empty archive comment")
+    if eocd + 22 != n:
+        raise ReleaseError("zip_trailing_bytes", "trailing bytes after EOCD")
+    if eocd >= 20 and data[eocd - 20:eocd - 16] == _ZIP64_EOCD_LOCATOR_SIG:
+        raise ReleaseError("zip_zip64", "ZIP64 EOCD locator present")
+    if disk != 0 or cddisk != 0 or ethis != etot:
+        raise ReleaseError("zip_multidisk", "EOCD is not single-disk canonical")
+    if etot == 0xFFFF or cdsize == 0xFFFFFFFF or cdoff == 0xFFFFFFFF:
+        raise ReleaseError("zip_zip64", "ZIP64 sentinel values present")
+    if etot > MAX_ZIP_ENTRIES:
+        raise ReleaseError("zip_too_many_entries", "release ZIP has too many entries")
+    if cdoff + cdsize != eocd:
+        raise ReleaseError("zip_structure", "central directory does not end exactly at EOCD")
+    off = cdoff
+    names: list[str] = []
+    for _ in range(etot):
+        if off + 46 > eocd or data[off:off + 4] != _CD_SIG:
+            raise ReleaseError("zip_structure", "malformed central-directory header")
+        (vmb, vn, flags, comp, _mt, _md, crc, csz, usz, nl, el, cl,
+         dstart, iattr, eattr, loff) = struct.unpack("<HHHHHHIIIHHHHHII", data[off + 4:off + 46])
+        end = off + 46 + nl + el + cl
+        if end > eocd:
+            raise ReleaseError("zip_structure", "central-directory header overruns EOCD")
+        raw_name = data[off + 46:off + 46 + nl]
+        if vmb != ZIP_VERSION_MADE_BY:
+            raise ReleaseError("zip_version", "non-canonical version-made-by")
+        if vn != ZIP_VERSION_NEEDED:
+            raise ReleaseError("zip_version", "non-canonical version-needed")
+        if flags != ZIP_FLAGS_CANONICAL:
+            raise ReleaseError("zip_flags", "non-canonical general-purpose flags")
+        if comp not in SUPPORTED_COMPRESSION:
+            raise ReleaseError("zip_unsupported_compression", "non-canonical compression method")
+        if el != 0 or cl != 0:
+            raise ReleaseError("zip_noncanonical_metadata", "central header has extra/comment bytes")
+        if dstart != ZIP_DISK_CANONICAL:
+            raise ReleaseError("zip_disk_start", "non-canonical entry disk-start")
+        if iattr != ZIP_INTERNAL_ATTR_CANONICAL:
+            raise ReleaseError("zip_internal_attr", "non-canonical internal attributes")
+        if eattr != ZIP_EXTERNAL_ATTR:
+            raise ReleaseError("zip_external_attr", "non-canonical external attributes")
+        try:
+            name = raw_name.decode("ascii")
+        except UnicodeDecodeError as exc:
+            raise ReleaseError("zip_nonascii_name", "non-ASCII entry name with canonical flags") from exc
+        validate_relative_posix(name, label="zip entry")
+        # Local header agreement.
+        if loff + 30 > cdoff or data[loff:loff + 4] != _LH_SIG:
+            raise ReleaseError("zip_structure", "malformed local header")
+        (lvn, lflags, lcomp, _lmt, _lmd, lcrc, lcsz, lusz, lnl, lel) = struct.unpack(
+            "<HHHHHIIIHH", data[loff + 4:loff + 30])
+        lname = data[loff + 30:loff + 30 + lnl]
+        if (lvn != vn or lflags != flags or lcomp != comp or lcrc != crc
+                or lcsz != csz or lusz != usz or lname != raw_name or lel != 0):
+            raise ReleaseError("zip_local_central_mismatch", "local header disagrees with central directory")
+        names.append(name)
+        off = end
+    if off != eocd:
+        raise ReleaseError("zip_structure", "unexpected trailing central-directory records")
+    if len(names) != len(set(names)):
+        raise ReleaseError("zip_duplicate", "duplicate entry names")
+    if len({x.casefold() for x in names}) != len(names):
+        raise ReleaseError("zip_case_collision", "case-colliding entry names")
+
+
 def read_zip_entries(zip_path: Path) -> dict[str, bytes]:
-    """Reopen a ZIP and return entry bytes, applying outer resource bounds and
-    rejecting unsafe/duplicate/colliding paths. Never extracts to the filesystem.
+    """Reopen a ZIP and return entry bytes, applying outer resource bounds, the
+    canonical raw-structure contract and safe-path validation. Never extracts.
     Maps unsupported/encrypted/malformed archives to controlled ReleaseError."""
     try:
-        with zipfile.ZipFile(zip_path, "r") as archive:
+        raw = Path(zip_path).read_bytes()
+    except OSError as exc:
+        raise ReleaseError("candidate_io_failure", "release ZIP could not be read") from exc
+    validate_zip_structure(raw)  # canonical EOCD/central/local metadata, single-disk, safe names
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw), "r") as archive:
             if archive.comment != b"":
                 raise ReleaseError("zip_comment_nonempty", "release ZIP has a non-empty archive comment")
             infos = archive.infolist()
@@ -891,10 +1066,7 @@ def read_zip_entries(zip_path: Path) -> dict[str, bytes]:
             total = 0
             for info in infos:
                 name = info.filename
-                pure = PurePosixPath(name)
-                if (name.startswith("/") or "\\" in name or pure.is_absolute()
-                        or pure.drive or ".." in pure.parts):
-                    raise ReleaseError("zip_unsafe_path", "ZIP contains an unsafe path")
+                validate_relative_posix(name, label="zip entry")
                 if info.flag_bits & 0x1:
                     raise ReleaseError("zip_encrypted", "ZIP contains an encrypted entry")
                 if info.compress_type not in SUPPORTED_COMPRESSION:

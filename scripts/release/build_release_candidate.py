@@ -39,7 +39,8 @@ if __package__ in (None, ""):
         assert_within, checksum_text, classify_path, classification_summary, deterministic_zip_bytes,
         exclusive_write, hardlink_no_clobber, inspect_archive_bytes, is_hex40, is_symlink_or_reparse,
         parse_generated_declaration, parse_release_policy, read_snapshot_bytes, read_zip_entries,
-        sha256_bytes, validate_relative_posix,
+        sha256_bytes, trusted_generated_snapshot_from_bytes, trusted_policy_snapshot_from_bytes,
+        validate_relative_posix,
     )
     import verify_release_candidate as _verifier  # type: ignore
 else:
@@ -50,7 +51,8 @@ else:
         assert_within, checksum_text, classify_path, classification_summary, deterministic_zip_bytes,
         exclusive_write, hardlink_no_clobber, inspect_archive_bytes, is_hex40, is_symlink_or_reparse,
         parse_generated_declaration, parse_release_policy, read_snapshot_bytes, read_zip_entries,
-        sha256_bytes, validate_relative_posix,
+        sha256_bytes, trusted_generated_snapshot_from_bytes, trusted_policy_snapshot_from_bytes,
+        validate_relative_posix,
     )
     from . import verify_release_candidate as _verifier  # noqa: F401
 
@@ -262,14 +264,12 @@ def _build_payload(*, repo_root: Path, expected_head: str | None, expected_branc
     }
 
 
-def _verify_zip_pass(zip_path: Path, trusted_policy_file: Path, policy: ReleasePolicy,
-                     trusted_generated_file: Path | None, *, stage: str) -> str:
-    """Verify against ONE immutable external trusted policy byte snapshot and,
-    when generated files are present, the exact external generated declaration
-    snapshot. Never candidate self-anchoring. Requires PASS."""
+def _verify_zip_pass(zip_path: Path, policy_snapshot, generated_snapshot, *, stage: str) -> str:
+    """Verify against ONE immutable in-memory trusted policy snapshot object (and,
+    when present, the generated declaration snapshot) shared by both the staged and
+    published verification. No mutable trust pathname is reopened. Requires PASS."""
     report = _verifier.verify_release_candidate(
-        zip_path, expected_policy_file=trusted_policy_file, expected_policy_id=policy.policy_id,
-        expected_generated_file=trusted_generated_file)
+        zip_path, trusted_policy=policy_snapshot, trusted_generated=generated_snapshot)
     if report.get("status") != "PASS":
         raise ReleaseError("verify_before_publish", f"{stage} verification did not PASS")
     return report.get("policy_trust", "")
@@ -308,13 +308,11 @@ def build_release_candidate(
     created_output = False
     try:
         staging_dir = Path(tempfile.mkdtemp(prefix=".rc-stage-", dir=str(output_dir.parent)))
-        # ONE immutable external trusted byte snapshot consumed by BOTH verifications.
-        trusted_policy_file = staging_dir / "trusted-policy.json"
-        exclusive_write(trusted_policy_file, built["policy_bytes"])
-        trusted_generated_file: Path | None = None
-        if built["generated_decl_bytes"] is not None:
-            trusted_generated_file = staging_dir / "trusted-generated.json"
-            exclusive_write(trusted_generated_file, built["generated_decl_bytes"])
+        # ONE immutable in-memory trust snapshot object consumed by BOTH verifications.
+        # No mutable trust pathname is written; the same object is passed to each call.
+        policy_snapshot = trusted_policy_snapshot_from_bytes(built["policy_bytes"])
+        generated_snapshot = (trusted_generated_snapshot_from_bytes(built["generated_decl_bytes"])
+                              if built["generated_decl_bytes"] is not None else None)
         staging_zip = staging_dir / ZIP_NAME
         exclusive_write(staging_zip, zip_bytes)
         exclusive_write(staging_dir / MANIFEST_NAME, built["manifest_bytes"])
@@ -325,8 +323,7 @@ def build_release_candidate(
 
         if sha256_bytes(staging_zip.read_bytes()) != verified_sha:
             raise ReleaseError("staging_mismatch", "staged ZIP bytes differ from the in-memory build")
-        prepub_trust = _verify_zip_pass(staging_zip, trusted_policy_file, policy,
-                                        trusted_generated_file, stage="staging")
+        prepub_trust = _verify_zip_pass(staging_zip, policy_snapshot, generated_snapshot, stage="staging")
 
         output_dir.mkdir(parents=True, exist_ok=False)
         created_output = True
@@ -340,8 +337,8 @@ def build_release_candidate(
         final_bytes = zip_path.read_bytes()
         if sha256_bytes(final_bytes) != verified_sha or len(final_bytes) != verified_size:
             raise ReleaseError("publication_mismatch", "published ZIP bytes differ from the verified ZIP")
-        postpub_trust = _verify_zip_pass(zip_path, trusted_policy_file, policy,
-                                         trusted_generated_file, stage="published")
+        # Same immutable snapshot object for the published verification.
+        postpub_trust = _verify_zip_pass(zip_path, policy_snapshot, generated_snapshot, stage="published")
 
         reopened = read_zip_entries(zip_path)
         if set(reopened) != set(built["payload"]):
@@ -358,20 +355,19 @@ def build_release_candidate(
             shutil.rmtree(staging_dir, ignore_errors=True)
 
     return {
-        "schema_version": 1, "tool": BUILDER_TOOL, "ok": True,
-        "repo_head": built["head"], "repo_branch": built["branch"],
-        "policy_id": policy.policy_id, "policy_schema_version": policy.schema_version,
+        "schema_version": 1, "tool": BUILDER_TOOL, "ok": True, "content_free": True,
+        "policy_schema_version": policy.schema_version,
         "policy_sha256": policy.sha256, "classification_summary": built["summary"],
         "trust_anchor_source": "external_tracked_policy",
-        "trusted_policy_path": POLICY_RELPATH, "trusted_policy_sha256": policy.sha256,
-        "verifier_trust_mode": postpub_trust,
+        "trusted_policy_relpath": POLICY_RELPATH, "trusted_policy_sha256": policy.sha256,
+        "immutable_trust_snapshot": True,
+        "same_snapshot_for_prepublication_and_postpublication": True,
+        "verifier_trust_mode": postpub_trust, "prepublication_verifier_trust_mode": prepub_trust,
         "prepublication_verifier_result": "PASS", "postpublication_verifier_result": "PASS",
-        "prepublication_verifier_trust_mode": prepub_trust,
         "generated_count": built["generated_count"], "generated_allowlist_sha256": built["generated_allowlist_sha256"],
         "generated_trust_mode": ("external_declaration_file" if built["generated_decl_bytes"] is not None
                                  else "canonical_zero"),
-        "zip_name": ZIP_NAME, "content_free": True,
-        "zip_sha256": verified_sha, "zip_size_bytes": verified_size,
+        "zip_name": ZIP_NAME, "zip_sha256": verified_sha, "zip_size_bytes": verified_size,
         "zip_entry_count": len(built["payload"]), "payload_count": built["payload_count"],
         "control_count": 3, "verified_before_publish": True, "published_atomically": True,
         "clean_tree_before": True, "clean_tree_after": True,
@@ -390,6 +386,25 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _emit(payload: dict, summary_out, *, to_stderr: bool) -> int:
+    """Serialize + write builder output through one content-free boundary."""
+    try:
+        text = json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False)
+    except Exception:
+        print('{"tool":"build_release_candidate","ok":false,"content_free":true,'
+              '"error_code":"output_serialization_failure"}', file=sys.stderr)
+        return 1
+    if summary_out is not None:
+        try:
+            Path(summary_out).write_text(text + "\n", encoding="utf-8")
+        except Exception:
+            print('{"tool":"build_release_candidate","ok":false,"content_free":true,'
+                  '"error_code":"output_write_failure"}', file=sys.stderr)
+            return 1
+    print(text, file=sys.stderr if to_stderr else sys.stdout)
+    return 1 if to_stderr else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
@@ -399,20 +414,14 @@ def main(argv: list[str] | None = None) -> int:
             base_sha=args.base_sha, generated_allowlist=args.generated_allowlist,
         )
     except ReleaseError as exc:
-        # Content-free: emit only the stable code, never the message (which may
-        # contain repository/generated/filesystem paths).
-        payload = {"schema_version": 1, "tool": BUILDER_TOOL,
-                   "ok": False, "error_code": exc.code, "content_free": True}
-        text = json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False)
-        if args.summary_out is not None:
-            args.summary_out.write_text(text + "\n", encoding="utf-8")
-        print(text, file=sys.stderr)
-        return 1
-    text = json.dumps(summary, indent=2, sort_keys=True, ensure_ascii=False)
-    if args.summary_out is not None:
-        args.summary_out.write_text(text + "\n", encoding="utf-8")
-    print(text)
-    return 0
+        # Content-free: emit only the stable code, never the message.
+        return _emit({"schema_version": 1, "tool": BUILDER_TOOL, "ok": False,
+                      "error_code": exc.code, "content_free": True}, args.summary_out, to_stderr=True)
+    except Exception:  # complete boundary; KeyboardInterrupt/SystemExit still propagate
+        return _emit({"schema_version": 1, "tool": BUILDER_TOOL, "ok": False,
+                      "error_code": "builder_internal_failure", "content_free": True},
+                     args.summary_out, to_stderr=True)
+    return _emit(summary, args.summary_out, to_stderr=False)
 
 
 if __name__ == "__main__":

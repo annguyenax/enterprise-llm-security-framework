@@ -194,16 +194,17 @@ def test_builder_passes_trusted_bytes_to_verification(builder, synthetic_repo, t
     real = builder._verifier.verify_release_candidate
 
     def spy(zip_path, **kw):
-        calls.append(kw.get("expected_policy_file"))
+        calls.append(kw.get("trusted_policy"))
         return real(zip_path, **kw)
 
     monkeypatch.setattr(builder._verifier, "verify_release_candidate", spy)
     _build(builder, synthetic_repo, tmp_path / "out")
     assert len(calls) == 2  # staging + published
-    # Both verifications consume ONE immutable trusted byte snapshot (not the mutable repo path).
-    for c in calls:
-        assert c is not None and Path(c).name == "trusted-policy.json"
-    assert calls[0] == calls[1]
+    # Both verifications consume the SAME immutable in-memory snapshot OBJECT
+    # (no mutable trust pathname). Prove byte identity, not just object identity.
+    assert calls[0] is not None and calls[0] is calls[1]
+    assert calls[0].raw_bytes == (synthetic_repo / "release/release-allowlist.json").read_bytes()
+    assert calls[0].sha256 == __import__("hashlib").sha256(calls[0].raw_bytes).hexdigest()
 
 
 def test_builder_refuses_publication_when_trusted_verification_not_pass(builder, synthetic_repo, tmp_path):
@@ -882,7 +883,10 @@ def test_verify_nondeterministic_metadata_fail(verifier, built_zip, tmp_path, po
         for name in sorted(items):
             z.writestr(name, items[name])
     r = _vr(verifier, dst, policy_file)
-    assert r["status"] == "FAIL" and any(f["code"] == "nondeterministic_metadata" for f in r["findings"])
+    # A plain re-zip is non-canonical: the raw-structure validator rejects it.
+    assert r["status"] == "FAIL" and any(
+        f["code"] in {"nondeterministic_metadata", "zip_version", "zip_external_attr", "zip_flags"}
+        for f in r["findings"])
 
 
 def test_verify_not_verifiable_is_not_pass(verifier, common, tmp_path, policy_file):
@@ -1083,3 +1087,216 @@ def test_verify_noncanonical_zip_policy_fail(verifier, common, built_zip, tmp_pa
     dst = tmp_path / "z.zip"; _repackage_full(common, built_zip, dst, mut)
     r = _vr(verifier, dst, policy_file)
     assert r["status"] == "FAIL" and any(f["code"] == "schema_value" for f in r["findings"])
+
+
+# =========================================================================== #
+# V6 Phase D — immutable trust snapshots
+# =========================================================================== #
+def test_trusted_policy_snapshot_mutation_after_load_no_effect(builder, verifier, common, synthetic_repo, tmp_path, policy_file):
+    _build(builder, synthetic_repo, tmp_path / "out")
+    zip_path = tmp_path / "out" / "release-candidate.zip"
+    snap = common.load_trusted_policy_snapshot(policy_file)  # read once into immutable bytes
+    policy_file.write_text('{"tampered": true}', encoding="utf-8")
+    policy_file.unlink()
+    r = verifier.verify_release_candidate(zip_path, trusted_policy=snap)
+    assert r["status"] == "PASS" and r["immutable_trust_snapshot"] is True
+
+
+def test_generated_snapshot_mutation_after_load_no_effect(builder, verifier, common, synthetic_repo, tmp_path, policy_file):
+    import hashlib
+    (synthetic_repo / "pipfreeze.txt").write_text("pytest==8.0\n", encoding="utf-8")
+    data = (synthetic_repo / "pipfreeze.txt").read_bytes()
+    gen = _gen_decl(tmp_path / "gen.json", [
+        {"path": "pipfreeze.txt", "sha256": hashlib.sha256(data).hexdigest(), "size_bytes": len(data)}])
+    _build(builder, synthetic_repo, tmp_path / "out", generated_allowlist=gen)
+    zip_path = tmp_path / "out" / "release-candidate.zip"
+    psnap = common.load_trusted_policy_snapshot(policy_file)
+    gsnap = common.load_trusted_generated_snapshot(gen)
+    gen.write_text('{"tampered":1}', encoding="utf-8"); gen.unlink()
+    r = verifier.verify_release_candidate(zip_path, trusted_policy=psnap, trusted_generated=gsnap)
+    assert r["status"] == "PASS" and r["generated_count"] == 1
+
+
+def test_snapshot_contradictory_sha_fails(verifier, common, built_zip, policy_file):
+    snap = common.load_trusted_policy_snapshot(policy_file)
+    r = verifier.verify_release_candidate(built_zip, trusted_policy=snap, expected_policy_sha256="e" * 64)
+    assert r["status"] == "FAIL" and any(f["code"] == "contradictory_policy_anchor" for f in r["findings"])
+
+
+def test_builder_writes_no_mutable_trust_staging_file():
+    src = (Path(__file__).resolve().parents[2] / "scripts" / "release" / "build_release_candidate.py").read_text()
+    assert "trusted-policy.json" not in src and "trusted-generated.json" not in src
+
+
+# =========================================================================== #
+# V6 Phase I — cross-platform path safety (one validator, all callers)
+# =========================================================================== #
+@pytest.mark.parametrize("bad", [
+    "C:/x.txt", "C:" + chr(92) + "x.txt", "C:x.txt", "file.txt:stream", "//srv/share",
+    "a" + chr(92) + "b", "/abs.txt", "a/../b", "a//b", "con.txt", "AUX", "LPT9.log",
+    "a" + chr(0) + "b", "a /b", "x.txt/",
+])
+def test_path_validator_rejects(common, bad):
+    with pytest.raises(common.ReleaseError):
+        common.validate_relative_posix(bad, label="t")
+
+
+@pytest.mark.parametrize("bad", ["C:/evil.txt", "file.txt:stream", "a" + chr(92) + "b", "../evil"])
+def test_generated_declaration_rejects_unsafe_path(common, bad):
+    raw = json.dumps({"schema_version": 1, "generated_files": [
+        {"path": bad, "sha256": "0" * 64, "size_bytes": 1}]}).encode()
+    with pytest.raises(common.ReleaseError) as e:
+        common.parse_generated_declaration(raw)
+    assert e.value.code.startswith("path_") or e.value.code == "generated_declaration"
+
+
+def test_outer_zip_drive_name_rejected(verifier, common, built_zip, tmp_path, policy_file):
+    with zipfile.ZipFile(built_zip) as z:
+        items = {i.filename: z.read(i.filename) for i in z.infolist()}
+    items["C:evil.txt"] = b"x"
+    dst = tmp_path / "drive.zip"; dst.write_bytes(common.deterministic_zip_bytes(items))
+    r = _vr(verifier, dst, policy_file)
+    assert r["status"] == "FAIL"
+    _assert_content_free(r, "C:evil.txt", "evil")
+
+
+# =========================================================================== #
+# V6 Phase L — canonical ZIP structure mutations
+# =========================================================================== #
+def _canon(common, items=None):
+    return common.deterministic_zip_bytes(items or {"repo/a.txt": b"hi", "b.json": b"{}"})
+
+
+def test_zip_structure_canonical_passes(common):
+    common.validate_zip_structure(_canon(common))
+
+
+def test_zip_structure_trailing_bytes_fails(common):
+    with pytest.raises(common.ReleaseError) as e:
+        common.validate_zip_structure(_canon(common) + b"EXTRA")
+    assert e.value.code == "zip_trailing_bytes"
+
+
+def test_zip_structure_nonempty_comment_fails(common):
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("a.txt", b"x"); z.comment = b"HIDE"
+    with pytest.raises(common.ReleaseError) as e:
+        common.validate_zip_structure(buf.getvalue())
+    assert e.value.code == "zip_comment_nonempty"
+
+
+def test_zip_structure_plain_zip_noncanonical_fails(common):
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("a.txt", b"x")
+    with pytest.raises(common.ReleaseError) as e:
+        common.validate_zip_structure(buf.getvalue())
+    assert e.value.code in {"zip_version", "zip_external_attr", "zip_flags", "zip_internal_attr"}
+
+
+def test_zip_structure_eocd_disk_nonzero_fails(common):
+    import struct
+    data = bytearray(_canon(common))
+    eocd = data.rfind(b"PK\x05\x06")
+    struct.pack_into("<H", data, eocd + 4, 1)
+    with pytest.raises(common.ReleaseError) as e:
+        common.validate_zip_structure(bytes(data))
+    assert e.value.code == "zip_multidisk"
+
+
+def test_zip_structure_local_central_mismatch_fails(common):
+    import struct
+    data = bytearray(_canon(common, {"repo/aaaa.txt": b"hi"}))
+    loff = data.find(b"PK\x03\x04")
+    name_at = loff + 30
+    data[name_at] = ord("z") if data[name_at] != ord("z") else ord("y")
+    with pytest.raises(common.ReleaseError) as e:
+        common.validate_zip_structure(bytes(data))
+    assert e.value.code == "zip_local_central_mismatch"
+
+
+def test_zip_structure_duplicate_entry_fails(common):
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+            zi = zipfile.ZipInfo("a.txt", date_time=common.ZIP_TIMESTAMP)
+            zi.create_system = common.ZIP_CREATE_SYSTEM
+            zi.external_attr = common.ZIP_EXTERNAL_ATTR
+            z.writestr(zi, b"1"); z.writestr(zi, b"2")
+    with pytest.raises(common.ReleaseError) as e:
+        common.validate_zip_structure(buf.getvalue())
+    assert e.value.code in {"zip_duplicate", "zip_case_collision"}
+
+
+# =========================================================================== #
+# V6 Phase N — zero-generated trust semantics
+# =========================================================================== #
+def test_zero_state_no_option_passes(verifier, built_zip, policy_file):
+    assert _vr(verifier, built_zip, policy_file)["status"] == "PASS"
+
+
+def test_zero_state_canonical_empty_declaration_passes(verifier, built_zip, tmp_path, policy_file):
+    empty = _gen_decl(tmp_path / "empty.json", [])
+    r = verifier.verify_release_candidate(built_zip, expected_policy_file=policy_file,
+                                          expected_generated_file=empty)
+    assert r["status"] == "PASS"
+
+
+def test_zero_state_nonempty_declaration_fails(verifier, built_zip, tmp_path, policy_file):
+    nonempty = _gen_decl(tmp_path / "ne.json", [{"path": "x.txt", "sha256": "0" * 64, "size_bytes": 1}])
+    r = verifier.verify_release_candidate(built_zip, expected_policy_file=policy_file,
+                                          expected_generated_file=nonempty)
+    assert r["status"] == "FAIL"
+    assert any(f["code"] == "generated_declaration_nonempty_in_zero_state" for f in r["findings"])
+
+
+def test_zero_state_generated_sha_only_not_verifiable(verifier, built_zip, policy_file):
+    r = verifier.verify_release_candidate(built_zip, expected_policy_file=policy_file,
+                                          expected_generated_sha256="a" * 64)
+    assert r["status"] == "NOT_VERIFIABLE"
+    assert any(n["code"] == "generated_hash_only" for n in r["not_verifiable"])
+
+
+# =========================================================================== #
+# V6 Phase G — complete content-free output (success + unexpected exceptions)
+# =========================================================================== #
+def test_builder_success_output_has_no_raw_identity(builder, synthetic_repo, tmp_path):
+    import subprocess as sp
+    s = _build(builder, synthetic_repo, tmp_path / "out")
+    blob = json.dumps(s)
+    assert "repo_head" not in s and "repo_branch" not in s and "policy_id" not in s
+    assert s["content_free"] is True and s["immutable_trust_snapshot"] is True
+    head = sp.run(["git", "-C", str(synthetic_repo), "rev-parse", "HEAD"],
+                  capture_output=True, text=True).stdout.strip()
+    assert head not in blob
+
+
+def test_verifier_success_output_has_no_repo_head(verifier, built_zip, policy_file):
+    r = _vr(verifier, built_zip, policy_file)
+    assert r["status"] == "PASS" and "repo_head" not in r
+
+
+def test_builder_unexpected_exception_content_free(builder, synthetic_repo, tmp_path, monkeypatch):
+    def boom(**kw):
+        raise OSError(2, "No such file", "C:" + chr(92) + "Users" + chr(92) + "ADMIN" + chr(92) + "secret_token.txt")
+    monkeypatch.setattr(builder, "build_release_candidate", boom)
+    import io as _io, contextlib
+    buf = _io.StringIO()
+    with contextlib.redirect_stderr(buf), contextlib.redirect_stdout(buf):
+        rc = builder.main(["--repo-root", str(synthetic_repo), "--output-dir", str(tmp_path / "out")])
+    out = buf.getvalue()
+    assert rc == 1
+    assert "secret_token" not in out and "ADMIN" not in out
+    assert '"error_code": "builder_internal_failure"' in out and '"content_free": true' in out
+
+
+def test_verifier_internal_exception_content_free(verifier, monkeypatch, built_zip, policy_file):
+    def boom(*a, **k):
+        raise RuntimeError("leak C:" + chr(92) + "Users" + chr(92) + "ADMIN" + chr(92) + "token")
+    monkeypatch.setattr(verifier, "_verify", boom)
+    r = verifier.verify_release_candidate(built_zip, expected_policy_file=policy_file)
+    assert r["status"] == "FAIL" and r["content_free"] is True
+    assert any(f["code"] in {"verification_internal_failure", "candidate_unsupported_feature"} for f in r["findings"])
+    assert "ADMIN" not in json.dumps(r) and "token" not in json.dumps(r)

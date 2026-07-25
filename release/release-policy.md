@@ -91,6 +91,37 @@ and needs no declaration. A generated row must carry `source="generated"`,
 `classification="GENERATED"`, the reserved generated rule ID and
 `rule_form="generated"` together; tracked rows may carry none of those markers.
 
+## Immutable trust snapshots
+
+Trusted policy and generated-declaration bytes are read **once** into immutable
+snapshot objects (bytes + SHA-256 + parsed semantics bound together). The builder
+passes the **same** immutable snapshot object to both the staged and the published
+verification — no mutable trust pathname is written or reopened between calls, so
+a mutation of (or deletion of) the source file after snapshot creation cannot
+affect verification. The verifier CLI reads each `--expected-*-file` once and
+constructs the snapshot before touching any candidate byte.
+
+## Canonical ZIP structure (raw-validated)
+
+The release ZIP is validated at the raw byte level against one canonical contract
+shared by builder and verifier: exactly one single-disk EOCD with an empty comment
+and **no trailing bytes**, no ZIP64/multi-disk/digital-signature records, and per
+entry the exact canonical values — version-made-by/needed, general-purpose flags
+(zero, ASCII names), compression, empty extra/comment, zero disk-start and
+internal attributes, canonical external attributes and fixed timestamp — with
+**local-header/central-directory agreement** (name, flags, compression, CRC and
+sizes). Any deviation fails closed before PASS; no bytes are echoed.
+
+## Cross-platform path safety
+
+One authoritative validator governs every path (policy rules, generated
+declaration, manifest payloads, checksum/size keys, outer ZIP entries and nested
+archive names). It rejects absolute/leading-slash, backslash, **any colon
+(drive `C:` and NTFS ADS `file:stream`)**, UNC (`//`/`\\`), repeated separators,
+`.`/`..`, control/NUL/DEL characters, trailing slash, whitespace-ambiguous
+components, and Windows reserved device names (with or without extension),
+case-insensitively.
+
 ## Contradictory trust anchors fail closed
 
 If both a policy file and a policy SHA are supplied they must agree exactly, else
@@ -120,10 +151,13 @@ report only a trusted `expected_head_matched` boolean, never the raw HEAD). Ever
 parser/ZIP/filesystem failure is converted at a single boundary into a structured
 result carrying only a stable reason code, `content_free: true`, and safe
 identifiers (ordinal index, count, or the SHA-256 of the offending value). The
-**builder** likewise emits only a stable `error_code` (never `ReleaseError`
-messages, generated/tracked paths, or absolute output paths) and no absolute
-filesystem paths in its summary. Uncontrolled tracebacks and raw exception
-messages are suppressed.
+**builder success summary is also content-free** — it carries no raw repository
+HEAD, branch or policy ID (only hashes, counts and booleans). Both the builder and
+verifier CLIs catch ordinary `Exception` at the public boundary (KeyboardInterrupt
+/SystemExit still propagate), mapping unexpected failures — including OSError with
+a filename, output-write failures and serialization failures — to stable codes
+(`builder_internal_failure`, `verification_internal_failure`, `output_write_failure`,
+…) with no message, path, username or traceback.
 
 ## Control-file coverage (explicit)
 
