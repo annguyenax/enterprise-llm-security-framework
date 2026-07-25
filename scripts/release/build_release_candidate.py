@@ -21,7 +21,6 @@ directory or ZIP.
 """
 from __future__ import annotations
 
-import argparse
 import json
 import shutil
 import subprocess
@@ -34,10 +33,12 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from release_common import (  # type: ignore
         BUILDER_TOOL, CHECKSUMS_NAME, CLASS_ALLOWED_ARCHIVE, CLASS_GENERATED,
-        CONTROL_COVERAGE_CANON, GENERATED_RULE_ID, MANIFEST_NAME, MANIFEST_SCHEMA_VERSION,
+        CONTROL_COVERAGE_CANON, ContentFreeArgumentParser, GENERATED_RULE_ID,
+        MANIFEST_NAME, MANIFEST_SCHEMA_VERSION, PublicArgumentError, PublicHelpRequested,
         PAYLOAD_PREFIX, POLICY_RELPATH, SIZES_NAME, ZIP_POLICY_CANON, ReleaseError, ReleasePolicy,
         assert_within, checksum_text, classify_path, classification_summary, deterministic_zip_bytes,
-        emit_public_result, exclusive_write, hardlink_no_clobber, inspect_archive_bytes, is_hex40, is_symlink_or_reparse,
+        emit_public_bytes, emit_public_result, exclusive_write, hardlink_no_clobber,
+        inspect_archive_bytes, is_hex40, is_symlink_or_reparse,
         parse_generated_declaration, parse_release_policy, read_snapshot_bytes, read_zip_entries,
         sha256_bytes, trusted_generated_snapshot_from_bytes, trusted_policy_snapshot_from_bytes,
         validate_relative_posix,
@@ -46,10 +47,12 @@ if __package__ in (None, ""):
 else:
     from .release_common import (  # noqa: F401
         BUILDER_TOOL, CHECKSUMS_NAME, CLASS_ALLOWED_ARCHIVE, CLASS_GENERATED,
-        CONTROL_COVERAGE_CANON, GENERATED_RULE_ID, MANIFEST_NAME, MANIFEST_SCHEMA_VERSION,
+        CONTROL_COVERAGE_CANON, ContentFreeArgumentParser, GENERATED_RULE_ID,
+        MANIFEST_NAME, MANIFEST_SCHEMA_VERSION, PublicArgumentError, PublicHelpRequested,
         PAYLOAD_PREFIX, POLICY_RELPATH, SIZES_NAME, ZIP_POLICY_CANON, ReleaseError, ReleasePolicy,
         assert_within, checksum_text, classify_path, classification_summary, deterministic_zip_bytes,
-        emit_public_result, exclusive_write, hardlink_no_clobber, inspect_archive_bytes, is_hex40, is_symlink_or_reparse,
+        emit_public_bytes, emit_public_result, exclusive_write, hardlink_no_clobber,
+        inspect_archive_bytes, is_hex40, is_symlink_or_reparse,
         parse_generated_declaration, parse_release_policy, read_snapshot_bytes, read_zip_entries,
         sha256_bytes, trusted_generated_snapshot_from_bytes, trusted_policy_snapshot_from_bytes,
         validate_relative_posix,
@@ -374,8 +377,8 @@ def build_release_candidate(
     }
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__)
+def build_parser() -> ContentFreeArgumentParser:
+    parser = ContentFreeArgumentParser(prog=BUILDER_TOOL, description=__doc__)
     parser.add_argument("--repo-root", required=True, type=Path)
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--expected-head", default=None)
@@ -395,7 +398,25 @@ def _emit(payload: dict, summary_out, *, success: bool) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    try:
+        args = build_parser().parse_args(argv)
+    except PublicHelpRequested as exc:
+        return emit_public_bytes(
+            exc.help_bytes, primary_stream=sys.stdout, fallback_stream=sys.stderr,
+            exit_code=0
+        )
+    except PublicArgumentError:
+        return _emit(
+            {"schema_version": 1, "tool": BUILDER_TOOL, "ok": False,
+             "error_code": "cli_argument_error", "content_free": True},
+            None, success=False
+        )
+    except Exception:
+        return _emit(
+            {"schema_version": 1, "tool": BUILDER_TOOL, "ok": False,
+             "error_code": "cli_parser_internal_failure", "content_free": True},
+            None, success=False
+        )
     try:
         summary = build_release_candidate(
             repo_root=args.repo_root, output_dir=args.output_dir,

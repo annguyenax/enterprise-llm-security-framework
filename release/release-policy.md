@@ -128,10 +128,12 @@ bytes/offsets are echoed.
 
 ## Cross-platform path safety (one validator, including nested archives)
 
-One authoritative validator governs **every** path — policy rules, generated
-declaration, manifest payloads, checksum/size keys, outer ZIP entries **and
-nested-archive member names** (which route through the same validator, not a
-weaker nested-only one). It validates raw `/`-split segments directly (so
+One authoritative validator governs policy rules, generated declarations,
+manifest payloads, outer ZIP entries **and nested-archive member names** (which
+route through the same validator, not a weaker nested-only one). Checksum and
+size-map keys must equal the already-validated payload/control identity sets
+exactly; they cannot introduce another path identity. The validator checks raw
+`/`-split segments directly (so
 `./x`, `a//b` and leading `./` cannot slip past `PurePosixPath` normalization) and
 rejects absolute/leading-slash, backslash, **any colon (drive `C:` and NTFS ADS
 `file:stream`)**, UNC (`//`/`\\`), repeated separators, `.`/`..`, control/NUL/DEL
@@ -144,13 +146,18 @@ collision. Every unsafe nested name yields the single content-free code
 
 ## Infallible content-free public emission
 
-All builder and verifier public output flows through one shared emitter that
-serializes to immutable bytes first, then performs the terminal write **inside**
-the failure boundary. A primary stream/`--output` write or flush failure is
-converted to a fixed content-free fallback on the alternate stream and a nonzero
-exit; when both streams fail it returns nonzero without raising and without
-producing output. An output-write failure never yields PASS exit semantics, the
-fallback never interpolates any candidate/exception value, and
+All builder and verifier public result and help output flows through one shared
+guarded emission boundary. Argument errors are converted to a fixed
+`cli_argument_error` result without retaining or printing argparse's raw message.
+The emitter serializes complete immutable bytes before touching a destination.
+Without an output file, the selected terminal stream is the sole authoritative
+sink; write/flush failure produces a fixed content-free fallback on the alternate
+stream and a nonzero exit. With `--output`/`--summary-out`, an atomically replaced
+same-directory file is the sole authoritative sink and terminal streams are used
+only for a fixed failure fallback. A failed file write/flush/fsync/close/replace
+removes its temporary file and cannot publish partial or PASS bytes. When both fallback
+streams fail the helper returns nonzero without raising or producing output.
+Fallbacks never interpolate candidate/exception values, while
 `KeyboardInterrupt`/`SystemExit` still propagate.
 
 ## Contradictory trust anchors fail closed
@@ -184,11 +191,10 @@ result carrying only a stable reason code, `content_free: true`, and safe
 identifiers (ordinal index, count, or the SHA-256 of the offending value). The
 **builder success summary is also content-free** — it carries no raw repository
 HEAD, branch or policy ID (only hashes, counts and booleans). Both the builder and
-verifier CLIs catch ordinary `Exception` at the public boundary (KeyboardInterrupt
-/SystemExit still propagate), mapping unexpected failures — including OSError with
-a filename, output-write failures and serialization failures — to stable codes
-(`builder_internal_failure`, `verification_internal_failure`, `output_write_failure`,
-…) with no message, path, username or traceback.
+verifier CLIs catch ordinary `Exception` at the public boundary
+(`KeyboardInterrupt`/`SystemExit` still propagate), mapping parser, processing,
+serialization and output failures to fixed content-free codes with no message,
+path, username or traceback.
 
 ## Control-file coverage (explicit)
 

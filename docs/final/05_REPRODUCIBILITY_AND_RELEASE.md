@@ -115,14 +115,19 @@ the output directory). It does **not** create a sibling `<OUTPUT_DIR>.zip`.
   parsed from both local and central headers** must be canonical and agree; a
   compressed-size ceiling is applied before reading.
 - **Cross-platform path safety (incl. nested archives).** One authoritative
-  validator — used for the declaration, manifest, checksum/size keys, outer ZIP
-  entries **and nested-archive member names** — rejects drive (`C:`), colon/NTFS-ADS,
-  UNC, backslash, traversal, `./`, repeated separators, control/NUL/DEL, reserved
-  device names, and whitespace/normalization-ambiguous components.
+  validator — used for declarations, manifest payloads, outer ZIP entries **and
+  nested-archive member names** — rejects drive (`C:`), colon/NTFS-ADS, UNC,
+  backslash, traversal, `./`, repeated separators, control/NUL/DEL, reserved
+  device names, and whitespace/normalization-ambiguous components. Checksum/size
+  maps must exactly equal those already-validated payload/control identity sets.
 - **Infallible public emission.** Builder and verifier output flows through one
-  shared emitter whose terminal write is inside the failure boundary: a stdout/
-  stderr/output-file failure yields a nonzero exit and a fixed content-free fallback
-  (or no output when both streams fail) — never a traceback, never PASS semantics.
+  guarded boundary, including help and argument errors. Without an output file,
+  one terminal stream is authoritative. With `--output`/`--summary-out`, one
+  atomically published file is authoritative and terminal streams are
+  failure-fallback only. Write/flush/fsync/close/replace failures yield nonzero with
+  a fixed content-free fallback (or no output when both fallback streams fail);
+  partial files, raw argparse text, tracebacks, and contradictory PASS sinks are
+  not published.
 - **Disjoint closed-world policy.** Classification is enforced from the tracked
   policy `release/release-allowlist.json` (schema 4), whose `policy_id`, schema
   version and SHA-256 are recorded in the ZIP's `release-manifest.json` and

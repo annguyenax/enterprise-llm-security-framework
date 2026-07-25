@@ -17,7 +17,6 @@ the PASS exit code.
 """
 from __future__ import annotations
 
-import argparse
 import io
 import json
 import sys
@@ -447,8 +446,10 @@ def verify_release_candidate(zip_path, *, trusted_policy=None, trusted_generated
         return _fail("verification_internal_failure")
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__)
+def build_parser() -> rc.ContentFreeArgumentParser:
+    parser = rc.ContentFreeArgumentParser(
+        prog="verify_release_candidate", description=__doc__
+    )
     parser.add_argument("--zip", required=True, type=Path)
     parser.add_argument("--output", type=Path, default=None)
     parser.add_argument("--expected-policy-file", type=Path, default=None,
@@ -468,7 +469,25 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    try:
+        args = build_parser().parse_args(argv)
+    except rc.PublicHelpRequested as exc:
+        return rc.emit_public_bytes(
+            exc.help_bytes, primary_stream=sys.stdout, fallback_stream=sys.stderr,
+            exit_code=0
+        )
+    except rc.PublicArgumentError:
+        report = _fail("cli_argument_error")
+        return rc.emit_public_result(
+            report, output_path=None, primary_stream=sys.stderr,
+            fallback_stream=sys.stdout, exit_code=1
+        )
+    except Exception:
+        report = _fail("cli_parser_internal_failure")
+        return rc.emit_public_result(
+            report, output_path=None, primary_stream=sys.stderr,
+            fallback_stream=sys.stdout, exit_code=1
+        )
     try:
         report = verify_release_candidate(
             args.zip, expected_policy_file=args.expected_policy_file,

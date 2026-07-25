@@ -30,11 +30,13 @@ Control-file coverage rule (explicit, enforced by builder and verifier):
 """
 from __future__ import annotations
 
+import argparse
 import hashlib
 import io
 import json
 import os
 import stat
+import tempfile
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -1175,6 +1177,30 @@ PUBLIC_OUTPUT_FAILURE_BYTES = (
 )
 
 
+class PublicArgumentError(Exception):
+    """Content-free argparse failure. The raw parser message is never retained."""
+
+
+class PublicHelpRequested(Exception):
+    """Carries static, pre-serialized help bytes to the guarded emitter."""
+
+    def __init__(self, help_bytes: bytes):
+        super().__init__()
+        self.help_bytes = help_bytes
+
+
+class ContentFreeArgumentParser(argparse.ArgumentParser):
+    """Argument parser that never writes or interpolates raw arguments itself."""
+
+    def error(self, message: str) -> None:
+        del message
+        raise PublicArgumentError
+
+    def print_help(self, file=None) -> None:
+        del file
+        raise PublicHelpRequested(self.format_help().encode("utf-8"))
+
+
 def _write_stream_bytes(stream, data: bytes) -> bool:
     """Write bytes to a text/binary stream, flushing. Returns True on success,
     False on ANY ordinary failure (never raises for ordinary errors).
@@ -1185,38 +1211,81 @@ def _write_stream_bytes(stream, data: bytes) -> bool:
             buffer.write(data)
             buffer.flush()
         else:
-            stream.write(data.decode("ascii", "replace"))
+            stream.write(data.decode("utf-8"))
             stream.flush()
         return True
     except Exception:
         return False
 
 
+def emit_public_bytes(data: bytes, *, primary_stream, fallback_stream,
+                      exit_code: int) -> int:
+    """Emit already-serialized public bytes through one guarded stream boundary."""
+    if type(data) is not bytes:
+        data = PUBLIC_OUTPUT_FAILURE_BYTES
+        exit_code = max(exit_code, 1)
+    if _write_stream_bytes(primary_stream, data):
+        return exit_code
+    _write_stream_bytes(fallback_stream, PUBLIC_OUTPUT_FAILURE_BYTES)
+    return max(exit_code, 1)
+
+
+def _write_public_file_atomically(output_path, data: bytes) -> None:
+    """Publish one complete public result file without exposing partial bytes."""
+    path = Path(output_path)
+    fd = -1
+    temporary_path: Path | None = None
+    try:
+        fd, raw_temporary_path = tempfile.mkstemp(
+            prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+        )
+        temporary_path = Path(raw_temporary_path)
+        with os.fdopen(fd, "wb") as handle:
+            fd = -1
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, path)
+        temporary_path = None
+    finally:
+        if fd >= 0:
+            try:
+                os.close(fd)
+            except Exception:
+                pass
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+
 def emit_public_result(payload: dict, *, output_path, primary_stream, fallback_stream,
                        exit_code: int) -> int:
-    """THE single content-free public emitter. Serializes to immutable bytes first,
-    then writes the optional output file and the primary stream; on ANY write/flush
-    failure it emits a fixed content-free fallback on the alternate stream (never
-    reusing candidate/exception text) and returns a nonzero exit code. When both
-    streams fail it returns nonzero WITHOUT raising and WITHOUT producing output. An
-    output-write failure never yields PASS exit semantics."""
+    """Serialize once, then emit to exactly one authoritative public sink.
+
+    When ``output_path`` is supplied, the atomically published file is the sole
+    success/failure result and terminal streams are fallback-only. Without a file,
+    the primary stream is authoritative. No command can therefore leave PASS in
+    one public sink after another required sink fails.
+    """
     try:
         data = (json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True) + "\n").encode("utf-8")
     except Exception:
-        if not _write_stream_bytes(primary_stream, PUBLIC_OUTPUT_FAILURE_BYTES):
-            _write_stream_bytes(fallback_stream, PUBLIC_OUTPUT_FAILURE_BYTES)
-        return max(exit_code, 1)
+        return emit_public_bytes(
+            PUBLIC_OUTPUT_FAILURE_BYTES, primary_stream=primary_stream,
+            fallback_stream=fallback_stream, exit_code=max(exit_code, 1)
+        )
     if output_path is not None:
         try:
-            with open(output_path, "wb") as handle:
-                handle.write(data)
-                handle.flush()
+            _write_public_file_atomically(output_path, data)
         except Exception:
-            if not _write_stream_bytes(primary_stream, PUBLIC_OUTPUT_FAILURE_BYTES):
-                _write_stream_bytes(fallback_stream, PUBLIC_OUTPUT_FAILURE_BYTES)
-            return max(exit_code, 1)
-    if _write_stream_bytes(primary_stream, data):
+            return emit_public_bytes(
+                PUBLIC_OUTPUT_FAILURE_BYTES, primary_stream=primary_stream,
+                fallback_stream=fallback_stream, exit_code=max(exit_code, 1)
+            )
         return exit_code
-    # Primary stream failed: fixed content-free fallback on the alternate stream.
-    _write_stream_bytes(fallback_stream, PUBLIC_OUTPUT_FAILURE_BYTES)
-    return max(exit_code, 1)
+    return emit_public_bytes(
+        data, primary_stream=primary_stream,
+        fallback_stream=fallback_stream, exit_code=exit_code
+    )

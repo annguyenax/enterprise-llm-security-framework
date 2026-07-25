@@ -1529,3 +1529,390 @@ def test_read_zip_entries_byte_ceiling(common, tmp_path, monkeypatch):
     with pytest.raises(common.ReleaseError) as e:
         common.read_zip_entries(big)
     assert e.value.code == "zip_too_large"
+
+
+# =========================================================================== #
+# V8 - guarded argument parsing and single-sink public result publication
+# =========================================================================== #
+class _TextWriteFailStream:
+    def write(self, value):
+        raise OSError(5, "unsafe path", r"C:\Users\ADMIN\secret-token.txt")
+
+    def flush(self):
+        pass
+
+
+class _TextFlushFailStream:
+    def __init__(self):
+        self.values = []
+
+    def write(self, value):
+        self.values.append(value)
+
+    def flush(self):
+        raise UnicodeError("unsafe bytes SECRET-BYTES")
+
+
+class _BufferWriteFail:
+    def write(self, value):
+        raise OSError(5, "unsafe path", r"C:\Users\ADMIN\secret-token.txt")
+
+    def flush(self):
+        pass
+
+
+class _BufferFlushFail:
+    def __init__(self):
+        self.values = []
+
+    def write(self, value):
+        self.values.append(value)
+
+    def flush(self):
+        raise UnicodeError("unsafe bytes SECRET-BYTES")
+
+
+class _BufferStream:
+    def __init__(self, buffer):
+        self.buffer = buffer
+
+
+@pytest.mark.parametrize("primary", [
+    _TextWriteFailStream(),
+    _TextFlushFailStream(),
+    _BufferStream(_BufferWriteFail()),
+    _BufferStream(_BufferFlushFail()),
+])
+def test_public_stream_write_and_flush_failures_are_nonthrowing(common, primary):
+    fallback = _CaptureStream()
+    rc_code = common.emit_public_bytes(
+        b'{"status":"PASS"}\n', primary_stream=primary,
+        fallback_stream=fallback, exit_code=0
+    )
+    emitted = fallback.buffer.getvalue()
+    assert rc_code != 0
+    assert b"public_output_failure" in emitted
+    assert b"ADMIN" not in emitted and b"secret-token" not in emitted
+    assert b"SECRET-BYTES" not in emitted
+
+
+@pytest.mark.parametrize("fallback", [
+    _TextWriteFailStream(),
+    _TextFlushFailStream(),
+    _BufferStream(_BufferWriteFail()),
+    _BufferStream(_BufferFlushFail()),
+])
+def test_public_fallback_write_and_flush_failures_never_escape(common, fallback):
+    rc_code = common.emit_public_bytes(
+        b'{"status":"PASS"}\n', primary_stream=_FailStream(),
+        fallback_stream=fallback, exit_code=0
+    )
+    assert rc_code != 0
+
+
+def test_output_file_is_the_only_authoritative_sink(common, tmp_path):
+    output = tmp_path / "result.json"
+    fallback = _CaptureStream()
+    rc_code = common.emit_public_result(
+        {"status": "PASS", "content_free": True}, output_path=output,
+        primary_stream=_FailStream(), fallback_stream=fallback, exit_code=0
+    )
+    assert rc_code == 0
+    assert json.loads(output.read_text(encoding="utf-8"))["status"] == "PASS"
+    assert fallback.buffer.getvalue() == b""
+    assert not list(tmp_path.glob(".*.tmp"))
+
+
+class _FaultingOutputFile:
+    def __init__(self, fd, fault):
+        self.fd = fd
+        self.fault = fault
+
+    def __enter__(self):
+        return self
+
+    def write(self, data):
+        if self.fault == "write":
+            raise OSError(5, "unsafe", r"C:\Users\ADMIN\secret-token.txt")
+        os.write(self.fd, data)
+
+    def flush(self):
+        if self.fault == "flush":
+            raise OSError(5, "unsafe", r"C:\Users\ADMIN\secret-token.txt")
+
+    def fileno(self):
+        return self.fd
+
+    def __exit__(self, exc_type, exc, tb):
+        os.close(self.fd)
+        if self.fault == "close" and exc is None:
+            raise OSError(5, "unsafe", r"C:\Users\ADMIN\secret-token.txt")
+
+
+@pytest.mark.parametrize("fault", ["write", "flush", "fsync", "close"])
+def test_atomic_output_write_flush_close_failure_leaves_no_result(
+        common, tmp_path, monkeypatch, fault):
+    output = tmp_path / "result.json"
+    capture = _CaptureStream()
+
+    def faulting_fdopen(fd, mode):
+        assert mode == "wb"
+        return _FaultingOutputFile(fd, fault)
+
+    monkeypatch.setattr(common.os, "fdopen", faulting_fdopen)
+    if fault == "fsync":
+        monkeypatch.setattr(
+            common.os, "fsync",
+            lambda fd: (_ for _ in ()).throw(
+                OSError(5, "unsafe", r"C:\Users\ADMIN\secret-token.txt")
+            ),
+        )
+    else:
+        monkeypatch.setattr(common.os, "fsync", lambda fd: None)
+    rc_code = common.emit_public_result(
+        {"status": "PASS", "content_free": True}, output_path=output,
+        primary_stream=capture, fallback_stream=_FailStream(), exit_code=0
+    )
+    emitted = capture.buffer.getvalue()
+    assert rc_code != 0 and not output.exists()
+    assert not list(tmp_path.glob(".*.tmp"))
+    assert b"public_output_failure" in emitted
+    assert b"ADMIN" not in emitted and b"secret-token" not in emitted
+
+
+def test_atomic_output_replace_failure_preserves_existing_result(
+        common, tmp_path, monkeypatch):
+    output = tmp_path / "result.json"
+    original = b'{"status":"FAIL","content_free":true}\n'
+    output.write_bytes(original)
+    capture = _CaptureStream()
+
+    def fail_replace(source, destination):
+        raise OSError(5, "unsafe", r"C:\Users\ADMIN\secret-token.txt")
+
+    monkeypatch.setattr(common.os, "replace", fail_replace)
+    rc_code = common.emit_public_result(
+        {"status": "PASS", "content_free": True}, output_path=output,
+        primary_stream=capture, fallback_stream=_FailStream(), exit_code=0
+    )
+    assert rc_code != 0 and output.read_bytes() == original
+    assert not list(tmp_path.glob(".*.tmp"))
+    assert b"public_output_failure" in capture.buffer.getvalue()
+
+
+@pytest.mark.parametrize("module_name", ["builder", "verifier"])
+def test_cli_argument_error_is_content_free(
+        request, module_name, monkeypatch):
+    module = request.getfixturevalue(module_name)
+    token = r"C:\Users\ADMIN\SECRET-TOKEN-candidate.zip"
+    stdout = _CaptureStream()
+    stderr = _CaptureStream()
+    monkeypatch.setattr(module.sys, "stdout", stdout)
+    monkeypatch.setattr(module.sys, "stderr", stderr)
+    rc_code = module.main(["--unknown-option", token])
+    emitted = stdout.buffer.getvalue() + stderr.buffer.getvalue()
+    assert rc_code != 0
+    assert b"cli_argument_error" in emitted and b'"content_free": true' in emitted
+    assert token.encode() not in emitted and b"ADMIN" not in emitted
+    assert b"Traceback" not in emitted
+
+
+@pytest.mark.parametrize("module_name", ["builder", "verifier"])
+def test_cli_help_uses_guarded_stream_boundary(
+        request, module_name, monkeypatch):
+    module = request.getfixturevalue(module_name)
+    stdout = _CaptureStream()
+    stderr = _CaptureStream()
+    monkeypatch.setattr(module.sys, "stdout", stdout)
+    monkeypatch.setattr(module.sys, "stderr", stderr)
+    assert module.main(["--help"]) == 0
+    assert b"usage:" in stdout.buffer.getvalue()
+    assert stderr.buffer.getvalue() == b""
+
+    monkeypatch.setattr(module.sys, "stdout", _FailStream())
+    monkeypatch.setattr(module.sys, "stderr", _FailStream())
+    assert module.main(["--help"]) != 0
+
+
+def test_builder_cli_success_uses_guarded_emitter(
+        builder, synthetic_repo, tmp_path, monkeypatch):
+    stdout = _CaptureStream()
+    stderr = _CaptureStream()
+    monkeypatch.setattr(builder.sys, "stdout", stdout)
+    monkeypatch.setattr(builder.sys, "stderr", stderr)
+    rc_code = builder.main([
+        "--repo-root", str(synthetic_repo),
+        "--output-dir", str(tmp_path / "candidate"),
+    ])
+    assert rc_code == 0
+    emitted = stdout.buffer.getvalue()
+    assert b'"ok": true' in emitted and b'"content_free": true' in emitted
+    assert stderr.buffer.getvalue() == b""
+
+
+def test_builder_summary_file_is_atomic_and_terminal_quiet(
+        builder, synthetic_repo, tmp_path, monkeypatch):
+    summary = tmp_path / "builder-summary.json"
+    stdout = _CaptureStream()
+    stderr = _CaptureStream()
+    monkeypatch.setattr(builder.sys, "stdout", stdout)
+    monkeypatch.setattr(builder.sys, "stderr", stderr)
+    rc_code = builder.main([
+        "--repo-root", str(synthetic_repo),
+        "--output-dir", str(tmp_path / "candidate"),
+        "--summary-out", str(summary),
+    ])
+    assert rc_code == 0
+    parsed = json.loads(summary.read_text(encoding="utf-8"))
+    assert parsed["ok"] is True and parsed["content_free"] is True
+    assert stdout.buffer.getvalue() == b"" and stderr.buffer.getvalue() == b""
+    assert not list(tmp_path.glob(".*.tmp"))
+
+
+def test_verifier_cli_fail_and_not_verifiable_are_guarded(
+        verifier, built_zip, tmp_path, monkeypatch):
+    stdout = _CaptureStream()
+    stderr = _CaptureStream()
+    monkeypatch.setattr(verifier.sys, "stdout", stdout)
+    monkeypatch.setattr(verifier.sys, "stderr", stderr)
+
+    missing = tmp_path / "SECRET-CANDIDATE-NAME.zip"
+    assert verifier.main(["--zip", str(missing)]) == 1
+    failed = stdout.buffer.getvalue()
+    assert b'"status": "FAIL"' in failed
+    assert b"SECRET-CANDIDATE-NAME" not in failed and b"Traceback" not in failed
+
+    stdout.buffer.seek(0)
+    stdout.buffer.truncate()
+    assert verifier.main(["--zip", str(built_zip)]) == 2
+    not_verifiable = stdout.buffer.getvalue()
+    assert b'"status": "NOT_VERIFIABLE"' in not_verifiable
+    assert b'"content_free": true' in not_verifiable
+
+
+def test_verifier_output_file_is_atomic_and_terminal_quiet(
+        verifier, built_zip, policy_file, tmp_path, monkeypatch):
+    output = tmp_path / "verification.json"
+    stdout = _CaptureStream()
+    stderr = _CaptureStream()
+    monkeypatch.setattr(verifier.sys, "stdout", stdout)
+    monkeypatch.setattr(verifier.sys, "stderr", stderr)
+    rc_code = verifier.main([
+        "--zip", str(built_zip),
+        "--expected-policy-file", str(policy_file),
+        "--output", str(output),
+    ])
+    assert rc_code == 0
+    assert json.loads(output.read_text(encoding="utf-8"))["status"] == "PASS"
+    assert stdout.buffer.getvalue() == b"" and stderr.buffer.getvalue() == b""
+    assert not list(tmp_path.glob(".*.tmp"))
+
+
+@pytest.mark.parametrize("module_name,argv", [
+    ("builder", ["--repo-root", r"C:\Users\ADMIN\SECRET-REPO"]),
+    ("verifier", []),
+])
+def test_cli_missing_required_argument_is_content_free(
+        request, module_name, argv, monkeypatch):
+    module = request.getfixturevalue(module_name)
+    stdout = _CaptureStream()
+    stderr = _CaptureStream()
+    monkeypatch.setattr(module.sys, "stdout", stdout)
+    monkeypatch.setattr(module.sys, "stderr", stderr)
+    rc_code = module.main(argv)
+    emitted = stdout.buffer.getvalue() + stderr.buffer.getvalue()
+    assert rc_code != 0
+    assert b"cli_argument_error" in emitted and b'"content_free": true' in emitted
+    assert b"ADMIN" not in emitted and b"SECRET-REPO" not in emitted
+    assert b"Traceback" not in emitted
+    assert b"the following arguments are required" not in emitted
+
+
+def test_public_json_serialization_failure_is_content_free(common):
+    class _Boom:
+        def __str__(self):
+            return r"C:\Users\ADMIN\secret-token.txt"
+
+    primary = _CaptureStream()
+    rc_code = common.emit_public_result(
+        {"status": "PASS", "unsafe": _Boom()}, output_path=None,
+        primary_stream=primary, fallback_stream=_FailStream(), exit_code=0
+    )
+    emitted = primary.buffer.getvalue()
+    assert rc_code != 0
+    assert b"public_output_failure" in emitted
+    assert b"ADMIN" not in emitted and b"secret-token" not in emitted
+
+
+def test_atomic_output_open_failure_leaves_no_result(
+        common, tmp_path, monkeypatch):
+    output = tmp_path / "result.json"
+    capture = _CaptureStream()
+
+    def fail_mkstemp(*args, **kwargs):
+        raise OSError(13, "Permission denied", r"C:\Users\ADMIN\secret-token.txt")
+
+    monkeypatch.setattr(common.tempfile, "mkstemp", fail_mkstemp)
+    rc_code = common.emit_public_result(
+        {"status": "PASS", "content_free": True}, output_path=output,
+        primary_stream=capture, fallback_stream=_FailStream(), exit_code=0
+    )
+    emitted = capture.buffer.getvalue()
+    assert rc_code != 0 and not output.exists()
+    assert not list(tmp_path.glob(".*.tmp"))
+    assert b"public_output_failure" in emitted
+    assert b"ADMIN" not in emitted and b"secret-token" not in emitted
+
+
+def test_verifier_file_fail_and_not_verifiable_are_atomic(
+        verifier, built_zip, tmp_path, monkeypatch):
+    stdout = _CaptureStream()
+    stderr = _CaptureStream()
+    monkeypatch.setattr(verifier.sys, "stdout", stdout)
+    monkeypatch.setattr(verifier.sys, "stderr", stderr)
+
+    fail_out = tmp_path / "fail.json"
+    missing = tmp_path / "SECRET-CANDIDATE-NAME.zip"
+    assert verifier.main([
+        "--zip", str(missing), "--output", str(fail_out),
+    ]) == 1
+    assert stdout.buffer.getvalue() == b"" and stderr.buffer.getvalue() == b""
+    fail_payload = json.loads(fail_out.read_text(encoding="utf-8"))
+    assert fail_payload["status"] == "FAIL" and fail_payload["content_free"] is True
+    assert "SECRET-CANDIDATE-NAME" not in fail_out.read_text(encoding="utf-8")
+    assert not list(tmp_path.glob(".*.tmp"))
+
+    nv_out = tmp_path / "not-verifiable.json"
+    assert verifier.main([
+        "--zip", str(built_zip), "--output", str(nv_out),
+    ]) == 2
+    assert stdout.buffer.getvalue() == b"" and stderr.buffer.getvalue() == b""
+    nv_payload = json.loads(nv_out.read_text(encoding="utf-8"))
+    assert nv_payload["status"] == "NOT_VERIFIABLE"
+    assert nv_payload["content_free"] is True
+    assert not list(tmp_path.glob(".*.tmp"))
+
+
+def test_file_output_failure_never_leaves_pass_after_terminal_fallback(
+        common, tmp_path, monkeypatch):
+    """A would-be PASS payload whose authoritative file sink fails must not leave
+    a PASS file; terminal fallback is fixed content-free failure."""
+    output = tmp_path / "result.json"
+    capture = _CaptureStream()
+
+    def fail_replace(source, destination):
+        raise OSError(5, "unsafe", r"C:\Users\ADMIN\secret-token.txt")
+
+    monkeypatch.setattr(common.os, "replace", fail_replace)
+    rc_code = common.emit_public_result(
+        {"status": "PASS", "content_free": True, "passed": True},
+        output_path=output, primary_stream=capture,
+        fallback_stream=_FailStream(), exit_code=0
+    )
+    emitted = capture.buffer.getvalue()
+    assert rc_code != 0
+    assert not output.exists() or b'"status": "PASS"' not in output.read_bytes()
+    assert b"public_output_failure" in emitted
+    assert b'"status": "PASS"' not in emitted
+    assert b"ADMIN" not in emitted
+    assert not list(tmp_path.glob(".*.tmp"))
