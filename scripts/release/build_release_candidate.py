@@ -38,7 +38,8 @@ if __package__ in (None, ""):
         PAYLOAD_PREFIX, POLICY_RELPATH, SIZES_NAME, ZIP_POLICY_CANON, ReleaseError, ReleasePolicy,
         assert_within, checksum_text, classify_path, classification_summary, deterministic_zip_bytes,
         exclusive_write, hardlink_no_clobber, inspect_archive_bytes, is_hex40, is_symlink_or_reparse,
-        parse_release_policy, read_snapshot_bytes, read_zip_entries, sha256_bytes, validate_relative_posix,
+        parse_generated_declaration, parse_release_policy, read_snapshot_bytes, read_zip_entries,
+        sha256_bytes, validate_relative_posix,
     )
     import verify_release_candidate as _verifier  # type: ignore
 else:
@@ -48,7 +49,8 @@ else:
         PAYLOAD_PREFIX, POLICY_RELPATH, SIZES_NAME, ZIP_POLICY_CANON, ReleaseError, ReleasePolicy,
         assert_within, checksum_text, classify_path, classification_summary, deterministic_zip_bytes,
         exclusive_write, hardlink_no_clobber, inspect_archive_bytes, is_hex40, is_symlink_or_reparse,
-        parse_release_policy, read_snapshot_bytes, read_zip_entries, sha256_bytes, validate_relative_posix,
+        parse_generated_declaration, parse_release_policy, read_snapshot_bytes, read_zip_entries,
+        sha256_bytes, validate_relative_posix,
     )
     from . import verify_release_candidate as _verifier  # noqa: F401
 
@@ -72,39 +74,20 @@ def _tracked_files(repo_root: Path) -> list[str]:
     return sorted(item for item in raw.split("\0") if item)
 
 
-def _load_generated_allowlist(path: Path) -> tuple[list[dict[str, Any]], str]:
-    """Load the EXTERNAL operator-supplied generated allowlist. Returns the
-    validated entries and the SHA-256 of the exact allowlist bytes (the external
-    trusted generated-allowlist anchor)."""
+def _load_generated_declaration(path: Path) -> tuple[list[dict[str, Any]], bytes, str]:
+    """Load and strictly parse the EXTERNAL operator-supplied generated
+    declaration (the same schema the verifier consumes). Returns the validated
+    entries, the exact declaration bytes, and their SHA-256."""
     if is_symlink_or_reparse(path):
-        raise ReleaseError("generated_allowlist", "generated allowlist is a symlink/reparse point")
+        raise ReleaseError("generated_declaration", "generated declaration is a symlink/reparse point")
     try:
         raw = path.read_bytes()
     except OSError as exc:
-        raise ReleaseError("generated_allowlist", "generated allowlist could not be read") from exc
-    allowlist_sha = sha256_bytes(raw)
-    try:
-        payload = json.loads(raw.decode("utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise ReleaseError("generated_allowlist", "generated allowlist is not valid UTF-8 JSON") from exc
-    if not isinstance(payload, dict) or payload.get("schema_version") != 1:
-        raise ReleaseError("generated_allowlist", "generated allowlist schema_version must be 1")
-    files = payload.get("files")
-    if not isinstance(files, list):
-        raise ReleaseError("generated_allowlist", "generated allowlist 'files' must be a list")
-    entries: list[dict[str, Any]] = []
-    for item in files:
-        if not isinstance(item, dict) or set(item) != {"path", "sha256", "size_bytes"}:
-            raise ReleaseError("generated_allowlist", "each generated entry needs path/sha256/size_bytes")
-        rel = validate_relative_posix(item["path"], label="generated path")
-        size = item["size_bytes"]
-        if type(size) is not int or size < 0:
-            raise ReleaseError("generated_allowlist", f"size_bytes must be a non-negative int: {rel}")
-        sha = item["sha256"]
-        if not isinstance(sha, str) or len(sha) != 64:
-            raise ReleaseError("generated_allowlist", f"sha256 must be 64 hex chars: {rel}")
-        entries.append({"path": rel, "sha256": sha.lower(), "size_bytes": size})
-    return entries, allowlist_sha
+        raise ReleaseError("generated_declaration", "generated declaration could not be read") from exc
+    mapping, decl_sha = parse_generated_declaration(raw)  # strict, duplicate-key-rejecting
+    entries = [{"path": rel, "sha256": sha, "size_bytes": size}
+               for rel, (sha, size) in sorted(mapping.items())]
+    return entries, raw, decl_sha
 
 
 def _reject_symlink_chain(repo_root: Path, rel: str) -> None:
@@ -207,8 +190,9 @@ def _build_payload(*, repo_root: Path, expected_head: str | None, expected_branc
 
     generated_entries: list[dict[str, Any]] = []
     generated_allowlist_sha: str | None = None
+    generated_decl_bytes: bytes | None = None
     if generated_allowlist is not None:
-        declared_entries, generated_allowlist_sha = _load_generated_allowlist(
+        declared_entries, generated_decl_bytes, generated_allowlist_sha = _load_generated_declaration(
             generated_allowlist.expanduser().resolve())
         for declared in declared_entries:
             entry = _snapshot_generated(repo_root, declared, policy)
@@ -270,21 +254,22 @@ def _build_payload(*, repo_root: Path, expected_head: str | None, expected_branc
     return {
         "zip_bytes": zip_bytes, "manifest_bytes": manifest_bytes,
         "sizes_bytes": sizes_bytes, "checksums_bytes": payload[CHECKSUMS_NAME],
-        "payload": payload, "policy": policy, "summary": summary,
+        "payload": payload, "policy": policy, "policy_bytes": policy_bytes, "summary": summary,
         "head": head_before, "branch": branch,
         "payload_count": file_count, "control_count": 3,
         "generated_count": len(generated_entries), "generated_allowlist_sha256": generated_allowlist_sha,
+        "generated_decl_bytes": generated_decl_bytes,
     }
 
 
-def _verify_zip_pass(zip_path: Path, policy_path: Path, policy: ReleasePolicy, *,
-                     generated_allowlist_sha: str | None, stage: str) -> str:
-    """Verify with the EXTERNAL trusted policy FILE bytes and, when generated
-    files are present, the EXTERNAL trusted generated-allowlist SHA (from the
-    operator-supplied allowlist file). Never candidate self-anchoring. Requires PASS."""
+def _verify_zip_pass(zip_path: Path, trusted_policy_file: Path, policy: ReleasePolicy,
+                     trusted_generated_file: Path | None, *, stage: str) -> str:
+    """Verify against ONE immutable external trusted policy byte snapshot and,
+    when generated files are present, the exact external generated declaration
+    snapshot. Never candidate self-anchoring. Requires PASS."""
     report = _verifier.verify_release_candidate(
-        zip_path, expected_policy_file=policy_path, expected_policy_id=policy.policy_id,
-        expected_generated_sha256=generated_allowlist_sha)
+        zip_path, expected_policy_file=trusted_policy_file, expected_policy_id=policy.policy_id,
+        expected_generated_file=trusted_generated_file)
     if report.get("status") != "PASS":
         raise ReleaseError("verify_before_publish", f"{stage} verification did not PASS")
     return report.get("policy_trust", "")
@@ -305,7 +290,6 @@ def build_release_candidate(
         raise ReleaseError("repo_root", "repo-root is not a Git repository")
 
     zip_path = output_dir / ZIP_NAME
-    policy_path = repo_root / POLICY_RELPATH
     if output_dir.exists():
         raise ReleaseError("output_reuse", "output directory already exists")
     if zip_path.exists():
@@ -324,6 +308,13 @@ def build_release_candidate(
     created_output = False
     try:
         staging_dir = Path(tempfile.mkdtemp(prefix=".rc-stage-", dir=str(output_dir.parent)))
+        # ONE immutable external trusted byte snapshot consumed by BOTH verifications.
+        trusted_policy_file = staging_dir / "trusted-policy.json"
+        exclusive_write(trusted_policy_file, built["policy_bytes"])
+        trusted_generated_file: Path | None = None
+        if built["generated_decl_bytes"] is not None:
+            trusted_generated_file = staging_dir / "trusted-generated.json"
+            exclusive_write(trusted_generated_file, built["generated_decl_bytes"])
         staging_zip = staging_dir / ZIP_NAME
         exclusive_write(staging_zip, zip_bytes)
         exclusive_write(staging_dir / MANIFEST_NAME, built["manifest_bytes"])
@@ -334,8 +325,8 @@ def build_release_candidate(
 
         if sha256_bytes(staging_zip.read_bytes()) != verified_sha:
             raise ReleaseError("staging_mismatch", "staged ZIP bytes differ from the in-memory build")
-        prepub_trust = _verify_zip_pass(staging_zip, policy_path, policy,
-                                        generated_allowlist_sha=built["generated_allowlist_sha256"], stage="staging")
+        prepub_trust = _verify_zip_pass(staging_zip, trusted_policy_file, policy,
+                                        trusted_generated_file, stage="staging")
 
         output_dir.mkdir(parents=True, exist_ok=False)
         created_output = True
@@ -349,8 +340,8 @@ def build_release_candidate(
         final_bytes = zip_path.read_bytes()
         if sha256_bytes(final_bytes) != verified_sha or len(final_bytes) != verified_size:
             raise ReleaseError("publication_mismatch", "published ZIP bytes differ from the verified ZIP")
-        postpub_trust = _verify_zip_pass(zip_path, policy_path, policy,
-                                         generated_allowlist_sha=built["generated_allowlist_sha256"], stage="published")
+        postpub_trust = _verify_zip_pass(zip_path, trusted_policy_file, policy,
+                                         trusted_generated_file, stage="published")
 
         reopened = read_zip_entries(zip_path)
         if set(reopened) != set(built["payload"]):
@@ -377,7 +368,9 @@ def build_release_candidate(
         "prepublication_verifier_result": "PASS", "postpublication_verifier_result": "PASS",
         "prepublication_verifier_trust_mode": prepub_trust,
         "generated_count": built["generated_count"], "generated_allowlist_sha256": built["generated_allowlist_sha256"],
-        "output_dir": str(output_dir), "zip_path": str(zip_path),
+        "generated_trust_mode": ("external_declaration_file" if built["generated_decl_bytes"] is not None
+                                 else "canonical_zero"),
+        "zip_name": ZIP_NAME, "content_free": True,
         "zip_sha256": verified_sha, "zip_size_bytes": verified_size,
         "zip_entry_count": len(built["payload"]), "payload_count": built["payload_count"],
         "control_count": 3, "verified_before_publish": True, "published_atomically": True,
@@ -406,8 +399,10 @@ def main(argv: list[str] | None = None) -> int:
             base_sha=args.base_sha, generated_allowlist=args.generated_allowlist,
         )
     except ReleaseError as exc:
+        # Content-free: emit only the stable code, never the message (which may
+        # contain repository/generated/filesystem paths).
         payload = {"schema_version": 1, "tool": BUILDER_TOOL,
-                   "ok": False, "error_code": exc.code, "error": exc.message}
+                   "ok": False, "error_code": exc.code, "content_free": True}
         text = json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False)
         if args.summary_out is not None:
             args.summary_out.write_text(text + "\n", encoding="utf-8")

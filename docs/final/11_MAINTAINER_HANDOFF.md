@@ -65,9 +65,13 @@ python scripts\release\build_release_candidate.py `
   [--expected-head <SHA>] [--expected-branch <BRANCH>] [--base-sha <SHA>] `
   [--generated-allowlist <JSON>] [--summary-out <JSON>]
 
-# Independently verify the built candidate (PASS / FAIL / NOT_VERIFIABLE)
+# Independently verify the built candidate (PASS / FAIL / NOT_VERIFIABLE).
+# --expected-policy-file is MANDATORY for a PASS result (an external trusted policy
+# file); without it the result is NOT_VERIFIABLE. Supply --expected-generated-file
+# only when the candidate contains generated payloads.
 python scripts\release\verify_release_candidate.py --zip <OUTPUT_DIR>\release-candidate.zip `
-  [--expected-policy-sha256 <SHA256>] [--expected-policy-id <ID>] [--expected-head <SHA>]
+  --expected-policy-file release\release-allowlist.json `
+  [--expected-policy-id <ID>] [--expected-head <SHA>] [--expected-generated-file <DECL_JSON>]
 ```
 
 ---

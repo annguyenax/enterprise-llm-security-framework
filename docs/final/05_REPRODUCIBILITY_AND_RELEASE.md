@@ -87,9 +87,19 @@ the output directory). It does **not** create a sibling `<OUTPUT_DIR>.zip`.
   files are present, PASS also requires an external generated-allowlist anchor.
   The default `verify_release_candidate.py` invocation therefore requires
   `--expected-policy-file`.
-- **Content-free failures.** Candidate-controlled names/paths/strings are never
-  emitted in failure output; findings carry only stable reason codes,
-  `content_free: true`, and safe indices/hashes. No raw values or tracebacks.
+- **Generated payloads need a parsed external declaration.** When generated files
+  are present, PASS requires an external trusted generated declaration file
+  (`--expected-generated-file`) that the verifier parses and reconciles
+  (exact path set + SHA-256 + size) against every generated payload; a generated
+  SHA alone is insufficient (NOT_VERIFIABLE) and the candidate cannot
+  self-authorize. Contradictory anchors (file + mismatching SHA) fail closed.
+- **Content-free failures.** Candidate-controlled names/paths/identities — including
+  the candidate manifest `repo_head` — are never emitted in verifier or builder
+  output; results carry only stable reason codes, `content_free: true`, and safe
+  indices/hashes. No raw values, absolute paths, or tracebacks.
+- **ZIP metadata is governed.** The outer archive comment, per-entry comments and
+  extra fields must be empty; the verifier independently rejects any unmanifested
+  data through these channels.
 - **Disjoint closed-world policy.** Classification is enforced from the tracked
   policy `release/release-allowlist.json` (schema 4), whose `policy_id`, schema
   version and SHA-256 are recorded in the ZIP's `release-manifest.json` and

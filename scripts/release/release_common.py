@@ -107,6 +107,9 @@ MANIFEST_TOP_KEYS = frozenset(
      "control_coverage", "content_controls", "zip_policy", "files"}
 )
 GENERATED_MANIFEST_KEYS = frozenset({"count", "allowlist_sha256"})
+GENERATED_DECL_TOP_KEYS = frozenset({"schema_version", "generated_files"})
+GENERATED_DECL_ROW_KEYS = frozenset({"path", "sha256", "size_bytes"})
+GENERATED_DECL_SCHEMA_VERSION = 1
 BUILDER_KEYS = frozenset({"tool", "manifest_schema_version", "archive_inspection_version"})
 REPO_KEYS = frozenset({"head", "branch", "base_sha"})
 POLICY_ID_KEYS = frozenset({"policy_id", "schema_version", "sha256"})
@@ -333,6 +336,42 @@ def load_json_no_dupes(raw: bytes, label: str) -> Any:
     except UnicodeDecodeError as exc:
         raise ReleaseError("malformed_utf8", f"{label} is not valid UTF-8") from exc
     return _load_json_no_dupes(text, label)
+
+
+def parse_generated_declaration(raw: bytes) -> tuple[dict[str, tuple[str, int]], str]:
+    """Strictly parse an EXTERNAL trusted generated-file declaration. Returns a
+    mapping ``path -> (sha256, size_bytes)`` and the SHA-256 of the exact declared
+    bytes. Duplicate-key-rejecting; exact schema; safe normalized paths; no
+    Boolean sizes; no duplicate/case-colliding/control-name paths. Fail closed."""
+    obj = load_json_no_dupes(raw, "generated declaration")  # ReleaseError on UTF-8/JSON/dupes
+    if not isinstance(obj, dict) or set(obj) != GENERATED_DECL_TOP_KEYS:
+        raise ReleaseError("generated_declaration", "declaration must have exactly schema_version/generated_files")
+    if not is_exact_int(obj["schema_version"]) or obj["schema_version"] != GENERATED_DECL_SCHEMA_VERSION:
+        raise ReleaseError("generated_declaration", f"declaration schema_version must be {GENERATED_DECL_SCHEMA_VERSION}")
+    rows = obj["generated_files"]
+    if not isinstance(rows, list):
+        raise ReleaseError("generated_declaration", "generated_files must be a list")
+    mapping: dict[str, tuple[str, int]] = {}
+    folded: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict) or set(row) != GENERATED_DECL_ROW_KEYS:
+            raise ReleaseError("generated_declaration", "each declaration row needs exactly path/sha256/size_bytes")
+        rel = validate_relative_posix(row["path"], label="generated declaration path")
+        if rel in (MANIFEST_NAME, CHECKSUMS_NAME, SIZES_NAME):
+            raise ReleaseError("generated_declaration", "declaration path collides with a control name")
+        sha = row["sha256"]
+        if not is_hex64(sha):
+            raise ReleaseError("generated_declaration", "declaration sha256 must be 64 hex")
+        size = row["size_bytes"]
+        if not is_exact_int(size) or size < 0:
+            raise ReleaseError("generated_declaration", "declaration size_bytes must be a non-negative integer")
+        if rel in mapping:
+            raise ReleaseError("generated_declaration", "duplicate declaration path")
+        if rel.casefold() in folded:
+            raise ReleaseError("generated_declaration", "case-colliding declaration path")
+        folded.add(rel.casefold())
+        mapping[rel] = (sha.lower(), size)
+    return mapping, sha256_bytes(raw)
 
 
 # --------------------------------------------------------------------------- #
@@ -793,11 +832,14 @@ def deterministic_zip_bytes(files: dict[str, bytes]) -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED,
                          compresslevel=9, strict_timestamps=True) as archive:
+        archive.comment = b""  # canonical: no outer archive comment
         for name in sorted(files):
             info = zipfile.ZipInfo(name, date_time=ZIP_TIMESTAMP)
             info.compress_type = zipfile.ZIP_DEFLATED
             info.create_system = ZIP_CREATE_SYSTEM
             info.external_attr = ZIP_EXTERNAL_ATTR
+            info.comment = b""      # canonical: no per-entry comment
+            info.extra = b""        # canonical: no extra field
             archive.writestr(info, files[name], compress_type=zipfile.ZIP_DEFLATED,
                              compresslevel=9)
     return buffer.getvalue()
@@ -836,6 +878,8 @@ def read_zip_entries(zip_path: Path) -> dict[str, bytes]:
     Maps unsupported/encrypted/malformed archives to controlled ReleaseError."""
     try:
         with zipfile.ZipFile(zip_path, "r") as archive:
+            if archive.comment != b"":
+                raise ReleaseError("zip_comment_nonempty", "release ZIP has a non-empty archive comment")
             infos = archive.infolist()
             if len(infos) > MAX_ZIP_ENTRIES:
                 raise ReleaseError("zip_too_many_entries", "release ZIP has too many entries")
@@ -855,6 +899,10 @@ def read_zip_entries(zip_path: Path) -> dict[str, bytes]:
                     raise ReleaseError("zip_encrypted", "ZIP contains an encrypted entry")
                 if info.compress_type not in SUPPORTED_COMPRESSION:
                     raise ReleaseError("zip_unsupported_compression", "ZIP uses unsupported compression")
+                if info.comment != b"":
+                    raise ReleaseError("zip_entry_comment", "ZIP entry carries a non-empty comment")
+                if info.extra != b"":
+                    raise ReleaseError("zip_entry_extra", "ZIP entry carries an extra field")
                 if info.file_size > MAX_FILE_BYTES:
                     raise ReleaseError("zip_entry_too_large", "a ZIP entry exceeds the size limit")
                 total += info.file_size

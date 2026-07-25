@@ -78,24 +78,52 @@ builder verifies both the staged and the published ZIP against the exact tracked
 policy file it loaded.
 
 When **generated files are present**, PASS additionally requires an external
-trusted generated-allowlist anchor (`--expected-generated-sha256`, the SHA-256 of
-the operator-supplied generated allowlist); without it the result is
-NOT_VERIFIABLE. The manifest encodes a canonical `generated` object
-(`{"count": N, "allowlist_sha256": …}`); the zero-generated state is exactly
-`{"count": 0, "allowlist_sha256": null}`. A generated row must carry
-`source="generated"`, `classification="GENERATED"`, the reserved generated
-rule ID and `rule_form="generated"` together; tracked rows may carry none of
-those markers.
+trusted generated **declaration file** (`--expected-generated-file`): the verifier
+parses that file with an exact, duplicate-key-rejecting schema
+(`{"schema_version": 1, "generated_files": [{"path", "sha256", "size_bytes"}]}`),
+hashes the exact bytes, and independently reconciles the exact path set, SHA-256
+and byte size of every generated payload against it. A generated **SHA alone**
+(`--expected-generated-sha256`) is insufficient and caps the result at
+NOT_VERIFIABLE; the candidate manifest cannot self-authorize generated rows. The
+manifest encodes a canonical `generated` object (`{"count": N, "allowlist_sha256":
+…}`); the zero-generated state is exactly `{"count": 0, "allowlist_sha256": null}`
+and needs no declaration. A generated row must carry `source="generated"`,
+`classification="GENERATED"`, the reserved generated rule ID and
+`rule_form="generated"` together; tracked rows may carry none of those markers.
+
+## Contradictory trust anchors fail closed
+
+If both a policy file and a policy SHA are supplied they must agree exactly, else
+FAIL (`contradictory_policy_anchor`); likewise a generated file plus a generated
+SHA (`contradictory_generated_anchor`). No supplied anchor is silently ignored.
+The builder binds **one immutable external byte snapshot** for the policy (and,
+when present, the generated declaration) and feeds the same snapshot to both the
+staged and the published verification.
+
+## Outer ZIP comment and metadata channels
+
+The release ZIP carries **no unmanifested data through metadata channels**. The
+builder writes an empty outer archive comment, empty per-entry comments and empty
+extra fields; the verifier independently rejects a non-empty archive comment
+(`zip_comment_nonempty`), a non-empty entry comment (`zip_entry_comment`) or an
+entry extra field (`zip_entry_extra`), alongside the existing deterministic
+timestamp / create-system / permission / compression checks. Comment bytes are
+never emitted in output.
 
 ## Content-free failure contract
 
-Candidate-controlled values (entry/nested names, paths, manifest/policy/rule/
-branch strings, malformed JSON/Unicode, OS/zip exception text) are **never**
-emitted in findings, summaries, stderr or exceptions. Every parser/ZIP/filesystem
-failure is converted at a single boundary into a structured result carrying only
-a stable reason code, `content_free: true`, and safe identifiers (ordinal index,
-count, or the SHA-256 of the offending value). Uncontrolled tracebacks and raw
-exception messages are suppressed.
+Candidate-controlled values (entry/nested names, paths, manifest identities such
+as `repo_head`/branch/policy-id/rule-id, malformed JSON/Unicode, OS/zip exception
+text, ZIP comments) are **never** emitted in findings, summaries, stderr or
+exceptions. The verifier report omits raw candidate identities entirely (it may
+report only a trusted `expected_head_matched` boolean, never the raw HEAD). Every
+parser/ZIP/filesystem failure is converted at a single boundary into a structured
+result carrying only a stable reason code, `content_free: true`, and safe
+identifiers (ordinal index, count, or the SHA-256 of the offending value). The
+**builder** likewise emits only a stable `error_code` (never `ReleaseError`
+messages, generated/tracked paths, or absolute output paths) and no absolute
+filesystem paths in its summary. Uncontrolled tracebacks and raw exception
+messages are suppressed.
 
 ## Control-file coverage (explicit)
 

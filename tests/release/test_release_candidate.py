@@ -67,7 +67,8 @@ def _add_allowed_archive(repo: Path, git, members: dict, *, path="bundle.zip"):
 
 @pytest.fixture()
 def built_zip(builder, synthetic_repo, tmp_path):
-    return Path(_build(builder, synthetic_repo, tmp_path / "out")["zip_path"])
+    _build(builder, synthetic_repo, tmp_path / "out")
+    return (tmp_path / "out" / "release-candidate.zip")
 
 
 # =========================================================================== #
@@ -79,13 +80,13 @@ def test_clean_build_and_verify_pass(builder, verifier, synthetic_repo, tmp_path
     assert s["verifier_trust_mode"] == "external_file"
     assert s["prepublication_verifier_result"] == "PASS" and s["postpublication_verifier_result"] == "PASS"
     assert s["generated_count"] == 0 and s["generated_allowlist_sha256"] is None
-    r = _vr(verifier, Path(s["zip_path"]), policy_file)
+    r = _vr(verifier, (tmp_path / "out" / "release-candidate.zip"), policy_file)
     assert r["status"] == "PASS" and r["policy_trust"] == "external_file", r
 
 
 def test_manifest_has_canonical_zero_generated_state(builder, synthetic_repo, tmp_path):
     s = _build(builder, synthetic_repo, tmp_path / "out")
-    m = _manifest_of(Path(s["zip_path"]))
+    m = _manifest_of((tmp_path / "out" / "release-candidate.zip"))
     assert m["schema_version"] == 5
     assert m["generated"] == {"count": 0, "allowlist_sha256": None}
     assert m["counts"]["generated_count"] == 0
@@ -199,8 +200,10 @@ def test_builder_passes_trusted_bytes_to_verification(builder, synthetic_repo, t
     monkeypatch.setattr(builder._verifier, "verify_release_candidate", spy)
     _build(builder, synthetic_repo, tmp_path / "out")
     assert len(calls) == 2  # staging + published
+    # Both verifications consume ONE immutable trusted byte snapshot (not the mutable repo path).
     for c in calls:
-        assert c is not None and Path(c).name == "release-allowlist.json"
+        assert c is not None and Path(c).name == "trusted-policy.json"
+    assert calls[0] == calls[1]
 
 
 def test_builder_refuses_publication_when_trusted_verification_not_pass(builder, synthetic_repo, tmp_path):
@@ -381,12 +384,12 @@ def test_generated_wrong_rule_form_fails(builder, verifier, common, synthetic_re
     import hashlib
     data = (synthetic_repo / "pipfreeze.txt").read_bytes()
     gen = tmp_path / "gen.json"
-    gen.write_text(json.dumps({"schema_version": 1, "files": [
+    gen.write_text(json.dumps({"schema_version": 1, "generated_files": [
         {"path": "pipfreeze.txt", "sha256": hashlib.sha256(data).hexdigest(), "size_bytes": len(data)}]}),
         encoding="utf-8")
     # pipfreeze.txt is untracked (generated); commit only leaves it out of tracked set
     s = _build(builder, synthetic_repo, tmp_path / "out", generated_allowlist=gen)
-    zip_path = Path(s["zip_path"])
+    zip_path = (tmp_path / "out" / "release-candidate.zip")
     m = _manifest_of(zip_path)
     genrows = [f for f in m["files"] if f["source"] == "generated"]
     assert genrows and genrows[0]["rule_form"] == "generated"
@@ -399,7 +402,7 @@ def test_generated_wrong_rule_form_fails(builder, verifier, common, synthetic_re
         _resign(common, it)
     dst = tmp_path / "z.zip"; _repackage_full(common, zip_path, dst, mut)
     r = verifier.verify_release_candidate(dst, expected_policy_file=policy_file,
-                                          expected_generated_sha256=m["generated"]["allowlist_sha256"])
+                                          expected_generated_file=gen)
     assert r["status"] == "FAIL" and any(f["code"] == "generated_semantic" for f in r["findings"])
 
 
@@ -408,11 +411,11 @@ def test_generated_nonzero_without_external_anchor_not_pass(builder, verifier, c
     import hashlib
     data = (synthetic_repo / "pipfreeze.txt").read_bytes()
     gen = tmp_path / "gen.json"
-    gen.write_text(json.dumps({"schema_version": 1, "files": [
+    gen.write_text(json.dumps({"schema_version": 1, "generated_files": [
         {"path": "pipfreeze.txt", "sha256": hashlib.sha256(data).hexdigest(), "size_bytes": len(data)}]}),
         encoding="utf-8")
     s = _build(builder, synthetic_repo, tmp_path / "out", generated_allowlist=gen)
-    r = _vr(verifier, Path(s["zip_path"]), policy_file)  # no expected_generated_sha256
+    r = _vr(verifier, (tmp_path / "out" / "release-candidate.zip"), policy_file)  # no expected_generated_sha256
     assert r["status"] == "NOT_VERIFIABLE"
     assert any(n["code"] == "generated_anchor_missing" for n in r["not_verifiable"])
 
@@ -422,34 +425,199 @@ def test_generated_external_anchor_match_passes(builder, verifier, common, synth
     import hashlib
     data = (synthetic_repo / "pipfreeze.txt").read_bytes()
     gen = tmp_path / "gen.json"
-    gen.write_text(json.dumps({"schema_version": 1, "files": [
+    gen.write_text(json.dumps({"schema_version": 1, "generated_files": [
         {"path": "pipfreeze.txt", "sha256": hashlib.sha256(data).hexdigest(), "size_bytes": len(data)}]}),
         encoding="utf-8")
     s = _build(builder, synthetic_repo, tmp_path / "out", generated_allowlist=gen)
-    m = _manifest_of(Path(s["zip_path"]))
-    r = verifier.verify_release_candidate(Path(s["zip_path"]), expected_policy_file=policy_file,
-                                          expected_generated_sha256=m["generated"]["allowlist_sha256"])
+    m = _manifest_of((tmp_path / "out" / "release-candidate.zip"))
+    r = verifier.verify_release_candidate((tmp_path / "out" / "release-candidate.zip"), expected_policy_file=policy_file,
+                                          expected_generated_file=gen)
     assert r["status"] == "PASS" and r["generated_count"] == 1
 
 
-def test_generated_anchor_mismatch_fails(builder, verifier, common, synthetic_repo, tmp_path, policy_file):
+def _gen_decl(path, entries):
+    path.write_text(json.dumps({"schema_version": 1, "generated_files": entries}), encoding="utf-8")
+    return path
+
+
+def test_generated_hash_only_cannot_pass(builder, verifier, synthetic_repo, tmp_path, policy_file):
     (synthetic_repo / "pipfreeze.txt").write_text("pytest==8.0\n", encoding="utf-8")
     import hashlib
     data = (synthetic_repo / "pipfreeze.txt").read_bytes()
-    gen = tmp_path / "gen.json"
-    gen.write_text(json.dumps({"schema_version": 1, "files": [
-        {"path": "pipfreeze.txt", "sha256": hashlib.sha256(data).hexdigest(), "size_bytes": len(data)}]}),
-        encoding="utf-8")
+    gen = _gen_decl(tmp_path / "gen.json", [
+        {"path": "pipfreeze.txt", "sha256": hashlib.sha256(data).hexdigest(), "size_bytes": len(data)}])
     s = _build(builder, synthetic_repo, tmp_path / "out", generated_allowlist=gen)
-    r = verifier.verify_release_candidate(Path(s["zip_path"]), expected_policy_file=policy_file,
-                                          expected_generated_sha256="b" * 64)
+    m = _manifest_of((tmp_path / "out" / "release-candidate.zip"))
+    r = verifier.verify_release_candidate((tmp_path / "out" / "release-candidate.zip"), expected_policy_file=policy_file,
+                                          expected_generated_sha256=m["generated"]["allowlist_sha256"])
+    assert r["status"] == "NOT_VERIFIABLE"
+    assert any(n["code"] == "generated_hash_only" for n in r["not_verifiable"])
+
+
+def test_generated_anchor_mismatch_fails(builder, verifier, synthetic_repo, tmp_path, policy_file):
+    (synthetic_repo / "pipfreeze.txt").write_text("pytest==8.0\n", encoding="utf-8")
+    import hashlib
+    data = (synthetic_repo / "pipfreeze.txt").read_bytes()
+    gen = _gen_decl(tmp_path / "gen.json", [
+        {"path": "pipfreeze.txt", "sha256": hashlib.sha256(data).hexdigest(), "size_bytes": len(data)}])
+    s = _build(builder, synthetic_repo, tmp_path / "out", generated_allowlist=gen)
+    # A reformatted declaration: same mapping, different bytes -> different declaration SHA.
+    gen2 = tmp_path / "gen2.json"
+    gen2.write_text(json.dumps({"schema_version": 1, "generated_files": [
+        {"path": "pipfreeze.txt", "sha256": hashlib.sha256(data).hexdigest(), "size_bytes": len(data)}]},
+        indent=4), encoding="utf-8")
+    r = verifier.verify_release_candidate((tmp_path / "out" / "release-candidate.zip"), expected_policy_file=policy_file,
+                                          expected_generated_file=gen2)
     assert r["status"] == "FAIL" and any(f["code"] == "generated_anchor_mismatch" for f in r["findings"])
+
+
+def test_generated_declaration_path_absent_fails(builder, verifier, synthetic_repo, tmp_path, policy_file):
+    (synthetic_repo / "pipfreeze.txt").write_text("pytest==8.0\n", encoding="utf-8")
+    import hashlib
+    data = (synthetic_repo / "pipfreeze.txt").read_bytes()
+    gen = _gen_decl(tmp_path / "gen.json", [
+        {"path": "pipfreeze.txt", "sha256": hashlib.sha256(data).hexdigest(), "size_bytes": len(data)}])
+    s = _build(builder, synthetic_repo, tmp_path / "out", generated_allowlist=gen)
+    # Declaration with an EXTRA path not in the candidate -> set mismatch.
+    other = _gen_decl(tmp_path / "gen3.json", [
+        {"path": "pipfreeze.txt", "sha256": hashlib.sha256(data).hexdigest(), "size_bytes": len(data)},
+        {"path": "phantom.txt", "sha256": "0" * 64, "size_bytes": 1}])
+    r = verifier.verify_release_candidate((tmp_path / "out" / "release-candidate.zip"), expected_policy_file=policy_file,
+                                          expected_generated_file=other)
+    assert r["status"] == "FAIL"
+    assert any(f["code"] in {"generated_set_mismatch", "generated_anchor_mismatch"} for f in r["findings"])
+
+
+def test_generated_declaration_malformed_fails(common):
+    with pytest.raises(common.ReleaseError) as e:
+        common.parse_generated_declaration(b"{ not json")
+    assert e.value.code == "malformed_json"
+
+
+def test_generated_declaration_boolean_size_fails(common):
+    raw = json.dumps({"schema_version": 1, "generated_files": [
+        {"path": "a.txt", "sha256": "0" * 64, "size_bytes": True}]}).encode()
+    with pytest.raises(common.ReleaseError) as e:
+        common.parse_generated_declaration(raw)
+    assert e.value.code == "generated_declaration"
+
+
+def test_generated_declaration_duplicate_path_fails(common):
+    raw = json.dumps({"schema_version": 1, "generated_files": [
+        {"path": "a.txt", "sha256": "0" * 64, "size_bytes": 1},
+        {"path": "a.txt", "sha256": "1" * 64, "size_bytes": 2}]}).encode()
+    with pytest.raises(common.ReleaseError) as e:
+        common.parse_generated_declaration(raw)
+    assert e.value.code == "generated_declaration"
+
+
+def test_generated_declaration_unexpected_field_fails(common):
+    raw = json.dumps({"schema_version": 1, "generated_files": [
+        {"path": "a.txt", "sha256": "0" * 64, "size_bytes": 1, "surprise": 1}]}).encode()
+    with pytest.raises(common.ReleaseError) as e:
+        common.parse_generated_declaration(raw)
+    assert e.value.code == "generated_declaration"
+
+
+# --- contradictory anchors ---
+def test_policy_file_and_matching_sha_passes(verifier, common, built_zip, policy_file):
+    trusted_sha = common.sha256_bytes(Path(policy_file).read_bytes())
+    r = verifier.verify_release_candidate(built_zip, expected_policy_file=policy_file,
+                                          expected_policy_sha256=trusted_sha)
+    assert r["status"] == "PASS"
+
+
+def test_policy_file_and_mismatching_sha_fails(verifier, built_zip, policy_file):
+    r = verifier.verify_release_candidate(built_zip, expected_policy_file=policy_file,
+                                          expected_policy_sha256="c" * 64)
+    assert r["status"] == "FAIL" and any(f["code"] == "contradictory_policy_anchor" for f in r["findings"])
+
+
+def test_generated_file_and_mismatching_sha_fails(builder, verifier, synthetic_repo, tmp_path, policy_file):
+    (synthetic_repo / "pipfreeze.txt").write_text("pytest==8.0\n", encoding="utf-8")
+    import hashlib
+    data = (synthetic_repo / "pipfreeze.txt").read_bytes()
+    gen = _gen_decl(tmp_path / "gen.json", [
+        {"path": "pipfreeze.txt", "sha256": hashlib.sha256(data).hexdigest(), "size_bytes": len(data)}])
+    s = _build(builder, synthetic_repo, tmp_path / "out", generated_allowlist=gen)
+    r = verifier.verify_release_candidate((tmp_path / "out" / "release-candidate.zip"), expected_policy_file=policy_file,
+                                          expected_generated_file=gen, expected_generated_sha256="d" * 64)
+    assert r["status"] == "FAIL" and any(f["code"] == "contradictory_generated_anchor" for f in r["findings"])
+
+
+# --- ZIP comment / metadata channels ---
+def test_nonempty_outer_zip_comment_fails(verifier, common, built_zip, tmp_path, policy_file):
+    with zipfile.ZipFile(built_zip) as z:
+        items = {i.filename: z.read(i.filename) for i in z.infolist()}
+    dst = tmp_path / "c.zip"
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for n in sorted(items):
+            z.writestr(n, items[n])
+        z.comment = b"HIDDEN-DATA-OUTSIDE-MANIFEST"
+    dst.write_bytes(buf.getvalue())
+    r = _vr(verifier, dst, policy_file)
+    assert r["status"] == "FAIL" and any(f["code"] == "zip_comment_nonempty" for f in r["findings"])
+    _assert_content_free(r, "HIDDEN-DATA-OUTSIDE-MANIFEST")
+
+
+def test_entry_comment_fails(verifier, common, built_zip, tmp_path, policy_file):
+    with zipfile.ZipFile(built_zip) as z:
+        infos = z.infolist()
+        items = [(i, z.read(i.filename)) for i in infos]
+    dst = tmp_path / "ec.zip"
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for i, data in items:
+            zi = zipfile.ZipInfo(i.filename, date_time=common.ZIP_TIMESTAMP)
+            zi.comment = b"ENTRY-HIDDEN"
+            z.writestr(zi, data)
+    dst.write_bytes(buf.getvalue())
+    r = _vr(verifier, dst, policy_file)
+    assert r["status"] == "FAIL"
+    _assert_content_free(r, "ENTRY-HIDDEN")
+
+
+def test_builder_produces_empty_zip_comment(builder, synthetic_repo, tmp_path):
+    s = _build(builder, synthetic_repo, tmp_path / "out")
+    with zipfile.ZipFile((tmp_path / "out" / "release-candidate.zip")) as z:
+        assert z.comment == b""
+        assert all(i.comment == b"" and i.extra == b"" for i in z.infolist())
+
+
+# --- content-free: candidate repo_head + builder errors ---
+def test_content_free_malicious_repo_head(verifier, common, built_zip, tmp_path, policy_file):
+    def mut(it):
+        m = json.loads(it["release-manifest.json"])
+        m["repository"]["head"] = "deadbeefLEAKTOKEN" + "a" * 24  # 40-ish, malicious content
+        it["release-manifest.json"] = (json.dumps(m, indent=2, sort_keys=True) + "\n").encode()
+        _resign(common, it)
+    dst = tmp_path / "z.zip"; _repackage_full(common, built_zip, dst, mut)
+    r = _vr(verifier, dst, policy_file)
+    assert r["status"] == "FAIL"
+    assert "repo_head" not in {k for k in r}  # raw head field removed from report
+    _assert_content_free(r, "LEAKTOKEN", "deadbeefLEAKTOKEN")
+
+
+def test_builder_error_output_content_free(builder, synthetic_repo, tmp_path, git):
+    # A prohibited tracked file with a secret-like name; the builder CLI error must be code-only.
+    (synthetic_repo / "SECRET_TOKEN_cafef00d.pem").write_text("k\n", encoding="utf-8")
+    git("add", "-f", "SECRET_TOKEN_cafef00d.pem"); _commit(git, "pem")
+    import io as _io
+    import contextlib
+    buf = _io.StringIO()
+    with contextlib.redirect_stderr(buf), contextlib.redirect_stdout(buf):
+        rc = builder.main(["--repo-root", str(synthetic_repo), "--output-dir", str(tmp_path / "out")])
+    out = buf.getvalue()
+    assert rc == 1
+    assert "SECRET_TOKEN_cafef00d" not in out
+    assert '"error_code"' in out and '"content_free": true' in out
 
 
 def test_generated_sha_mismatch_at_build_fails(builder, synthetic_repo, tmp_path):
     (synthetic_repo / "pipfreeze.txt").write_text("pytest==8.0\n", encoding="utf-8")
     gen = tmp_path / "gen.json"
-    gen.write_text(json.dumps({"schema_version": 1, "files": [
+    gen.write_text(json.dumps({"schema_version": 1, "generated_files": [
         {"path": "pipfreeze.txt", "sha256": "0" * 64, "size_bytes": 999}]}), encoding="utf-8")
     with pytest.raises(builder.ReleaseError) as e:
         _build(builder, synthetic_repo, tmp_path / "out", generated_allowlist=gen)
@@ -520,10 +688,10 @@ def test_builder_verifier_share_archive_helper(builder, verifier, common):
 def test_allowed_archive_safe_names_passes(builder, verifier, synthetic_repo, tmp_path, git, policy_file):
     _add_allowed_archive(synthetic_repo, git, {"fig/a.tex": b"x", "b.bib": b"y"})
     s = _build(builder, synthetic_repo, tmp_path / "out")
-    m = _manifest_of(Path(s["zip_path"]))
+    m = _manifest_of((tmp_path / "out" / "release-candidate.zip"))
     arc = [f for f in m["files"] if f["path"] == "bundle.zip"][0]
     assert arc["classification"] == "ALLOWED_ARCHIVE" and arc["archive_inspection"]["result"] == "SAFE"
-    assert _vr(verifier, Path(s["zip_path"]), policy_file)["status"] == "PASS"
+    assert _vr(verifier, (tmp_path / "out" / "release-candidate.zip"), policy_file)["status"] == "PASS"
 
 
 def test_archive_scan_uses_snapshot_not_second_read(builder, synthetic_repo, tmp_path, git, common):
@@ -536,7 +704,7 @@ def test_archive_scan_uses_snapshot_not_second_read(builder, synthetic_repo, tmp
 
     with mock.patch.object(builder, "read_snapshot_bytes", patched):
         s = _build(builder, synthetic_repo, tmp_path / "out")
-    arc = [f for f in _manifest_of(Path(s["zip_path"]))["files"] if f["path"] == "bundle.zip"][0]
+    arc = [f for f in _manifest_of((tmp_path / "out" / "release-candidate.zip"))["files"] if f["path"] == "bundle.zip"][0]
     assert arc["sha256"] == common.sha256_bytes(crafted)
     assert arc["archive_inspection"]["entry_count"] == 3
 
@@ -551,7 +719,7 @@ def test_verifier_reinspects_archive_metadata(builder, verifier, common, synthet
                 f["archive_inspection"]["entry_count"] = 99
         it["release-manifest.json"] = (json.dumps(m, indent=2, sort_keys=True) + "\n").encode()
         _resign(common, it)
-    dst = tmp_path / "z.zip"; _repackage_full(common, Path(s["zip_path"]), dst, mut)
+    dst = tmp_path / "z.zip"; _repackage_full(common, (tmp_path / "out" / "release-candidate.zip"), dst, mut)
     r = _vr(verifier, dst, policy_file)
     assert r["status"] == "FAIL" and any(f["code"] == "archive_scan_mismatch" for f in r["findings"])
 
@@ -588,15 +756,15 @@ def test_outer_zip_entry_count_bound(common, tmp_path, monkeypatch):
 def test_zip_bytes_are_the_hashed_bytes(builder, synthetic_repo, tmp_path):
     import hashlib
     s = _build(builder, synthetic_repo, tmp_path / "out")
-    with zipfile.ZipFile(s["zip_path"]) as z:
-        for item in _manifest_of(Path(s["zip_path"]))["files"]:
+    with zipfile.ZipFile((tmp_path / "out" / "release-candidate.zip")) as z:
+        for item in _manifest_of((tmp_path / "out" / "release-candidate.zip"))["files"]:
             data = z.read(item["archive_path"])
             assert hashlib.sha256(data).hexdigest() == item["sha256"] and len(data) == item["size_bytes"]
 
 
 def test_policy_single_read_bytes_match_package(builder, synthetic_repo, tmp_path, common):
     s = _build(builder, synthetic_repo, tmp_path / "out")
-    with zipfile.ZipFile(s["zip_path"]) as z:
+    with zipfile.ZipFile((tmp_path / "out" / "release-candidate.zip")) as z:
         packaged = z.read("repo/release/release-allowlist.json")
     assert packaged == (synthetic_repo / "release/release-allowlist.json").read_bytes()
 
