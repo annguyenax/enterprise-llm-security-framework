@@ -1,0 +1,12 @@
+# Phụ thuộc cho phần LLM + Kho tri thức doanh nghiệp (Nghĩa sở hữu).
+#
+# Tách khỏi requirements.txt (gateway/An) để tránh merge conflict và giữ CI của gateway
+# nhẹ. KHÔNG cài httpx2 (typosquat). Bổ sung theo thứ tự alphabet, mỗi gói một dòng.
+#
+# CHƯA CÀI — thêm phiên bản cụ thể khi bắt đầu Giai đoạn 1/2 và ghi rõ trong ADR nếu là
+# thư viện nặng (AGENT_RULES: không thêm gói nặng nếu chưa được duyệt).
+#
+# Gợi ý (bỏ ghi chú khi dùng, chốt version sau khi chạy thử):
+# sentence-transformers>=X,<Y     # embedding cho kho tri thức
+# faiss-cpu>=X,<Y                 # hoặc một vector index thuần offline
+# numpy>=X,<Y

@@ -1,9 +1,17 @@
-"""Offline-first LLM provider abstraction for the Phase 6 gateway."""
+"""Offline-first LLM provider abstraction for the Phase 6 gateway.
+
+Collaboration seam (ADR-004): additional offline/approved providers are added by
+calling ``register_provider(name, factory)`` from their own module under
+``app/services/providers/`` — the ``get_llm_provider`` factory below is NOT
+edited, minimizing merge conflicts between the gateway and LLM workstreams. The
+built-in ``mock`` provider is registered here and remains the default; behavior
+for existing callers is unchanged.
+"""
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 from app.core.config import settings
 from app.schemas.requests import RAGContextChunk
@@ -65,11 +73,36 @@ class MockLLMProvider(BaseLLMProvider):
         )
 
 
+# --- Provider registry (ADR-004 collaboration seam) -------------------------
+# Maps a normalized provider name to a zero-argument factory. New providers
+# register here from their own module; `get_llm_provider` is not edited.
+_PROVIDER_REGISTRY: dict[str, Callable[[], BaseLLMProvider]] = {}
+
+
+def register_provider(name: str, factory: Callable[[], BaseLLMProvider]) -> None:
+    """Register an offline/approved provider factory under a normalized name.
+
+    Fail-closed on an empty or duplicate name so two workstreams cannot silently
+    collide. Called by provider modules under ``app/services/providers/``.
+    """
+    key = name.strip().lower()
+    if not key:
+        raise ValueError("provider name must be non-empty")
+    if key in _PROVIDER_REGISTRY:
+        raise ValueError(f"provider {key!r} is already registered")
+    _PROVIDER_REGISTRY[key] = factory
+
+
 def get_llm_provider(provider_name: str) -> BaseLLMProvider:
     """Return a configured local provider, rejecting unsupported names."""
     normalized = provider_name.strip().lower()
-    if normalized == "mock":
-        return MockLLMProvider()
-    raise ValueError(
-        f"Unsupported LLM provider {provider_name!r}. Only the offline 'mock' provider is available."
-    )
+    factory = _PROVIDER_REGISTRY.get(normalized)
+    if factory is None:
+        raise ValueError(
+            f"Unsupported LLM provider {provider_name!r}. Only the offline 'mock' provider is available."
+        )
+    return factory()
+
+
+# Built-in offline provider. Remains the default and preserves prior behavior.
+register_provider("mock", MockLLMProvider)
