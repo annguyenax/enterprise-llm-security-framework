@@ -294,3 +294,977 @@ Phase 0 kickoff. Focus was entirely on scaffolding: repository structure, planni
   is not itself the go-ahead to implement - per `AGENT_RULES.md` rule 12,
   Phase 12B still requires a separate, explicit instruction before any
   `app/` code is written.
+
+## Phase 12B - SQLite FTS5/BM25 Retrieval Foundation (same week, 2026-07-11)
+
+- Implemented the retrieval foundation approved in Phase 12A, using only
+  Python's standard-library `sqlite3` (no new dependency, matching
+  `ADR-002-retrieval-engine.md`): `app/retrieval/models.py` (defensively
+  immutable records, metadata copied into `MappingProxyType`),
+  `app/retrieval/base.py` (`Retriever` protocol), `app/retrieval/sqlite_bm25.py`
+  (persistent schema, `bm25()`-ranked search, short-lived per-operation
+  connections only, explicit FTS5 capability check with **no fallback of
+  any kind**), `app/services/chunking.py` (deterministic paragraph-aware
+  chunking, distinct from and not replacing v1's `dataset_loader.py`
+  chunker), `app/core/source_policy.py` (server-controlled trust/
+  classification, unknown `source_key` rejected by documented choice), and
+  `app/services/ingestion.py` (atomic upsert orchestration, reserved
+  metadata-key stripping, one safe audit event per batch).
+- Added `POST /v1/documents/ingest` and `POST /v1/retrieve` to
+  `app/api/routes.py`. `POST /v1/gateway/chat` and every other Phase 0-11
+  endpoint are unchanged - confirmed via regression tests and a live
+  `curl` check producing byte-identical responses.
+- Query safety: user query text is tokenized into plain lexical terms,
+  each individually double-quoted before being joined into the FTS5
+  `MATCH` expression, so operators (`NEAR`, `AND`/`OR`/`NOT`, column
+  filters, wildcards) typed by a caller are treated as literal search
+  terms rather than executed as FTS5 query syntax - verified with a
+  parametrized adversarial test covering quotes, parentheses, wildcards,
+  a SQL-injection-shaped string, control characters, and a 5000-character
+  query.
+- Trust/provenance: verified end-to-end (not just by code review) that a
+  caller-supplied `trust_level: "trusted_internal"` inside a document's
+  free-form `metadata` is silently stripped and has no effect - the
+  document is stored with the real server-assigned policy value instead.
+  A top-level `trust_level` field (outside `metadata`) is rejected outright
+  by the request schema (`extra="forbid"`, HTTP 422).
+- Ingestion semantics verified live: re-ingesting identical content is a
+  no-op (`unchanged`); changed content atomically replaces all stale
+  chunks and FTS index rows in one transaction (`updated`, confirmed the
+  pre-update content is no longer retrievable while the new content is);
+  duplicate `external_id` within a batch is rejected per-item.
+- **Test suite grew from 82 to 151 tests** (69 new):
+  `tests/test_chunking.py` (14), `tests/test_sqlite_bm25.py` (31, including
+  a simulated FTS5-unavailable capability failure using a fake connection
+  object, since `sqlite3.Connection` is an immutable C type that cannot be
+  patched directly with `unittest.mock`), `tests/test_ingestion.py` (14),
+  `tests/test_retrieval_routes.py` (10). All 151 passed in a clean
+  project-local `.venv` (not the shared/global environment with the
+  documented `httpx2` issue).
+- Added `scripts/smoke_test_retrieval.ps1` (ingest, retrieve, update,
+  verify stale content gone) and ran it against a live local server on a
+  scratch `RETRIEVAL_DB_PATH` - passed.
+- **Backward-compatibility fix:** adding 9 new fields to `Settings`
+  (`app/core/config.py`) initially broke an existing test that constructs
+  `Settings(...)` directly without them. Fixed by giving every new field a
+  default value rather than modifying the pre-existing test -
+  `load_settings()` still passes every field explicitly from the
+  environment, so runtime behavior is unchanged.
+- No file under `app/guards/`, `app/services/gateway.py`,
+  `app/services/evaluation_runner.py`, `app/services/llm_provider.py`,
+  `datasets/`, `redteam/`, `reports/evaluation/`, `report-latex-template/`,
+  or `requirements.txt` was modified; no new dependency installed
+  (`sqlite3` is standard library). Runtime database files (`data/*.db`)
+  were already covered by `.gitignore` before this phase - no `.gitignore`
+  change was needed.
+- **Explicitly not implemented (by design):** no `POST /v1/rag/query` -
+  retrieval is not wired into any guard or the LLM provider yet, that is
+  Phase 12C; no vector/embedding retrieval (optional Phase 12F); no real
+  LLM call anywhere.
+- **Marked In Review, not Done** per `AGENT_RULES.md` rule 9/10 - this
+  session's verification is thorough (151/151 tests, live smoke test) but
+  the phase awaits an independent repeat of that verification and a
+  repository-wide security review before being declared Done. Phase 12C
+  does not start automatically and requires a separate, explicit
+  go-ahead.
+
+## Phase 12B Code X Audit Resolution (same week, 2026-07-11)
+
+- An independent Code X audit of implementation commit `6bfb714` returned
+  verdict REVISE: 0 Critical, 5 Major (all blocking), 4 Minor findings.
+  Every Major finding was independently re-verified against the actual
+  code before being accepted - none was accepted purely on the audit's
+  say-so, per this task's own explicit instruction not to assume the
+  audit is automatically correct.
+- All 5 Major findings fixed, each with a regression test reproducing the
+  exact scenario the audit demonstrated: (1) a public caller could claim
+  `source_key="synthetic_clean_corpus"` and be granted
+  `trust_level="trusted_internal"` - fixed by removing elevated-trust
+  policies from the table the public ingestion path resolves against;
+  (2) reserved metadata-key stripping only matched exact top-level keys,
+  so `{"nested": {"trust_level": "..."}}` or `{"Trust_Level": "..."}`
+  survived unmodified - fixed with recursive, case/whitespace-normalized,
+  depth-bounded sanitization plus an auditable stripped-key count (never
+  the stripped value); (3) re-ingesting identical text with a changed
+  title/metadata was wrongly reported `unchanged`, silently freezing
+  stale fields - fixed by widening the persistence-comparison fingerprint;
+  (4) environment-configured ingestion resource limits
+  (`RETRIEVAL_MAX_DOCUMENT_CHARS` etc.) were never actually wired into the
+  service, so they had no effect - fixed in `app/api/routes.py`; (5)
+  implicit AND term-combination meant one extra irrelevant query term
+  could zero out an otherwise-matching retrieval result, a genuine
+  false-negative/evasion primitive - FTS5 term joining changed from AND
+  to OR (`ADR-002-retrieval-engine.md` updated to document why).
+- Minor findings: eager FTS5 capability check at import time (was lazy,
+  first-request-only); safe generic error mapping for unexpected storage
+  failures (was leaking raw exception text toward the client); a test
+  cleanup fixture preventing `data/retrieval.db` from growing unbounded
+  across repeated test runs; and a partial fix for ID normalization
+  (whitespace + source_key case folded before dedup, but external_id case
+  deliberately left as-is, since a case-sensitive real-world ID scheme
+  could otherwise have two genuinely distinct documents silently merged -
+  a worse failure mode than the one being fixed, documented explicitly
+  rather than silently accepted).
+- 14 new regression tests added (83 Phase 12B tests total, up from 69);
+  full suite grew to **165/165 passing**. `scripts/smoke_test_retrieval.ps1`
+  needed updating too - its original "stale content gone" check
+  implicitly relied on the AND-only suppression semantics that finding
+  (5) removed, so it now asserts the actual invariant (no stale chunk
+  text in any returned hit) directly; re-verified against a live local
+  server after the fix.
+- Created `docs/modernization-ai-reviews/phase-12b-audit-resolution.md`
+  (full traceable record: every finding's decision/fix/regression-test/
+  rationale/residual-risk, the ingestion-atomicity and metadata-spoofing
+  and FTS5-query-safety decisions restated precisely, and a 12-point
+  acceptance-gate checklist - all PASS). No file under `app/guards/`,
+  `app/services/gateway.py`, `app/services/evaluation_runner.py`,
+  `app/services/llm_provider.py`, `datasets/`, `redteam/`,
+  `reports/evaluation/`, `report-latex-template/`, or `requirements.txt`
+  was modified; no new dependency installed; no runtime database tracked.
+- **Final recommendation: APPROVE PHASE 12B.** Phase 12C still requires a
+  separate, explicit go-ahead - audit approval is not itself that
+  go-ahead.
+
+## Phase 12B Code X Re-audit Resolution (same week, 2026-07-11)
+
+- An independent re-audit of the first-pass fix (commit `04f68dd`) found
+  that Major #2 (reserved metadata filtering) was only partially
+  resolved: a list-of-lists structure - the exact probe
+  `{"wrapper": [[{" TrUsT-LeVeL ": "trusted_internal", "is_poisoned": true, "expected_decision": "allow"}]]}` -
+  bypassed the recursive sanitization entirely, persisting unmodified
+  with `metadata_keys_stripped` wrongly reporting 0. The metadata-size
+  limit was also found to run after sanitization, letting a huge value
+  hidden under a reserved key bypass it. The `phase-12b-audit-resolution.md`
+  document's earlier claim of "recursive handling at any nesting depth"
+  was corrected in place rather than left standing.
+- Root cause: the first fix only recursed into a list element when that
+  element was itself a `dict`; `_metadata_depth` also never incremented
+  for list descent, so list nesting never tripped the depth safety net
+  regardless of how deep it went.
+- Fix: `app/services/ingestion.py`'s `_sanitize_metadata`/`_metadata_depth`
+  now recurse uniformly over every combination of dicts and lists; the
+  ingestion loop validates raw metadata JSON size and depth *before*
+  sanitizing, not after; `MAX_METADATA_DEPTH` raised 4->6 (a direct
+  consequence of counting list depth correctly - a realistic 5-container
+  structure needs a 6th unit of budget to reach its own leaf values).
+- Route-test database isolation was also completed properly this pass:
+  `tests/test_retrieval_routes.py` now swaps `app.api.routes`'s
+  `_retriever`/`_ingestion_service` singletons for instances pointed at a
+  pytest-managed temporary file for the whole module (restored at
+  teardown) instead of only cleaning up tracked documents afterward -
+  verified to leave zero test documents in `data/retrieval.db`.
+- 12 new regression tests added (95 Phase 12B tests, up from 83); full
+  suite grew to **177/177 passing**.
+- `README.md` and `app/README.md` corrected: both previously still
+  claimed FTS5 terms are joined with implicit AND (stale from before the
+  Major #5 OR fix); both now correctly state explicit server-generated OR,
+  and the metadata section now accurately describes recursive dict+list
+  handling and the raw-size-before-sanitization ordering.
+- No file under `app/guards/`, `app/services/gateway.py`,
+  `app/services/evaluation_runner.py`, `app/services/llm_provider.py`,
+  `datasets/`, `redteam/`, `reports/evaluation/`,
+  `report-latex-template/`, or `requirements.txt` was modified; no new
+  dependency installed; no runtime database tracked.
+- ~~**Final recommendation: APPROVE PHASE 12B**, this time based on a
+  verdict where the one remaining blocking finding is actually fixed and
+  regression-tested.~~ **Superseded** — a further independent re-audit
+  (below) found this fix still incomplete. Phase 12C still requires a
+  separate, explicit go-ahead, and remains additionally gated on Phase
+  12B actually reaching `Done`.
+
+## Phase 12B Final Metadata Re-audit Resolution (2026-07-12)
+
+- An independent final re-audit of the second-pass fix returned verdict
+  **REVISE**: 0 Critical, 1 remaining blocking Major finding (#2), all
+  other previously-resolved findings reconfirmed unaffected.
+- **Finding 1 (byte-vs-character size):** the raw-metadata size check
+  used `len(json.dumps(raw_metadata, ensure_ascii=False))` — a Python
+  *character* count, not a UTF-8 *byte* count. Multi-byte content
+  (Vietnamese text, emoji) was under-counted: the reviewer's example
+  serialized to 2,412 UTF-8 bytes but measured as only ~1,212 characters,
+  passing a nominal 2,000-character limit it should have failed against
+  an equivalent byte limit.
+- **Finding 2 (unbounded recursion):** neither `json.dumps(...)` nor the
+  recursive `_metadata_depth`/`_sanitize_metadata` helpers had any bound
+  checked before being called. A sufficiently deep structure (reviewer's
+  probe: ~900 nested lists) exceeded Python's recursion limit inside
+  `json.dumps` itself, raising an unhandled `RecursionError` instead of a
+  controlled rejection.
+- Fix: `app/services/ingestion.py` gained `_preflight_metadata()` — an
+  **iterative, explicit-stack-based** (never recursive) check validating
+  structure/type/cycle/depth *before* any `json.dumps` call or recursive
+  traversal runs, bounding traversal by loop iterations instead of the
+  Python call stack — and `_metadata_byte_size()`, measuring the real
+  UTF-8 encoded byte length of a deterministic serialization
+  (`ensure_ascii=False`, `sort_keys=True`, fixed separators).
+  `MAX_METADATA_JSON_CHARS` was renamed `MAX_METADATA_JSON_BYTES` (still
+  2000) to make the unit explicit. `ingest_batch`'s metadata handling was
+  reordered to: preflight → deterministic serialization → UTF-8
+  byte-size check → sanitize (now provably safe, since preflight already
+  bounds depth) → persist → audit. Defensive `RecursionError` catches
+  remain as a safety net only, since the preflight should make them
+  unreachable in practice.
+- Route-test database isolation residual completed: new `tests/conftest.py`
+  redirects `RETRIEVAL_DB_PATH` to a per-session temporary path before any
+  test module in the directory is collected/imported (pytest loads
+  `conftest.py` before importing sibling test modules), closing the gap
+  where the prior pass's module-scoped fixture could not prevent an
+  *earlier-collected* test file's `app.main` import from still creating
+  an empty, schema-only `data/retrieval.db` via `app/api/routes.py`'s
+  eager `_retriever.initialize()`. The prior documentation's claim that
+  route tests "genuinely no longer touch `data/retrieval.db` at all" was
+  accurate only about this one module's own test documents, not about
+  that eager-init side effect from a different test file — corrected in
+  place in `tests/test_retrieval_routes.py`'s docstring and the
+  audit-resolution document.
+- 11 new regression tests added (106 Phase 12B tests, up from 95): 9 in
+  `tests/test_ingestion.py` (UTF-8 byte accounting, exact/near-boundary
+  byte behavior, ~900-level nested-list rejection without a
+  `RecursionError`, deep mixed dict/list nesting, direct-Python
+  cyclic-metadata rejection at both the helper and service level,
+  non-cyclic shared-value handling, audit-log safety for both new
+  rejection paths) and 2 in `tests/test_retrieval_routes.py` (the same
+  two new rejection paths through the real HTTP route); the existing
+  route-level list-of-list regression was also extended to cover all four
+  reserved keys instead of two. Full suite grew to **188/188 passing**
+  (run with an explicit writable `--basetemp`, since the shared
+  environment's default Windows temp directory has a pre-existing,
+  unrelated permissions issue).
+- Documentation corrected in `README.md`, `app/README.md`,
+  `tests/README.md`, `TASK_BOARD.md`, this file, and
+  `docs/modernization-ai-reviews/phase-12b-audit-resolution.md`: the
+  metadata size limit is now described in UTF-8 bytes, not characters;
+  the iterative preflight is described as running before serialization
+  and sanitization; and the route-test database isolation overclaim is
+  removed.
+- No file under `app/guards/`, `app/services/gateway.py`,
+  `app/services/evaluation_runner.py`, `app/services/llm_provider.py`,
+  `datasets/`, `redteam/`, `reports/evaluation/`,
+  `report-latex-template/`, or `requirements.txt` was modified; no new
+  dependency installed; no runtime database tracked.
+- **Final recommendation: READY FOR FINAL RE-AUDIT, NOT DONE.** Per this
+  task's explicit instruction, Phase 12B is not marked `Done` — an
+  independent re-audit of this specific diff is required before the
+  phase can be closed. Phase 12C still requires a separate, explicit
+  go-ahead and is additionally gated on that re-audit returning PASS.
+
+## Phase 12C — End-to-End RAG Security Pipeline (2026-07-12)
+
+The project owner gave an explicit go-ahead to begin Phase 12C
+implementation before Phase 12B's own final independent re-audit PASS was
+obtained (recorded transparently in `TASK_BOARD.md`; Phase 12B's `In
+Review` status is unaffected).
+
+- Implemented `POST /v1/rag/query`: Input Guard -> server-side retrieval
+  (existing Phase 12B `SqliteBM25Retriever`) -> Provenance/Trust Guard
+  (new) -> RAG Context Guard (per chunk, then a bounded aggregate pass)
+  -> Mock LLM Provider (existing, unchanged) -> centralized DLP (new) ->
+  Output Guard (existing, unchanged) -> structured audit -> safe
+  response. `POST /v1/gateway/chat` was not modified in any way and
+  remains fully regression-tested as caller-supplied-context-only.
+- New modules: `app/core/pipeline.py` (typed `RagPipelineResult`/
+  `ProvenanceSummary`/`StageResult` — `GuardProfile` ablation config
+  explicitly deferred to Phase 12E, documented not silently omitted),
+  `app/guards/provenance_guard.py`, `app/guards/dlp_guard.py`,
+  `app/services/rag_query.py`.
+- **Provenance/Trust Guard:** three fixed allow-lists (`trust_level`,
+  `classification`, `source_type`) matching exactly the values
+  `app/core/source_policy.py`'s real (non-fallback) policies produce —
+  fails closed on anything else, including the `untrusted_unknown`/
+  `unverified` fallback pair. Reads only a `RetrievalHit`'s
+  server-assigned fields; a caller cannot influence it since the request
+  schema has no such fields at all. Acceptance is eligibility only —
+  trust does not bypass the RAG Context Guard's content scan that
+  follows.
+- **Multi-chunk coordination:** the Phase 12A audit resolution required
+  Phase 12C to explicitly decide (implement or document-defer) a
+  cross-chunk mitigation, not silently omit the decision. Implemented a
+  bounded, deterministic aggregate inspection — the final accepted
+  chunks' bounded excerpts (default cap 4000 chars total) are joined and
+  re-run through the same, unmodified `evaluate_rag_context()` as one
+  synthetic chunk, catching a split-across-chunks instruction that no
+  single chunk's own inspection would trip. Verified with a dedicated
+  test constructing exactly that scenario
+  (`test_multi_chunk_coordination_is_caught_by_the_aggregate_check`).
+  This reduces, not eliminates, the risk; documented as a residual
+  limitation, not a solved problem.
+- **Centralized DLP:** deterministic regex detectors (canary secret,
+  OpenAI/AWS/GitHub key shapes, PEM private-key blocks, bearer tokens,
+  `key: value`/`key=value` secret assignments), bounded input size, never
+  logs raw detected values. `app/guards/output_guard.py` and
+  `app/services/audit_logger.py` were changed to import their
+  previously-duplicated secret patterns from this module instead of
+  redefining them — a small, mechanical, behavior-preserving refactor
+  verified with parity regression tests
+  (`test_output_guard_redaction_unchanged_after_consolidation`,
+  `test_audit_logger_redaction_unchanged_after_consolidation`) run
+  against the existing fixture set. `app/guards/rag_guard.py` was
+  deliberately left untouched (not named in
+  `docs/modernization-v2-architecture.md` §5's consolidation target;
+  touching it was not necessary for a safe integration).
+- **Fail-closed stop paths:** input blocked, retrieval failed (mapped to
+  the same 400/503 `POST /v1/retrieve` already uses), no hits (safe
+  allow/no-answer, not an error), all hits rejected by provenance,
+  all/aggregate-blocked by the RAG Context Guard, provider failure, DLP
+  failure, output blocked, and an unexpected-internal-failure safety net.
+  Every guard-stage exception is caught inside the pipeline and mapped to
+  a fail-closed `block`, not an unhandled 500 — verified by monkeypatched
+  exception tests for each stage.
+- **Response safety:** no full retrieved chunk text returned by default —
+  only a safe per-hit provenance summary (document/chunk ID, title,
+  source_type, classification, trust_level, rank, score, accepted/
+  rejected status, reason code). The raw query itself is never logged in
+  the audit event, only a SHA-256 hash prefix and length (stricter than
+  other endpoints' existing redacted-preview convention, since a natural
+  RAG query may embed sensitive content that pattern-based redaction
+  would not catch).
+- 79 new regression tests added across `tests/test_provenance_guard.py`
+  (11), `tests/test_dlp_guard.py` (13), `tests/test_rag_pipeline.py` (32,
+  service-level via a stub retriever double plus two real-SQLite
+  end-to-end cases), and `tests/test_rag_query_routes.py` (23,
+  HTTP-level, including strict-schema rejection of every prohibited
+  field and regression checks that `/health`, `/v1/gateway/chat`, and
+  `/v1/retrieve` are unaffected). Full suite grew to **267/267 passing**
+  (up from 188), run with an explicit writable `--basetemp`.
+- Live smoke test `scripts/smoke_test_rag_pipeline.ps1` run against a
+  real `uvicorn` server on a scratch `RETRIEVAL_DB_PATH` — **PASSED**:
+  benign query (allow, DLP stage ran), mixed query (poisoned doc
+  excluded), all-poisoned query (`all_context_blocked`, provider not
+  called), direct-injection query (`input_blocked` before retrieval), and
+  the `/v1/gateway/chat` regression check. One scenario is documented as
+  not live-testable rather than faked: the deterministic Mock LLM
+  Provider never echoes retrieved content into its response, so live
+  secret-redaction-in-response cannot be demonstrated against a real
+  server — that exact case is covered instead by
+  `tests/test_dlp_guard.py`/`tests/test_rag_pipeline.py` using a scripted
+  offline provider double.
+- No file under `app/guards/input_guard.py`, `app/services/gateway.py`,
+  `app/services/evaluation_runner.py`, `app/services/llm_provider.py`,
+  `datasets/`, `redteam/`, `reports/evaluation/`,
+  `report-latex-template/`, or `requirements.txt` was modified; no new
+  dependency installed; no runtime database tracked; no network call
+  anywhere in the new code.
+- Documentation updated: `README.md` (new Phase 12C section),
+  `app/README.md` (new "End-to-End RAG Pipeline" section, updated
+  endpoint table and "Not Implemented"/"Audit Logging" sections),
+  `tests/README.md` (new test-module rows, updated counts),
+  `scripts/README.md` (new smoke-test entry), `TASK_BOARD.md` (new Phase
+  12C section), this file.
+- **Phase 12C is marked In Review, not Done.** Per this task's explicit
+  instruction, it is not declared complete until a maintainer
+  independently repeats verification and an independent security audit
+  passes — the same process already applied to Phase 12A and 12B. Phase
+  12D (benchmark v2 generation) was explicitly not started this session.
+## Phase 12C multidisciplinary audit resolution (2026-07-12)
+
+- Adjudicated the Gemini, Grok, and Code X Phase 12C audits using executable
+  repository evidence. All three verdicts were `REVISE`; Gemini explicitly
+  could not inspect the diff, so its recommendations were treated as
+  conditional academic requirements rather than code facts.
+- Resolved Code X's two Critical findings: DLP no longer returns an
+  uninspected output suffix, and audit logging now consumes the complete
+  centralized redaction API, including bearer and secret-assignment patterns.
+- Resolved the five blocking Major findings: provider requests contain only
+  the sanitized effective query; provider context is exactly the bounded
+  aggregate-inspected context; controlled failures have safe reason codes and
+  audit handling; Phase 12C settings fail fast on invalid values; DLP findings
+  produce `sanitize` and structured category/count telemetry.
+- Added overlap-safe DLP counting, safe audit-sink fallback, corrected FastAPI
+  metadata, and Grok-inspired multilingual/zero-width, high-trust malicious,
+  mixed-trust, legitimate-authority, and academic-discussion tests.
+- Gemini ablation toggles remain Phase 12E evaluation-only work. The public
+  endpoint has no field, header, or serving setting that can disable guards.
+  Per-request stage telemetry is ready for Phase 12E aggregation; no p50/p95
+  or benchmark result was generated in Phase 12C.
+- Validation: focused Phase 12C suite 123 passed; full suite 311 passed;
+  compile checks and live isolated RAG smoke test passed. Phase 12D was not
+  started.
+- ~~Final recommendation at the time: APPROVE PHASE 12C.~~ **Superseded**
+  — a further independent Code X re-audit of this exact state (below)
+  found terminal audit coverage was still incomplete for two paths.
+
+## Phase 12C Code X Final Re-audit (2026-07-12)
+
+An independent Code X final re-audit of the multidisciplinary-resolution
+state returned verdict **REVISE**: 0 remaining Critical, 1 remaining
+blocking Major ("terminal audit coverage is still incomplete"), everything
+else previously resolved reconfirmed unaffected.
+
+- **Root cause:** two paths in `app/api/routes.py::rag_query` reached the
+  service but bypassed the pipeline's own internal audit commit: (1) the
+  configured `top_k > settings.rag_max_top_k` rejection returned HTTP 400
+  before `run_rag_query`'s `log_event` call ever ran, producing zero audit
+  trail; (2) `run_rag_query` committed its terminal audit event *before*
+  `app/api/routes.py` attempted to build `RagQueryResponse(...)` from the
+  result, so a response-construction failure left an earlier, contradictory
+  "success" (`allowed`) event on record for a request the caller actually
+  received as a 500.
+- **Fix:** split audit commitment out of the pipeline function.
+  `app/services/rag_query.py::run_rag_query_uncommitted(...)` now contains
+  the full pipeline body and returns `(RagPipelineResult,
+  RagQueryAuditContext)` without logging; `commit_rag_query_audit(result,
+  audit_ctx)` is the extracted, explicit commit step, called exactly once
+  for whichever outcome is actually visible to the caller.
+  `run_rag_query`'s public signature/behavior is unchanged (a two-line
+  wrapper: uncommitted call, immediate commit, return) so every existing
+  direct/service caller needed zero changes. `audit_top_k_rejected(...)`
+  emits exactly one safe `block`/`top_k_rejected` event for the first gap;
+  the route now defers its commit until after `RagQueryResponse(...)`
+  construction succeeds (or commits
+  `mark_response_construction_failed(pipeline_result)` if it does not) for
+  the second gap. This is an explicit internal Python contract (two named
+  functions plus a small internal dataclass), not a public flag.
+- 8 new regression tests added: `test_audit_top_k_rejected_emits_exactly_one_safe_block_event`,
+  `test_run_rag_query_uncommitted_does_not_audit_until_committed`,
+  `test_mark_response_construction_failed_produces_corrected_block_event`,
+  `test_exact_empty_sanitized_query_is_rejected_and_audited_once` (service
+  level); `test_top_k_rejection_returns_400_without_calling_retriever_or_provider`,
+  `test_top_k_rejection_returns_safe_response_even_if_audit_sink_fails`,
+  `test_response_construction_failure_emits_exactly_one_corrected_audit_event`,
+  `test_response_construction_failure_audit_sink_failure_still_returns_safe_500`
+  (HTTP level).
+- Validation: focused Phase 12C suite grew to **131 passed** (up from
+  123); full suite grew to **319 passed** (up from 311); `python -m
+  py_compile` clean; live smoke test
+  (`scripts/smoke_test_rag_pipeline.ps1`) against a real `uvicorn` server
+  on a scratch database/log path passed, plus a manual live check
+  confirming a `top_k=30` request now produces exactly one
+  `stop_reason=top_k_rejected` audit event with no raw query. No
+  prohibited path, dependency, or tracked database changed.
+- ~~Final recommendation: READY FOR ONE FINAL CODE X RE-AUDIT.~~
+  **Superseded** — a further independent Code X re-audit of this exact
+  diff (below) found one more blocking gap in the same terminal-audit-
+  coverage area.
+
+## Phase 12C Code X Final Terminal-Audit Re-audit — Nested Response Construction (2026-07-12)
+
+A further independent Code X re-audit of the terminal-audit-coverage fix
+returned verdict **REVISE**: 0 remaining Critical, 1 remaining blocking
+Major ("nested `ProvenanceItemResponse` construction occurs outside the
+protected response-construction and terminal-audit block").
+
+- **Root cause:** `app/api/routes.py::rag_query` built the `provenance =
+  [ProvenanceItemResponse(...) for ...]` list **before** the `try` block
+  protecting `RagQueryResponse(...)` construction (the previous pass's
+  fix had wrapped the outer call, and incidentally the inline
+  `StageResultResponse` list nested inside it, but not this separate,
+  earlier list comprehension). A failure constructing a
+  `ProvenanceItemResponse` — reachable only after the full pipeline,
+  including the provider, had already run — propagated as a raw,
+  unprotected exception: no safe `request_id`-bearing HTTP 500, and zero
+  terminal audit events.
+- **Fix:** moved the `provenance = [...]` construction (and made the
+  `stage_items = [...]` list explicit) inside the same `try` block as
+  `RagQueryResponse(...)`, so every nested and outer response object is
+  built in one protected block, and the success/`SANITIZE` terminal
+  audit commits only after the entire response tree is confirmed valid.
+  No change to `app/services/rag_query.py` was needed — its
+  audit-deferral contract (`run_rag_query_uncommitted`/
+  `commit_rag_query_audit`/`mark_response_construction_failed`) already
+  supported this; only the route's own code needed restructuring.
+- 4 new regression tests added (all in `tests/test_rag_query_routes.py`):
+  `test_nested_provenance_item_response_failure_maps_to_safe_500_with_audit`,
+  `test_nested_provenance_item_response_failure_with_audit_sink_failure_still_returns_safe_500`,
+  `test_successful_nested_response_construction_emits_exactly_one_normal_event`,
+  `test_nested_stage_result_response_failure_maps_to_safe_500_with_audit`
+  (forcing a different nested model to fail, confirming it follows the
+  same path, not a special case).
+- Validation: focused Phase 12C suite grew to **135 passed** (up from
+  131); full suite grew to **323 passed** (up from 319); `python -m
+  py_compile` clean; live smoke test
+  (`scripts/smoke_test_rag_pipeline.ps1`) against a real `uvicorn` server
+  on a scratch database/log path passed. No prohibited path, dependency,
+  or tracked database changed.
+- **Documentation correction:** the prior pass's claim that "every
+  response-construction path was already protected" was inaccurate;
+  corrected in place. The schema-level 422 boundary (FastAPI/Pydantic
+  validation failures before `rag_query`'s function body runs, therefore
+  outside the one-terminal-audit-event contract) is now explicitly
+  documented rather than left implicit.
+- **Final recommendation (superseded — see the closure note below):** READY
+  FOR ONE FINAL CODE X RE-AUDIT. Not APPROVE, not DONE. Phase 12C remained
+  In Review until an independent re-audit of this specific diff returned
+  PASS. Phase 12D was not started.
+
+## Phase 12C — Final Code X Re-Audit: PASS, Phase 12C CLOSED (2026-07-13)
+
+The final independent Code X re-audit returned **PASS**, closing Phase 12C.
+Report: `docs/modernization-ai-reviews/codex-phase-12c-final-reaudit.md`.
+
+- **Reviewed HEAD** `9fed074481f46ce5e3ae2bfa20abcec3e36661fb` against the
+  **Phase 12C implementation baseline** `ad555c95f01601b8eeeba92106b132ad88d7be00`
+  (final implementation commit `56b749a47501ab9686503ca007c5197d8a6b47b0`).
+  `app/` had no drift after the baseline — post-baseline executable additions
+  belong only to Phase 12D scripts/tests.
+- Code X **inspected the actual code** and **independently executed the
+  tests** (not merely read our reported numbers).
+- **The previously blocking finding is RESOLVED.** The nested
+  `ProvenanceItemResponse` construction that used to sit outside the
+  protected response/audit boundary — allowing an unaudited HTTP 500 *after*
+  the provider had already run — is fixed: `ProvenanceItemResponse`,
+  `StageResultResponse`, and the outer `RagQueryResponse` are all built
+  inside one `try` block, and the success audit is committed only after the
+  complete typed response tree exists. Code X confirmed no false success
+  audit, no partial response, and safe failure disclosure (fixed
+  request-ID-bearing HTTP 500 with no exception text, context, query, secret,
+  or path leakage).
+- Every security/pipeline invariant re-verified: sanitized-prompt-only,
+  bounded approved context, aggregate inspection with separator accounting,
+  server-side provenance, trusted content still inspected, DLP
+  complete-output coverage, Output Guard `BLOCK` priority over DLP
+  `SANITIZE`, nested audit redaction, no public guard-disable surface, no
+  external provider drift.
+- **Executed evidence:** focused Phase 12C suite **172 passed, 1 warning**;
+  targeted Critical/Major probes **24 passed, 1 warning**; full repository
+  suite **578 passed, 0 failed, 0 skipped, 1 warning**; `compileall` PASS.
+  The one warning is the pre-existing Starlette/`httpx` deprecation notice;
+  `httpx2` remains a typosquat and was never installed.
+- **Critical: None. Blocking Major: None. Required actions before DONE: None.**
+- **Three Minor findings, adjudicated non-blocking and recorded rather than
+  quietly dropped:** (1) the collaboration handoff said "5 regression tests"
+  where the authoritative resolution correctly says **4 newly added**
+  nested-response tests — five counts the earlier outer-response atomicity
+  regression too; the handoff wording was the imprecise one. (2) A non-finite
+  `retrieval_score` would serialize as JSON `null` rather than fail — current
+  SQLite BM25 emits only finite scores, so this is optional future schema
+  hardening, not a live defect. (3) Pre-existing ignored `__pycache__`
+  directories predate the audit and are not tracked.
+- Deferrable recommendations carried into the Phase 12E ablation design:
+  semantic/homoglyph resistance and trusted-internal ablation profiles.
+- **Phase 12C: DONE. Phase 12D: DONE. Phase 12E: NOT STARTED** — both gating
+  phases have now closed via independent audit PASS, but 12E still requires
+  its own explicit go-ahead (`AGENT_RULES.md` rule 12).
+
+## Phase 12D — Independent Benchmark V2 Design, Generation, Validation and Freeze (2026-07-12)
+
+Produced a new, independently-governed benchmark for a future Phase 12E
+security evaluation, under `datasets/v2/` — artifacts only; no guard rule
+modified, no evaluation run, no ASR/FPR/FNR computed.
+
+- **Design:** 23 scenario families, 120 cases (30 development / 30
+  validation / 60 holdout), 164 corpus documents, 120 matching labels.
+  Category balance 36 benign / 74 malicious / 6 mixed / 4 neutral;
+  language distribution 60 vi / 40 en / 20 bilingual (fixed deterministic
+  rotation via `itertools.cycle`, never random).
+- **Two architectural boundaries identified and honestly represented
+  rather than fabricated:** (1) `app/guards/provenance_guard.py`'s
+  allow-lists already cover every trust/classification/source_type
+  combination `app/core/source_policy.py` can assign, so a retrieved hit
+  can never carry genuinely malformed provenance metadata end-to-end —
+  represented instead by `provenance_denied_at_ingestion` (rejection at
+  ingestion time via an unregistered `source_key`), with the
+  unit-level-only condition cross-referenced to the existing
+  `tests/test_provenance_guard.py`. (2) The deterministic Mock LLM
+  Provider never echoes retrieved content into its response, so true
+  end-to-end DLP-on-provider-output leakage cannot be exercised
+  black-box — represented instead by `leakage_context_exclusion`/
+  `leakage_dlp_mechanism_reference`, which test the RAG Context Guard's
+  own `rag-fake-secret` redaction of retrieved content, with centralized
+  DLP-on-provider-output cross-referenced to `tests/test_dlp_guard.py`.
+- **Generator:** `scripts/build_v2_benchmark.py`, fixed documented seed
+  `1220126` driving only cosmetic phrasing selection (never case counts,
+  IDs, splits, or expected outcomes, which are always fixed by an
+  explicit family table). `--verify-determinism` builds twice in memory
+  and confirms byte-identical output.
+- **Bug found and fixed during authoring (self-caught before shipping,
+  via the validator's guard cross-check):** a Vietnamese
+  `direct_injection` variant used "thay vào đó" (Vietnamese for
+  "instead") where `app/guards/input_guard.py`'s
+  `direct-disregard-own-instructions` rule requires the literal English
+  word "instead" within 80 characters of the trigger phrase — the
+  Vietnamese translation silently didn't match the English-only regex.
+  Fixed by keeping "instead" in English inline in the sentence, verified
+  by re-running the cross-check.
+- **Validator:** `scripts/validate_v2_benchmark.py` — schemas, exact
+  counts, category/language coverage, referential integrity, no
+  duplicate IDs, no normalized-duplicate queries, no cross-split
+  credential-shaped-value reuse (the one canonical `FAKE-SECRET-0000-
+  EXAMPLE-DO-NOT-USE` canary marker is an explicit, documented
+  exemption), source-key compatibility, no runtime/label import
+  coupling, and a cross-check against the **real, currently-deployed**
+  `app.guards.input_guard`/`app.guards.rag_guard` functions. Found and
+  fixed its own bug: `_ALLOW_FAMILIES` incorrectly included
+  `mixed_benign_malicious_retrieval` (by design one benign + one
+  malicious document); fixed with a dedicated
+  `_MIXED_ACCEPT_AND_REJECT_FAMILIES` check.
+- **Freeze:** `scripts/freeze_v2_benchmark.py` — SHA-256 manifest over
+  `corpus/`, `cases/`, `labels/` (the manifest excludes itself from its
+  own hash set), `freeze`/`verify` modes, no timestamp, no
+  machine-specific absolute path. Verified: froze 7 files; a mutation
+  test (appending a line to a copy of `cases/development.jsonl`)
+  correctly made `verify` fail with both a content-changed and a
+  size-changed report for exactly that file; a clean deterministic
+  rebuild restored byte-identical content and `verify` passed again.
+- **Tests added (53, all passing):** `tests/test_benchmark_v2_schema.py`
+  (16), `tests/test_benchmark_v2_integrity.py` (24 — including synthetic
+  fixtures proving each check function actually *rejects* a deliberately
+  broken input: duplicate IDs, duplicate queries, cross-split secret
+  reuse, unregistered source key outside its family, missing required
+  field, leaked label field, `is_poisoned` in corpus), and
+  `tests/test_benchmark_v2_freeze.py` (13 — manifest correctness against
+  the real committed manifest, plus tamper-detection tests against a
+  `tmp_path` copy of the tree, never the real committed files).
+- **Test evidence:** full repository suite **376 tests** (323
+  pre-existing + 53 new); **299 passed** directly in this session; the
+  remaining 77 (across 7 files) require `fastapi.testclient.TestClient`,
+  blocked by this shared environment's pre-existing, documented
+  `httpx`/`httpx2` issue (unrelated to this phase; none of those 77
+  tests touch `datasets/v2/`). `python -m py_compile` clean on every new
+  file. `git status --short` confirmed the change set is exactly
+  `datasets/v2/`, three new scripts, and three new test files — no file
+  under `app/guards/`, `app/services/rag_query.py`,
+  `app/services/gateway.py`, `app/services/llm_provider.py`,
+  `app/retrieval/`, `app/api/routes.py`, the v1 benchmark, or
+  `requirements.txt` was touched; no `.db`/`.sqlite`/`.sqlite3` file is
+  tracked; no new dependency was added; scripts contain no network-call
+  imports.
+- **Documentation:** `datasets/v2/README.md` and
+  `docs/benchmark-v2-methodology.md` (new, full design/taxonomy/
+  limitations write-up); `README.md`, `tests/README.md`,
+  `scripts/README.md`, `TASK_BOARD.md` updated; ADR-003 given an
+  Implementation Note recording the final `datasets/v2/` path (ADR-003
+  had only named a placeholder, `redteam/v2/`) and disclosing a deviation
+  from ADR-003's holdout-authorship-independence wording — this
+  benchmark is generated programmatically, so the ADR's conditions (a)/
+  (b), which assume separate human authoring sessions, do not literally
+  apply; this phase relies on and documents condition (c), independent
+  multidisciplinary review, applied at the generator level.
+- **Final recommendation: IN REVIEW, not Done.** Per this task's explicit
+  instruction, Phase 12D does not close until maintainer verification,
+  Copilot working-tree review, Code X technical audit, Gemini academic
+  audit, and Grok red-team audit all pass. Phase 12E was not started.
+
+## Phase 12D — Code X Audit Resolution (2026-07-12)
+
+Code X's first independent technical audit of Phase 12D returned verdict
+**REVISE**: 2 Critical + 3 Major blocking findings. Resolved all five:
+
+- **Critical #1 — guard-dependent validation.** The validator used to import
+  the real Input/RAG Guards and gate its exit status on agreement with
+  hand-authored labels — circular, since a benchmark's whole point is to
+  measure disagreement with the current implementation. Fixed: the default
+  `scripts/validate_v2_benchmark.py` path now imports nothing from
+  `app.guards.*`; the guard cross-check survives only as an explicitly
+  opt-in, non-gating `--diagnose-current-guards` report (scoped to
+  development+validation unless `--include-holdout-diagnostic` is also
+  passed).
+- **Critical #2 — holdout template contamination.** Code X measured 34/60
+  holdout queries at ≥0.9 similarity to an earlier split for the same
+  family (median similarity 1.0), 17/23 families sharing an identical
+  normalized template, and one validation case 0.929-similar to a v1 case
+  (violating ADR-003). Root cause: every family drew development,
+  validation, and holdout content from one shared template, varying only a
+  per-case token. Fixed: `scripts/build_v2_benchmark.py` rewritten so every
+  family draws development/validation/holdout content from three disjoint,
+  independently authored content banks — different topics, different
+  sentence structure, different trigger-phrase alternatives per split, not
+  a token-substituted copy. New automated
+  `check_cross_split_contamination`/`check_v1_contamination` checks (Unicode
+  normalization + `difflib.SequenceMatcher` at the same 0.9 threshold Code
+  X's own finding used) now run on every validation and report **zero
+  findings** against the regenerated corpus.
+- **Bugs found and fixed while rewriting content (self-caught, via the same
+  guard-agreement diagnostic used for the original Phase 12D pass, re-run
+  after every content change):** several new split-specific sentences used
+  a noun other than the regex-required "note" ("memo", "report") or
+  inserted a word between "this" and "note", breaking a `\bthis note\b`
+  boundary; two multi-chunk-coordination holdout pairs had one half that
+  already tripped a per-chunk rule alone, defeating the coordination
+  premise; and several families' query text turned out to be hardcoded
+  identically regardless of split even after the document-content fix,
+  which the new contamination check itself caught (`fragment_near_
+  aggregate_budget`'s filler paragraph was also identical across splits and
+  dominated the similarity ratio for a different reason — fixed with three
+  distinct filler paragraphs).
+- **Major #1 — validator completeness.** Invalid `Decision` values and
+  unknown label fields used to pass; a globally-missing scenario family
+  used to pass; a dangling document reference or mismatched case/label ID
+  used to raise an unhandled `KeyError`. Fixed: exact-field-set + enum
+  validation for every record type, an explicit `REQUIRED_FAMILIES`
+  registry, and fully defensive (`.get(...)`-based) checks that report a
+  clean, deterministic, repository-relative-path error instead of crashing.
+- **Major #2 — label isolation / evaluation scope.** `expected_ingestion_
+  status` (a ground-truth outcome) lived in the corpus, outside `labels/`;
+  no `evaluation_scope` field existed. Fixed: moved to
+  `expected_document_ingestion_status` in labels; added a validated
+  `evaluation_scope` (`end_to_end`/`component`/`availability_fault`/
+  `residual_risk_only`) to every case — `provenance_denied_at_ingestion` is
+  now `component`, `availability_failure_case` is `availability_fault`,
+  `fragment_beyond_per_chunk_prefix` is `residual_risk_only` (excluded from
+  expected-detection denominators).
+- **Major #3 — weak class balance.** 36 benign / 74 malicious / 6 mixed / 4
+  neutral (≈30% benign) undermined the "approximately balanced" wording.
+  Rebalanced to Code X's own preferred distribution: 48 benign / 48
+  malicious / 16 mixed / 8 neutral overall (development/validation 12/12/4/2
+  each, holdout 24/24/8/4) — no family removed, all 23 still present in
+  every split; a new validator check enforces these exact bounds, not an
+  "approximate" claim.
+- **Regenerated candidate artifacts:** 172 documents, 120 cases (30/30/60).
+  Build twice + byte-for-byte compare: passed. Validate: passed, zero
+  contamination findings. Freeze (explicitly labeled `"manifest_status":
+  "candidate"`) + verify: passed. Mutation-then-deterministic-rebuild
+  round trip: passed.
+- **Tests:** 39 new/updated regression tests (92 total across the three
+  Phase 12D test files, up from 53) covering every accepted finding,
+  including guard-independence proofs (a schema-valid label disagreeing
+  with the real Input Guard still passes; builder output unchanged when a
+  guard module is monkeypatched; no gating check function imports
+  `app.guards.*`), contamination-rejection negative fixtures (shared
+  template, translation-style near-duplicate, superficial token
+  substitution, v1-derived validation query all correctly rejected; a
+  genuinely independent same-family pair correctly passes), and CLI-level
+  schema/enum/mapping negative probes.
+- **Test evidence:** focused Phase 12D suite **92 passed**; full repository
+  suite **338 passed** directly in this session (376 total including 38
+  TestClient-blocked tests, unrelated to this phase, blocked by the
+  pre-existing documented shared-environment `httpx`/`httpx2` issue).
+  `python -m py_compile` clean on every changed file. `git status --short`
+  confirmed the change set stayed within the allowed scope (`datasets/v2/`,
+  the three scripts, the three test files, docs, plus this new audit-
+  resolution document) — no file under `app/guards/`,
+  `app/services/rag_query.py`, `app/services/gateway.py`,
+  `app/services/llm_provider.py`, `app/retrieval/`, `app/api/routes.py`, the
+  v1 benchmark, or `requirements.txt` was touched.
+- **Final recommendation: READY FOR CODE X RE-AUDIT.** Not APPROVE, not
+  DONE. Phase 12D remains In Review. Gemini and Grok review the committed
+  candidate only after this Code X re-audit passes. Phase 12E was not
+  started.
+
+## Phase 12D — Code X Re-Audit Resolution, Round 2 (2026-07-12)
+
+A second independent Code X technical re-audit of the round-1 fix
+returned verdict **REVISE** again — Critical #2 and Major #1 were only
+*partially* resolved, plus two new findings against round 1's own fixes:
+
+- **Critical #2, continued — translation contamination.** Constructed the
+  exact failure scenario directly: an English sentence and its honest
+  Vietnamese translation, placed in different splits with different
+  self-declared `translation_group_id` values — round 1's fingerprint/
+  similarity check reported zero findings, since a translation shares
+  almost no literal text with its source language. Fixed with two
+  complementary controls: (1) a new non-runtime `datasets/v2/design/
+  authoring-provenance.jsonl` artifact (292 records — one per generated
+  query/document) whose `semantic_group_id`/`translation_group_id` values
+  are constructed to embed `(scenario_family, split[, bank_index])`, so
+  neither can ever collide across two splits by construction, with a
+  `normalized_text_hash` independently cross-checked against the real,
+  current artifact text; (2) a benchmark-specific, standard-library-only
+  EN/VI phrase-canonicalization check (`check_bilingual_contamination`,
+  ~40 reviewed phrase pairs, compared cross-split via both
+  `difflib.SequenceMatcher` ratio and token-Jaccard overlap — the latter
+  specifically so a clause-reordered translation is still caught).
+- **Bugs found and fixed while building the bilingual check (self-caught
+  before finalizing, documented transparently):** the first lexicon draft
+  used semantically-named substitution tokens (e.g. `@leavepolicyfull@`)
+  that themselves contained plain English words a *later, shorter*
+  lexicon entry could then re-match and corrupt — fixed by switching to
+  collision-free numeric tokens (`@C0@`, `@C1@`, ...); trailing sentence
+  punctuation stuck directly to a substituted token and silently broke
+  token-level comparison — fixed by stripping punctuation before
+  substitution; shorter lexicon entries sometimes matched before longer,
+  more specific ones, fragmenting a multi-word phrase — fixed by always
+  matching longest-phrase-first. A test fixture using word-level (rather
+  than clause-level) reordering genuinely failed to trigger detection
+  during development and had to be redesigned — documented as an exact,
+  tested limitation rather than silently discarded.
+- **Major #1, continued — field-type completeness.** Reproduced the exact
+  crash directly: a corpus record with `content: 12345` (an int) raised
+  an unhandled `TypeError` from `check_no_cross_split_secret_reuse`'s
+  `.finditer(content)` call. Also reproduced a duplicate `external_id`
+  passing silently. Fixed with complete field-type validation across
+  every corpus/case/label field (non-empty-string checks, JSON-safe
+  `metadata` rejecting non-string keys and NaN/Infinity, bounded `top_k`
+  `[1,50]` and DLP redaction count `[0,100]`, `external_id` uniqueness),
+  plus defensive `isinstance` guards on the two checks that previously
+  crashed, so a malformed value is always a clean validation error now.
+- **New finding — v1 contamination scanned queries only.** Direct read
+  confirmed `check_v1_contamination` accepted a `corpus` parameter but its
+  body never referenced it. Reproduced: a v1 prompt copied verbatim into a
+  holdout corpus document passed undetected. Fixed:
+  `find_v1_contamination_matches` now scans every validation/holdout query
+  *and* every corpus document referenced by a validation/holdout case; a
+  new `check_no_orphan_documents` guarantees every corpus document is
+  referenced by some case, closing the gap an unreferenced document could
+  otherwise exploit.
+- **New finding — candidate manifest missing policy artifacts.**
+  `contamination-exemptions.json` (which can suppress a contamination
+  finding) sat outside the manifest's integrity scope. Fixed: manifest now
+  covers all 9 policy-bearing files, including the exemptions file and the
+  new authoring-provenance artifact; mutating either now fails `verify`
+  exactly like a mutated corpus/case/label file (tested directly for all
+  5 artifact kinds: corpus, cases, labels, exemptions, provenance).
+- **Regenerated candidate artifacts:** counts unchanged from round 1 (172
+  documents, 120 cases 30/30/60, 48/48/16/8 class balance) — this round
+  added controls around content generation, not new content. Build twice
+  + compare: passed. Validate: passed, 0 findings across every
+  contamination check (fingerprint, bilingual, provenance, v1 query, v1
+  document). Freeze (9 files) + verify: passed. All 5 mutation-then-
+  restore round trips: passed.
+- **Measured statistics:** maximum cross-split query similarity 0.7213,
+  median holdout-query max-similarity 0.4589 (both comfortably below the
+  0.9 gating threshold — a healthy margin, not a bare pass); 0 bilingual/
+  translation/provenance/v1-query/v1-document contamination findings; 0
+  active exemptions.
+- **Tests:** 51 new/updated regression tests (143 total across the three
+  Phase 12D test files, up from 92), covering every accepted finding —
+  8 required translation/provenance regressions, 6 required v1-document
+  regressions, ~14 required field-type regressions, 5 required
+  manifest-policy regressions.
+- **Resumed completion evidence:** schema/type validation is now a hard
+  preflight; provenance rejects extra/malformed records and verifies identity
+  fields, hashes, and bilingual query-document linkage; fresh freeze rejects
+  missing policy artifacts. Focused Phase 12D suite: **161 passed**. Full
+  repository suite with no ignored modules: **484 passed, 1 warning** in the
+  project `.venv`, superseding the inherited partial command that omitted
+  seven TestClient modules. `python -m py_compile` was clean on every changed
+  file. `git status --short` confirmed the change
+  set stayed within the allowed scope — no file under `app/guards/`,
+  `app/services/rag_query.py`, `app/services/gateway.py`,
+  `app/services/llm_provider.py`, `app/retrieval/`, `app/api/routes.py`,
+  the v1 benchmark, or `requirements.txt` was touched; no new dependency
+  (all new logic uses only `unicodedata`/`re`/`difflib`/`hashlib`/`math`
+  from the standard library).
+- **Final recommendation: READY FOR TECHNICAL READ-ONLY VERIFICATION.** Not
+  APPROVE, not DONE. Phase 12D remains In Review pending a clean Code X
+  verification and subsequent Gemini/Grok audits. Phase 12E was not started.
+
+## Phase 12D — Code X Re-Audit Resolution, Round 3 (2026-07-12)
+
+A third independent Code X re-audit found round 2's field-type fix
+(Major #1, continued) covered non-string **scalars** only — a `list` or
+`dict` value in an enum-field position was never exercised and still
+crashed with an unhandled `TypeError: unhashable type`. **Final
+malformed-value verification verdict: REVISE.** Authoring provenance:
+**PARTIALLY RESOLVED**. Schema/type validation: **NOT RESOLVED** for
+list/dict values.
+
+- **Reproduced both exact reported crashes independently before fixing:**
+  a label with `expected_stop_reason: []` raised `TypeError: unhashable
+  type: 'list'` from `check_schemas`'s bare `value not in
+  STOP_REASON_VALUES` test; an authoring-provenance entry with `split: []`
+  raised the identical error from `check_authoring_provenance`. Both
+  confirmed pre-fix via a standalone script against the real module, not
+  merely inferred from the audit text.
+- **Root cause:** Python's `in`/`not in` against a `set` hashes its
+  operand before comparing anything; a `list`/`dict` value is unhashable.
+  Round 2's own field-type test matrix used only hashable scalars
+  (`12345`, `True`, `5.0`, `999`, `"not-a-list"`), so this exact class of
+  bug was never exercised until this round's explicit malformed-value
+  probe — not a regression, a genuinely untested gap.
+- **Fix:** eight reusable, type-first helpers added to
+  `scripts/validate_v2_benchmark.py` (`is_non_empty_string`,
+  `safe_record_identifier`, `validate_string_field`, `validate_string_enum`,
+  `validate_optional_string_enum`, `validate_string_list`,
+  `validate_integer_field`, `validate_json_safe_value`), each confirming a
+  value's Python type — rejecting `list`/`dict`/unwanted `bool`/`None` —
+  before any set/dict membership test can ever see it. Applied
+  consistently across every corpus/case/label field in `check_schemas`
+  and every provenance field in `check_authoring_provenance`. Every
+  downstream function that builds a set/dict/`Counter` from a validated
+  field got its own defense-in-depth `isinstance`/`_safe_in` guard (~20
+  sites across 15 functions, found via an exhaustive grep sweep), so each
+  remains individually crash-proof even when called directly, not only
+  through `main()`'s gate. `main()` also gained a final, last-resort
+  `except Exception` boundary (generic, non-traceback message, exit 1) —
+  documented in-code as secondary; the type-first helpers are the primary
+  fix.
+- **`freeze_v2_benchmark.py` investigated, not modified:** confirmed it
+  operates purely on file bytes (SHA-256/size), never parses JSONL field
+  values into a set/dict, so it is not exposed to this bug class.
+- **Tests:** 85 new/updated regression tests, all in
+  `tests/test_benchmark_v2_integrity.py` (246 total across the three
+  Phase 12D test files, up from 161) — a parametrized matrix of
+  `list`/`dict` malformed values across every corpus (17), case (17),
+  label (26), and authoring-provenance (16) field; direct CLI
+  reproductions of both exact reported crashes; a combined multi-field
+  malformed fixture proving aggregation without a crash; a non-object
+  provenance record test (direct-call and real-JSONL-line); a
+  deterministic-error-order test; and a real-candidate-still-passes test.
+  A small number of round-1/round-2 tests whose expected error-message
+  substring changed shape under the new, more descriptive helper wording
+  were updated to match (same field, same failure category — not
+  weakened).
+- **Malformed-value probe results (post-fix, both via CLI):**
+  `expected_stop_reason=[]` → `FAIL: 1 validation error(s): label
+  'V2-DEV-9001' expected_stop_reason has invalid type list (must be a
+  string)`, return code 1, no traceback. Authoring-provenance `split=[]`
+  → `FAIL: 22 validation error(s): ...split has invalid type list...`
+  (plus 21 correctly-aggregated, unrelated errors from the otherwise-empty
+  fixture), return code 1, no traceback.
+- **Final executed evidence:** focused Phase 12D suite **246 passed**
+  (up from 161). Full repository suite, no ignored modules: **569
+  passed, 1 warning** in the project `.venv` (up from 484 — the +85
+  delta exactly matches the Phase 12D test count increase). `python -m
+  py_compile` clean on every changed file. Default validator, optional
+  diagnostic, `--verify-determinism`, and the 9-file candidate-manifest
+  `verify` all still pass unchanged, since no generated artifact byte
+  changed this round. `git diff --check` clean; `git status --short`
+  confirmed the change set stayed within scope — no file under `app/`,
+  `requirements.txt`, the v1 benchmark, `reports/evaluation/`, or
+  `report-latex-template/` was touched.
+- **Final recommendation (superseded by the verification note below):**
+  the implementation pass closed with READY FOR FINAL MALFORMED-VALUE
+  READ-ONLY VERIFICATION. Not APPROVE, not DONE. Phase 12D remains In
+  Review; the candidate manifest remains CANDIDATE. Phase 12E was not
+  started.
+
+## Phase 12D — Final Malformed-Value Verification and Documentation Alignment (2026-07-12)
+
+The independent Code X read-only verification of the round-3 fix
+(`docs/modernization-ai-reviews/codex-phase-12d-final-malformed-value-verification.md`)
+confirmed the implementation across every category — implementation
+presence, validation ordering, corpus/case/label/provenance/exemption
+fail-safe handling, CLI error safety, regression preservation: all
+**RESOLVED**; Critical issues: **None**; blocking Major issues: **None**;
+focused suite **246 passed**, full suite **569 passed, 1 warning**,
+9-file candidate manifest verified. Its verdict was nonetheless
+**REVISE**, caused solely by three documentation inaccuracies, which a
+documentation-only alignment pass (no code, test, or artifact change)
+then corrected:
+
+- The audit-resolution narrative over-claimed that only fully
+  preflight-valid provenance records enter `by_artifact_id`; in fact a
+  record with a usable string `artifact_id` is indexed for deterministic
+  identity/duplicate reporting before its remaining fields are
+  validated, and all later comparisons/grouping/hash operations are
+  type-guarded.
+- It over-claimed that malformed values are simply skipped by all
+  downstream checks; in fact selected downstream checks intentionally
+  process malformed records through guarded, safe operations to
+  aggregate deterministic errors (the 22 errors of the `split=[]` probe
+  are safe deterministic findings, not an exception).
+- The corpus/label malformed-value parameter counts were corrected from
+  16/25 to the actual **17/26** (case 17 and provenance 16 were already
+  correct) in every document repeating them.
+- **Historical recommendation before multidisciplinary closure
+  (superseded below): READY FOR FINAL DOCUMENTATION READ-ONLY
+  VERIFICATION.** At that point Phase 12D remained In Review, the candidate
+  manifest remained CANDIDATE, and Phase 12E had not started.
+
+## Phase 12D — Multidisciplinary Audit Closure and Final Freeze (2026-07-12)
+
+- Verified the actual final reports at commit `4e10a2e`: Code X technical
+  **PASS**, Gemini academic **PASS**, and Grok red-team coverage **PASS**;
+  no Critical or blocking Major finding remains.
+- Recorded Gemini's direct-artifact access limitation and accepted its
+  non-blocking reporting constraint: Phase 12E percentages are limited to
+  aggregate or adequately supported, predeclared high-level attack groups;
+  individual-family outcomes remain descriptive. Ablation profiles,
+  confidence intervals, and the evaluation runner remain Phase 12E work.
+- Preserved Grok's three Phase 12E probe recommendations (budget-exact
+  Vietnamese multi-chunk splits, trusted-source authority/canary mixes,
+  homoglyph plus benign triggers) and its semantic-coordination/
+  over-redaction future-work observations without changing benchmark data.
+- Added the explicit deterministic `finalize` mode to
+  `scripts/freeze_v2_benchmark.py`. The default `freeze` mode remains
+  CANDIDATE; only `finalize` emits FINAL. Both cover the same nine relative
+  POSIX paths with the same SHA-256 values and sizes, no timestamp, no
+  absolute path, and no self-hash.
+- Finalized `datasets/v2/manifests/benchmark-v2-manifest.json`; all nine
+  audited artifacts remained byte-identical before and after. Any later
+  artifact change requires a new benchmark version and fresh audits.
+- Final validation: focused Phase 12D suite **255 passed**; full repository
+  suite **578 passed, 1 warning**; six-file compile, validator (172
+  documents/120 cases), deterministic rebuild, FINAL manifest verify, and
+  mutation detection against a temporary copy all passed.
+- **Final status: Phase 12D DONE; manifest FINAL; Phase 12E not started.**

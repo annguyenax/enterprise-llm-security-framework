@@ -1,0 +1,102 @@
+name: Phase 12G Public Release Gates
+
+# Public CI deliberately has no access to the git-ignored private benchmark
+# artifacts. It does not download, reconstruct, or execute validation/holdout
+# data, and therefore does not reproduce the full private-artifact test suite.
+# Synthetic Phase 12F tests exercise fail-closed missing-source behavior and
+# release-packet exclusions without materializing repository datasets.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase12g-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  public-release-gates:
+    name: Public gates (${{ matrix.os }}, Python 3.11)
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONPYCACHEPREFIX: ${{ runner.temp }}/phase12g-pycache
+
+    steps:
+      - name: Checkout without persisted credentials
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up supported Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install declared project and test dependencies only
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+        timeout-minutes: 8
+
+      - name: Compile Python sources
+        run: python -m compileall -q app scripts
+        timeout-minutes: 3
+
+      - name: Check tracked repository policy
+        run: >-
+          python scripts/ci/check_repository_policy.py
+          --repo-root .
+          --require-clean-tree
+          --json-out "${{ runner.temp }}/phase12g-policy.json"
+          --markdown-out "${{ runner.temp }}/phase12g-policy.md"
+        timeout-minutes: 3
+
+      - name: Build offline declared-dependency inventory
+        run: >-
+          python scripts/ci/build_dependency_inventory.py
+          --repo-root .
+          --json-out "${{ runner.temp }}/phase12g-dependencies.json"
+          --markdown-out "${{ runner.temp }}/phase12g-dependencies.md"
+        timeout-minutes: 3
+
+      - name: Run synthetic Phase 12F and Phase 12G tests
+        # These tests use temporary synthetic bytes only. They prove that a
+        # missing private source fails closed and that release packets exclude
+        # prohibited JSONL/result/secret classes. No evaluation command runs.
+        run: >-
+          python -m pytest -q -p no:cacheprovider
+          --basetemp="${{ runner.temp }}/pytest-phase12g-${{ matrix.os }}"
+          tests/ci
+          tests/test_v2_release_artifacts.py
+          tests/phase12f
+        timeout-minutes: 12
+
+      - name: Archive content-free gate reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase12g-content-free-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/phase12g-policy.json
+            ${{ runner.temp }}/phase12g-policy.md
+            ${{ runner.temp }}/phase12g-dependencies.json
+            ${{ runner.temp }}/phase12g-dependencies.md
+          if-no-files-found: ignore
+          retention-days: 7

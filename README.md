@@ -2,7 +2,7 @@
 
 **Xây dựng Hệ thống Bảo mật LLM Chống Tấn công Prompt Injection và Data Poisoning trong Môi trường Doanh nghiệp**
 
-> Status: **Phase 10 - Final LaTeX report integration (In Review).** The lab-scale gateway, guards, offline mock provider, controlled evaluation harness, and final report content are integrated. This is a university internship proof-of-concept (PoC), not a production system.
+> Status: **Phase 10 (v1 report track) In Review; Phase 12C (end-to-end RAG security pipeline) is DONE — final independent Code X re-audit PASS, no remaining Critical or blocking Major findings; Phase 12D (independent v2 benchmark design/generation/freeze) is DONE — Code X final technical verification PASS, Gemini final academic audit PASS, Grok final red-team audit PASS, and the 9-artifact benchmark manifest is FINAL; Phase 12E G0 planning gate is PASS and its master plan is APPROVED FOR IMPLEMENTATION, but implementation has NOT STARTED, evaluation results are NONE, and holdout execution is NO.** The lab-scale gateway, guards, offline mock provider, controlled v1 evaluation harness, and final v1 report content are integrated (Phase 0-10). The separate v2 wave has added SQLite FTS5/BM25 retrieval, server-controlled provenance, a guarded end-to-end RAG pipeline, and a final-frozen, deterministic 120-case v2 benchmark for a future Phase 12E evaluation. This is a university internship proof-of-concept (PoC), not a production system.
 
 ## Project Summary
 
@@ -99,7 +99,7 @@ Invoke-RestMethod -Uri "http://127.0.0.1:8000/v1/gateway/chat" -Method Post -Bod
 Or run `scripts/smoke_test_gateway.ps1` to exercise all of the above automatically (server must already be running).
 
 - **Audit log location:** `logs/audit.jsonl` by default (`LOG_PATH` env var to change it). One JSON object per line, UTF-8 encoded; secret-like patterns are redacted before being written, and rule-authored reason strings use plain ASCII (no em dashes) so the file renders correctly in any PowerShell console codepage.
-- **Still intentionally mocked, not a bug:** `/v1/gateway/chat` uses the local deterministic provider adapter; it never calls an external LLM, and no real RAG retrieval exists yet - see `app/README.md`.
+- **Still intentionally mocked, not a bug:** `/v1/gateway/chat` uses the local deterministic provider adapter and never calls retrieval or an external LLM. Retrieval is available only through the separate v2 endpoints; see `app/README.md`.
 
 ### Phase 5 RAG Context Guard
 
@@ -328,6 +328,333 @@ The Phase 12B entry gate now passes on all 10 checked requirements.
 Phase 12B (the first phase that touches `app/`) requires a separate,
 explicit go-ahead — it does not start automatically from this plan or from
 audit approval.
+
+### Phase 12B Retrieval Foundation (In Review)
+
+Phase 12B implements the SQLite FTS5/BM25 retrieval foundation approved in
+Phase 12A: persistent local document ingestion, server-controlled
+provenance/trust, and lexical retrieval — using only Python's
+standard-library `sqlite3` (no new dependency). **Retrieval is not yet
+wired into the guarded gateway** — `POST /v1/rag/query` does not exist
+until Phase 12C, and `POST /v1/gateway/chat` is byte-identical to its
+Phase 0-11 behavior (regression-tested).
+
+**Database location:** `data/retrieval.db` by default (`RETRIEVAL_DB_PATH`
+env var to change it; already covered by `.gitignore`'s existing `data/`
+and `*.db` entries — no runtime database is ever committed).
+
+**Ingest documents** (server assigns trust/classification from a
+`source_key` allowlist — see `app/core/source_policy.py` — a caller can
+never set `trust_level`/`classification` directly, and any attempt via the
+free-form `metadata` field is silently stripped, at any nesting depth
+through any combination of dicts/lists, after an iterative
+structure/type/cycle/depth preflight bounds the metadata before any
+recursive handling runs; the configured size limit is enforced against
+the raw metadata's actual UTF-8 encoded byte length, not a character
+count):
+
+```powershell
+$body = @{
+    documents = @(
+        @{ external_id = "policy-001"; source_key = "api_upload"; title = "Security Policy"; text = "..." }
+    )
+} | ConvertTo-Json -Depth 5
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/v1/documents/ingest" -Method Post -Body $body -ContentType "application/json"
+```
+
+**Retrieve** (lexical/BM25 only, no guard pipeline):
+
+```powershell
+$body = @{ query = "warranty policy"; top_k = 5 } | ConvertTo-Json
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/v1/retrieve" -Method Post -Body $body -ContentType "application/json"
+```
+
+**Smoke test** (ingest, retrieve, update, verify stale content gone):
+
+```powershell
+$env:RETRIEVAL_DB_PATH = "$env:TEMP\smoke-retrieval.db"
+uvicorn app.main:app --reload
+# in a second shell:
+powershell -ExecutionPolicy Bypass -File scripts/smoke_test_retrieval.ps1
+```
+
+**Safe FTS5 query construction:** user query text is never concatenated
+raw into an FTS5 `MATCH` expression. Queries are tokenized into plain
+lexical terms, each individually double-quoted, and joined with an
+explicit, server-generated `OR` — so FTS5 operators (`NEAR`, `AND`/`OR`/`NOT`,
+column filters, wildcards) typed by a caller are treated as literal search
+terms, not executed as query syntax. Term combination uses `OR` (not
+implicit `AND`) so that one extra, otherwise-irrelevant query term cannot
+zero out an otherwise-matching result — `bm25()` ranking still rewards
+chunks matching more of the query's terms. SQL parameterization alone does
+not protect against FTS5 query-syntax manipulation (FTS5 `MATCH` has its
+own query language) — see `docs/decisions/ADR-002-retrieval-engine.md`.
+
+**Ingestion/upsert semantics:** canonical `document_id` is derived
+server-side from `source_key` + `external_id` (SHA-256-based, deterministic
+— never caller-supplied). Re-ingesting identical content is a no-op
+(`unchanged`); changed content atomically replaces all stale chunks and FTS
+index rows within one transaction (`updated`); a batch-level database
+failure rolls back the entire batch (`IngestionBatchError`) — no partial
+write is ever left behind. Duplicate `external_id` values within the same
+batch are rejected per-item, not the whole batch.
+
+**FTS5 capability policy:** an explicit capability check runs before
+retrieval is used. If FTS5 is unavailable in the local Python/SQLite build,
+the system raises a clear `FTS5UnavailableError` and serves **zero**
+retrieval-dependent requests — there is no fallback to `LIKE` search or any
+degraded scoring mode, at startup or at any later point. Any alternative
+retriever requires a future ADR.
+
+**Known limitations (not bugs):**
+- Lexical/keyword retrieval only — no semantic similarity, no embeddings,
+  no vector database (deferred to optional Phase 12F, its own future ADR).
+- Retrieval is now connected to a guard pipeline via `POST /v1/rag/query`
+  (Phase 12C, see below) — `POST /v1/gateway/chat` itself still does not
+  use retrieval, unchanged since Phase 6.
+- No real LLM call anywhere in this repository.
+- Not production-ready: no production claim, no real-world detection-rate
+  claim, evaluated only on synthetic content created during manual testing
+  (Phase 12B/12C have no benchmark of their own — that is Phase 12D/12E).
+
+**Phase 12B is marked In Review, not Done**, pending an independent
+re-audit of the latest resolution pass returning PASS (this session
+verified 188/188 tests passing in a project-local `.venv`, but per
+`AGENT_RULES.md` rule 9/10 the phase is not declared `Done` until that
+independent verification is obtained).
+
+**Independent audit (Code X):** Phase 12B was independently audited after
+implementation; verdict REVISE with 5 blocking Major findings (no
+Critical), all resolved with regression tests. Two subsequent rounds of
+independent re-audit each found the previous pass's Major #2 fix
+(reserved-metadata filtering) still incomplete and required further
+correction — see
+[docs/modernization-ai-reviews/phase-12b-audit-resolution.md](docs/modernization-ai-reviews/phase-12b-audit-resolution.md)
+for the full three-round history. Notable fixes: the public ingestion
+endpoint could no longer be tricked into granting `trusted_internal`
+status by claiming a synthetic `source_key`; metadata-based trust
+spoofing now defeats nested/case/whitespace variants through any
+combination of dicts and lists; re-ingesting identical text with a
+changed title/metadata now correctly updates instead of silently
+no-op'ing; environment-configured ingestion limits are now actually wired
+to the service; retrieval no longer returns zero hits just because a
+query contains one extra irrelevant term (FTS5 term combination changed
+from AND to OR, see `ADR-002-retrieval-engine.md`); and (final re-audit
+round) the metadata size limit is now measured in actual UTF-8 bytes
+instead of Python characters, and a bounded, iterative
+(non-recursive) preflight now rejects pathologically deep or cyclic
+metadata with a controlled error instead of an unhandled
+`RecursionError`.
+
+### Phase 12C End-to-End RAG Security Pipeline (DONE — final Code X re-audit PASS)
+
+Phase 12C adds `POST /v1/rag/query`: Input Guard → server-side retrieval
+(Phase 12B) → Provenance/Trust Guard → RAG Context Guard (per chunk, then
+a bounded aggregate pass) → Mock LLM Provider → centralized DLP → Output
+Guard → structured audit → safe response. `POST /v1/gateway/chat` is
+**unchanged** — it still only ever uses caller-supplied `context_chunks`
+and never calls the retriever or this new pipeline.
+
+**Query** (server retrieves context itself — the request has no field for
+`context_chunks`, `trust_level`, `classification`, `source_type`,
+`is_poisoned`, `expected_decision`, a guard decision, or a canonical
+document/chunk ID; `extra="forbid"` rejects any attempt to add one):
+
+```powershell
+$body = @{ query = "What is the Aurora Widget's warranty period?"; top_k = 5 } | ConvertTo-Json
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/v1/rag/query" -Method Post -Body $body -ContentType "application/json"
+```
+
+**Smoke test** (ingest a benign + two poisoned documents, exercise every
+stop path against a live server):
+
+```powershell
+$env:RETRIEVAL_DB_PATH = "$env:TEMP\smoke-rag-pipeline.db"
+uvicorn app.main:app --reload
+# in a second shell:
+powershell -ExecutionPolicy Bypass -File scripts/smoke_test_rag_pipeline.ps1
+```
+
+**Provenance/Trust Guard** (`app/guards/provenance_guard.py`): three
+fixed allow-lists (`trust_level`, `classification`, `source_type`)
+matching exactly the values `app/core/source_policy.py`'s real policies
+produce — fails closed on anything else, including the
+`untrusted_unknown`/`unverified` fallback pair. A caller cannot influence
+this decision; it reads only a retrieved hit's server-assigned fields.
+Trust does not prove content safety — an accepted, even
+`trusted_internal`, chunk still goes through the same content-based RAG
+Context Guard afterward; a compromised high-trust source remains a
+documented residual risk.
+
+**Multi-chunk coordination decision** (required by the Phase 12A audit
+resolution, Grok Critical 2): implemented as a bounded, deterministic
+**aggregate enforcement** — accepted chunks are deterministically bounded
+first (including separator cost, capped total at 4000 chars by default),
+then that exact bounded representation is re-run through the same RAG
+Context Guard and is the only context the provider can receive, catching an
+instruction split across chunks that no single chunk's inspection alone
+would trip. Aggregate `sanitize` fails closed because a sanitized joined
+blob cannot be mapped safely back to source chunks. This reduces, but does
+not eliminate, semantic multi-chunk coordination risk; no ML detector was
+added.
+
+**Centralized DLP** (`app/guards/dlp_guard.py`): deterministic regex
+detectors (canary secret, OpenAI/AWS/GitHub key shapes, PEM private-key
+blocks, bearer tokens, `key: value`/`key=value` secret assignments)
+redact the provider's output before the Output Guard or the API response
+see it. Output beyond the configured inspection boundary is dropped, never
+returned uninspected. A redaction is reported as `sanitize`, not `allow`.
+The complete shared redaction API is also used by the audit logger, including
+bearer-token and secret-assignment patterns. This module is the single source
+of the secret patterns
+previously duplicated in `app/guards/output_guard.py` and
+`app/services/audit_logger.py` — both now import from it; their own
+matching/decision behavior is unchanged (verified by regression tests
+comparing redaction output before and after consolidation).
+
+The provider receives only the post-Input-Guard effective query; removed raw
+prompt content is never present in a provider request. Phase 12C settings are
+validated at construction/startup, including positive values, top-k
+relationships, and hard resource ceilings.
+
+**Fail-closed stop paths:** input blocked, retrieval failed (safe 400/503,
+matching `POST /v1/retrieve`'s existing convention), no retrieval hits
+(safe `allow`/no-answer, not an error), all hits rejected by provenance,
+all/aggregate-blocked by the RAG Context Guard, provider failure, DLP
+processing failure, output blocked, and an unexpected-internal-failure
+safety net. Guard-stage failures return safe structured refusals; retrieval
+failures use safe HTTP mappings and are audited before propagation. Audit-sink
+failure emits one metadata-only fallback signal and never exposes the sink
+exception or request content.
+
+**Response is safe by default:** no full retrieved chunk text — only a
+per-hit provenance summary (document/chunk ID, title, source_type,
+classification, trust_level, rank, score, accepted/rejected status, a
+safe reason code).
+
+**Multidisciplinary audit resolution:** Gemini, Grok, and Code X all returned
+`REVISE`; the two Code X Critical findings, five blocking Major findings,
+and two Minor findings were accepted and resolved with regression tests.
+Gemini's evaluation-only ablation profile remains scoped to Phase 12E; no
+public guard-disable control was added.
+
+**Code X final re-audit:** a subsequent independent re-audit of that exact
+state found terminal audit coverage was still incomplete for two paths —
+a configured `top_k` policy rejection and a response-construction failure
+could each reach the API boundary with zero or contradictory audit
+trail. Both are now fixed (see
+[phase-12c-audit-resolution.md](docs/modernization-ai-reviews/phase-12c-audit-resolution.md)
+for the full architecture: `run_rag_query_uncommitted`/
+`commit_rag_query_audit`/`audit_top_k_rejected`/
+`mark_response_construction_failed`). The validated suite now contains
+319 passing tests; see [tests/README.md](tests/README.md) and
+[app/README.md](app/README.md) for the full stage-by-stage design and
+test breakdown. **Phase 12C is DONE.** The final independent Code X
+re-audit returned **PASS** at HEAD `9fed074` against the Phase 12C
+implementation baseline `ad555c9` (final implementation commit `56b749a`),
+with **no remaining Critical and no remaining blocking Major findings** and
+no required actions before closure. Code X independently inspected the code
+and executed the tests: focused Phase 12C suite **172 passed, 1 warning**;
+targeted Critical/Major probes **24 passed, 1 warning**; full repository
+suite **578 passed, 0 failed, 0 skipped, 1 warning**; `compileall` PASS.
+The previously blocking finding — nested `ProvenanceItemResponse`
+construction outside the protected response/audit boundary — is confirmed
+RESOLVED: every nested response model is now built inside one protected
+`try` block, and the success audit is committed only after the complete
+typed response tree exists. Three Minor findings (regression-count wording,
+optional non-finite-`retrieval_score` schema hardening, and pre-existing
+ignored `__pycache__` directories) were adjudicated as non-blocking and are
+recorded in
+[phase-12c-audit-resolution.md](docs/modernization-ai-reviews/phase-12c-audit-resolution.md).
+
+### Phase 12D Independent Benchmark V2 (DONE — Code X, Gemini, and Grok final audits all PASS; manifest FINAL)
+
+Phase 12D produces a new, independently-governed benchmark for a future
+Phase 12E security evaluation — 120 cases across 23 scenario families
+(direct/indirect injection, low-trust/compromised-trusted-source content,
+multi-chunk coordination, aggregate-budget edges, zero-width/HTML
+concealment, Vietnamese/English/bilingual attacks, DLP/leakage mechanism
+cases, and benign false-positive traps), split 30 development / 30
+validation / 60 holdout, class-balanced 48 benign / 48 malicious / 16 mixed
+/ 8 neutral, backed by a 172-document synthetic corpus, under
+`datasets/v2/`. Generated deterministically by
+[scripts/build_v2_benchmark.py](scripts/build_v2_benchmark.py) (fixed seed,
+no network, no LLM calls, split-independent content banks per family, plus
+a non-runtime `datasets/v2/design/authoring-provenance.jsonl` artifact — one
+hashed record per generated query/document), checked by
+[scripts/validate_v2_benchmark.py](scripts/validate_v2_benchmark.py)
+(complete, **type-first** schema/enum/type validation — every field is
+confirmed to have the right Python type before any set/dict membership
+test, so a malformed `list`/`dict`/`bool` value is always a clean
+validation error, never an unhandled `TypeError` — counts, taxonomy
+coverage, referential integrity, exact class-distribution bounds, no
+duplicate/reused secrets, cross-split contamination/similarity checks, a
+benchmark-specific EN/VI bilingual-translation canonicalization check, an
+authoring-provenance hash cross-check, and v1-comparison against both
+queries and every referenced corpus document — all **guard-independent**,
+with an optional, explicitly opt-in, non-gating `--diagnose-current-guards`
+report against the real `input_guard`/`rag_guard` available separately),
+and frozen with a SHA-256 **candidate** manifest covering all 9
+policy-bearing artifacts (corpus/cases/labels/provenance/exemptions) by
+[scripts/freeze_v2_benchmark.py](scripts/freeze_v2_benchmark.py). Case
+inputs (including `evaluation_scope`) and ground-truth labels (including
+non-runtime authoring metadata) are held in strictly separate files; no file
+under `app/` reads either. Three independent Code X technical audit rounds
+(`docs/modernization-ai-reviews/codex-phase-12d-benchmark-audit.md`) all
+returned verdict **REVISE** — round 1 (2 Critical: guard-dependent
+validation, holdout template contamination; 3 Major: incomplete validator
+schema, incomplete label isolation, weak class balance), round 2 (found
+round 1's split-independence and validator-completeness fixes were only
+partial: no defense against an exact EN/VI translation using different
+self-declared group IDs, a `TypeError` crash on non-string corpus content, a
+v1-comparison check that never actually scanned corpus documents, and a
+candidate manifest missing the exemption/provenance policy files), and
+round 3 (found round 2's type-validation fix covered non-string scalars
+only — a `list`/`dict` value in an enum field, e.g. a label's
+`expected_stop_reason=[]` or an authoring-provenance entry's `split=[]`,
+still raised an unhandled `TypeError: unhashable type` from a bare
+`value in ALLOWED_SET` test performed before any type check) — all
+findings from all three rounds resolved; see
+[docs/modernization-ai-reviews/phase-12d-audit-resolution.md](docs/modernization-ai-reviews/phase-12d-audit-resolution.md).
+See [datasets/v2/README.md](datasets/v2/README.md) and
+[docs/benchmark-v2-methodology.md](docs/benchmark-v2-methodology.md) for the
+full design, taxonomy, contamination controls, and documented limitations
+(synthetic corpus, rule-based guard target, no real LLM, no semantic
+retrieval, residual paraphrase/encoding bypasses, benchmark-author/
+guard-author overlap, and the exact tested boundary of the bilingual
+translation-detection lexicon). Phase 12D produces benchmark artifacts
+only — no security evaluation, no ASR/FPR/FNR numbers, no ablation
+results; that is Phase 12E, whose implementation has not started. **Phase 12D is DONE**:
+after the three fix rounds, the committed candidate (commit `4e10a2e`)
+passed all remaining multidisciplinary gates — Code X final technical
+verification **PASS**, Gemini final academic audit **PASS**, Grok final
+red-team coverage audit **PASS**, with no remaining Critical or blocking
+Major findings — and the 9-artifact manifest was then finalized via the
+freeze script's explicit `finalize` mode (`"manifest_status": "final"`;
+the nine audited artifacts remained byte-identical, verified by SHA-256
+before and after). Final verification completed with **255 focused Phase
+12D tests passed** and **578 repository tests passed, 1 warning**. Per
+Gemini's accepted (non-blocking) finding, Phase
+12E must report percentage metrics only at the aggregate and at
+predeclared high-level attack-group levels with adequate support;
+individual-family outcomes are descriptive only. Any
+future change to the frozen artifacts is a new benchmark version (v3)
+requiring fresh audits, per ADR-003's Rule of Freezing.
+
+### Phase 12E G0 Planning Gate (PASS — implementation not started)
+
+The Phase 12E master plan at audited commit
+`d82bac7828e2e54520e0aa29271e820a52ec6f47` passed all three final G0
+reviews: [Code X technical verification](docs/modernization-ai-reviews/codex-phase-12e-plan-final-verification.md),
+[Gemini academic re-audit](docs/modernization-ai-reviews/gemini-phase-12e-plan-final-academic-reaudit.md),
+and [Grok red-team re-audit](docs/modernization-ai-reviews/grok-phase-12e-plan-final-red-team-reaudit.md).
+All three verdicts are **PASS**; remaining Critical issues, blocking Major
+issues, and required corrections before implementation are **None**. The
+master plan is therefore **APPROVED FOR IMPLEMENTATION**. This closes only
+the planning gate: Phase 12E implementation is **NOT STARTED**, evaluation
+results are **NONE**, and holdout execution is **NO**. All documented
+limitations and deferred recommendations remain in force, and implementation
+requires a separate explicit task.
 
 Everything before Phase 4 was documentation/data only — Phase 0–3.1 produced scaffolding, research, architecture/threat-model docs, and the synthetic benchmark (`datasets/`, `redteam/`). See [PROJECT_PLAN.md](PROJECT_PLAN.md) for the full roadmap.
 

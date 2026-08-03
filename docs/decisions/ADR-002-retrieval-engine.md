@@ -81,6 +81,23 @@ Key implementation requirements (see `docs/modernization-v2-architecture.md`
   then a stable secondary key such as `chunk_id`), so the same query against
   the same corpus always returns the same ordered result — required for
   reproducible evaluation.
+- **Term-combining behavior (updated per the Phase 12B Codex audit, Major
+  #5, "Implicit AND permits trivial retrieval suppression"):** sanitized
+  query terms are joined with explicit `OR`, not (as originally
+  implemented and documented here) implicit `AND`. The original AND-only
+  behavior meant that a single extra, otherwise-irrelevant query term
+  could silently zero out an otherwise-matching result — a genuine
+  false-negative/evasion primitive an attacker or an ordinary verbose
+  query could trigger, not merely a ranking-quality preference. Under OR,
+  a chunk matching *any* extracted term is a candidate, still ranked by
+  `bm25()`, which continues to reward chunks matching more of the query's
+  terms (BM25 sums per-term scores and down-weights very common terms via
+  document frequency) — so precision is not abandoned, only the
+  all-or-nothing suppression failure mode. This is an internal
+  ranking-semantics refinement within the already-approved SQLite FTS5/
+  BM25 engine; it does not change the engine choice itself or any of the
+  hard requirements above (capability fail-closed, no fallback, safe
+  tokenization/quoting, parameterized SQL).
 
 ## Alternatives Considered
 

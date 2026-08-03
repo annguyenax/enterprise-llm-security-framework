@@ -135,6 +135,81 @@ performs the actual authoring.
 | **Extend v1's 40 cases in place** (add more cases to `redteam/prompts.jsonl` rather than create a new file) | Rejected outright — `docs/dataset/dataset-methodology.md` §9 already establishes that any content change to the frozen v1 corpus is a new corpus version, and the whole point of v2 is to be an *independently governed* set that the v1-tuned rules were never exposed to. Modifying v1 in place would destroy that independence. |
 | **No holdout split (development/validation only)** | Rejected — without a holdout that is provably never used for rule tuning, the same calibration-not-generalization problem that affects v1 today would simply reappear one level up in v2. |
 
+## Implementation Note (added at Phase 12D implementation time)
+
+- **Final path:** `datasets/v2/` (not `redteam/v2/`, the placeholder this ADR
+  named above). `datasets/` is the repository's existing convention for
+  versioned corpus content (`datasets/clean/`, `datasets/poisoned/`), and v2
+  has its own multi-file corpus/case/label/manifest structure — materially
+  larger than `redteam/`'s single frozen `prompts.jsonl` file. This choice
+  does not change any rule this ADR fixes, only the directory name; see
+  `docs/benchmark-v2-methodology.md` §2 for the full rationale.
+- **Holdout independence condition:** the three conditions in "Split
+  structure" above ((a) different author, (b) documented time gap, (c)
+  independent review) assume manual, per-scenario human authorship of
+  development/validation vs. holdout content. Phase 12D's benchmark is
+  instead generated **programmatically** — one deterministic builder
+  function per scenario family produces its development, validation, and
+  holdout instances in the same run, each drawing from its own independently
+  authored content bank (not a shared template — see the next bullet).
+  Conditions (a) and (b), which assume separate human authoring sessions, do
+  not literally apply to this generation method. This benchmark relies on
+  **condition (c)** instead, applied to the whole generator: the holdout
+  split is not treated as validated for Phase 12E use until it passes the
+  multidisciplinary review this phase's own instructions require (Code X,
+  Gemini, Grok, Copilot). This is recorded as a **deviation from this ADR's
+  literal wording** — a future amendment should state explicitly that
+  condition (c) may be satisfied at the generator level when a benchmark is
+  programmatically authored, rather than requiring a scenario-by-scenario
+  independence claim. See `docs/benchmark-v2-methodology.md` §10-11 for the
+  full discussion.
+- **Code X Phase 12D audit round (post-initial-implementation):** the first
+  Code X technical audit
+  (`docs/modernization-ai-reviews/codex-phase-12d-benchmark-audit.md`)
+  returned verdict REVISE, finding the initial implementation's development/
+  validation/holdout content for a given family was in fact generated from
+  one shared template varying only by a per-case token — 34 of 60 holdout
+  queries scored ≥0.9 lexical similarity to an earlier split, and one
+  validation case was a 0.929-similarity restatement of a v1 case, violating
+  this ADR's v1-reuse restriction. This was a real, material violation of
+  the independence condition (c) claim above (independent review, once
+  actually performed, would not have passed) — the generator was rewritten
+  so every family draws split-specific content from disjoint content banks;
+  see `docs/modernization-ai-reviews/phase-12d-audit-resolution.md` and
+  `docs/benchmark-v2-methodology.md` §10 for the fix and its verification.
+  The audit also found the corpus's declared "approximately balanced"
+  category mix (≈30% benign) too weak to support meaningful FPR reporting;
+  rebalanced to 48 benign / 48 malicious / 16 mixed / 8 neutral (exact,
+  reviewed bounds, not merely "approximate" — `docs/benchmark-v2-
+  methodology.md` §6). Neither change required amending any rule this ADR
+  fixes (split sizes, freeze mechanics, v1-retirement) — only the generator
+  implementation and the corpus's realized category counts.
+- **Code X Phase 12D re-audit round 2:** a second independent audit pass
+  found round 1's split-independence fix still allowed an exact EN/VI
+  translation to pass validation as long as the two records declared
+  different `translation_group_id` values (the raw-text fingerprint check
+  cannot see a translation, by construction), and found the v1-reuse
+  check above never actually scanned corpus documents despite accepting
+  one as a parameter. Both fixed: a new non-runtime `datasets/v2/design/
+  authoring-provenance.jsonl` artifact plus a benchmark-specific EN/VI
+  phrase-canonicalization check now catch a direct translation across
+  splits (`docs/benchmark-v2-methodology.md` §10a); the v1-reuse
+  prohibition this ADR states now covers every corpus document referenced
+  by a validation/holdout case, not only queries (§11). Neither change
+  amends this ADR's own rules — only the depth of enforcement.
+- **Code X Phase 12D re-audit round 3:** a third independent audit pass
+  found round 2's field-type validation fix covered non-string scalars
+  (e.g. an int `content`, a bool `top_k`) but not `list`/`dict` values in
+  an enum-field position — `expected_stop_reason=[]` on a label and
+  `split=[]` on an authoring-provenance entry each raised an unhandled
+  `TypeError: unhashable type` from a bare `value in ALLOWED_SET` test
+  performed with no type check first. Fixed by making every enum/list/
+  integer field's validation **type-first**: the Python type is confirmed
+  before any set/dict membership test can ever see the value, so a
+  malformed value is always a clean, aggregated validation error. This
+  does not amend this ADR's own rules — only the validator's robustness
+  against a malformed artifact.
+
 ## Consequences
 
 - Phase 12D is a documentation/data-authoring phase with no code changes,

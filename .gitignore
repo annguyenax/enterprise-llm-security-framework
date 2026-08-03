@@ -16,6 +16,19 @@ env/
 
 # --- Logs & local data ---
 logs/
+# JSONL is ignored by default. NOTE (Phase 12F release hardening):
+# the nine FINAL-frozen benchmark v2 artifacts under datasets/v2/ include eight
+# *.jsonl files that are intentionally NOT tracked here. They are externally
+# materialized and byte-verified against the FINAL manifest
+# (datasets/v2/manifests/benchmark-v2-manifest.json) via
+# scripts/materialize_v2_frozen_artifacts.py. Their integrity is guaranteed by
+# manifest SHA-256, not by git tracking.
+#
+# Do NOT add a blanket "!datasets/v2/**/*.jsonl" un-ignore rule: the holdout
+# split (datasets/v2/cases/holdout.jsonl, datasets/v2/labels/holdout.jsonl) must
+# remain a blind, externally-held holdout and must not be exposed for tracking as
+# a side effect of release packaging. Materialization is explicit and audited;
+# git exposure is not.
 *.jsonl
 data/
 *.db

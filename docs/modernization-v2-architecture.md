@@ -71,7 +71,7 @@ listed; existing guards keep their current responsibility.
 | `app/services/ingestion.py` | Validation, size limits, SHA-256 hashing, deduplication, transactional batch ingestion, server-assigned source/trust policy | SQLite store, Chunking | 12B |
 | `app/services/rag_query.py` | Orchestrates Input Guard -> Retriever -> RAG Guard -> existing gateway/provider path for the new end-to-end query flow | Input Guard, Retriever, RAG Guard, Provider | 12C |
 | `app/guards/dlp_guard.py` | Centralized `DLPFinding` detectors + redaction, shared by Output Guard and audit logger instead of duplicated patterns | Output Guard, Audit Logger | 12C |
-| `app/core/pipeline.py` | `GuardProfile`: immutable, named layer-enable/disable configuration used only by the ablation runner, never by production endpoints | Ablation Runner | 12C (definition), 12E (used) |
+| `app/core/pipeline.py` | Phase 12C typed full-pipeline results; Phase 12E adds `GuardProfile`, an immutable named layer configuration used only by trusted evaluation code and never by public endpoints | RAG Query Service, Ablation Runner | 12C (results), 12E (`GuardProfile`) |
 | `app/services/ablation_runner.py` | Executes the v2 benchmark once per `GuardProfile`, compares results, computes marginal contribution | Guards, Retriever, `GuardProfile` | 12E |
 | `app/services/evaluation_store.py` | Reads a fixed, already-generated evaluation artifact for the optional read-only summary endpoint; never triggers a run or accepts a caller-supplied path | Generated reports only | 12E or later, only if `GET /v1/evaluation/summary` is built |
 
@@ -312,6 +312,16 @@ by this document alone — each requires its own explicit go-ahead per
   not author the v2 benchmark yet (Phase 12D) using this phase's own code
   as the design reference, to avoid designing the benchmark around whatever
   the implementation happens to catch.
+
+**Audit-resolution clarification:** the public endpoint always executes the
+full secure profile. Guard enable/disable controls are not accepted through
+request fields, headers, or serving-mode environment variables. The typed
+`GuardProfile` and its injection into an evaluation-only runner remain Phase
+12E work, as the Phase 12E allowed-files and acceptance criteria below already
+specify. Phase 12C's stable stage results, reason codes, monotonic per-stage
+timings, provider-called state, DLP categories/counts, and retrieval/context
+counts provide the per-request inputs that Phase 12E will aggregate; p50/p95
+are deliberately not calculated in the request path.
 
 ### Phase 12D — Benchmark v2 Generation and Freeze
 
