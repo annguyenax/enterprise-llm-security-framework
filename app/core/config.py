@@ -61,6 +61,13 @@ class Settings:
     rag_max_aggregate_context_chars: int = 4000
     dlp_max_inspect_chars: int = 20_000
     rag_return_provenance: bool = True
+    # Enterprise ACL retriever (Slice 2). The default is deliberately the
+    # existing Phase 12B backend, so nothing about the current demos or the
+    # frozen-benchmark evaluations changes unless an operator opts in.
+    # Selecting a backend by name goes through the ADR-004 registry
+    # (`app/retrieval/registry.py`), which fails closed on an unknown name.
+    retriever_name: str = "sqlite_bm25"
+    enterprise_kb_db_path: str = "data/enterprise-kb.db"
 
     def __post_init__(self) -> None:
         """Fail startup/construction on unsafe Phase 12C limits."""
@@ -96,6 +103,13 @@ class Settings:
             )
         if not isinstance(self.rag_return_provenance, bool):
             raise ValueError("rag_return_provenance must be a boolean")
+        if not isinstance(self.retriever_name, str) or not self.retriever_name.strip():
+            raise ValueError("retriever_name must be a non-empty string")
+        if (
+            not isinstance(self.enterprise_kb_db_path, str)
+            or not self.enterprise_kb_db_path.strip()
+        ):
+            raise ValueError("enterprise_kb_db_path must be a non-empty string")
 
 
 def load_settings() -> Settings:
@@ -125,6 +139,8 @@ def load_settings() -> Settings:
         rag_max_aggregate_context_chars=int(os.getenv("RAG_MAX_AGGREGATE_CONTEXT_CHARS", "4000")),
         dlp_max_inspect_chars=int(os.getenv("DLP_MAX_INSPECT_CHARS", "20000")),
         rag_return_provenance=_str_to_bool(os.getenv("RAG_RETURN_PROVENANCE", "true")),
+        retriever_name=os.getenv("RETRIEVER_NAME", "sqlite_bm25"),
+        enterprise_kb_db_path=os.getenv("ENTERPRISE_KB_DB_PATH", "data/enterprise-kb.db"),
     )
 
 

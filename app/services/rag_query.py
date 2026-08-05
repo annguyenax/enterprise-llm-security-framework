@@ -44,15 +44,26 @@ import dataclasses
 import hashlib
 import time
 import uuid
+from datetime import datetime, timezone
 
 from app.core.config import settings
 from app.core.decisions import Decision, most_severe
 from app.core.pipeline import ALL_ON, GuardProfile, ProvenanceSummary, RagPipelineResult, StageResult
+from app.guards.acl_guard import (
+    REASON_NOT_APPLICABLE as ACL_NOT_APPLICABLE,
+    AclGuardDecision,
+    evaluate_access,
+)
 from app.guards.dlp_guard import DLPResult, scan_and_redact
 from app.guards.input_guard import evaluate_input
 from app.guards.output_guard import evaluate_output
 from app.guards.provenance_guard import ProvenanceDecision, evaluate_provenance
 from app.guards.rag_guard import evaluate_rag_context
+from app.retrieval.acl import (
+    ACL_METADATA_PREFIX,
+    RetrievalPrincipal,
+    canonical_timestamp,
+)
 from app.retrieval.base import Retriever
 from app.retrieval.models import RetrievalHit, RetrievalQuery
 from app.schemas.requests import RAGContextChunk
@@ -90,12 +101,21 @@ STOP_RETRIEVAL_FAILED = "retrieval_failed"
 # response) -- see audit_top_k_rejected and mark_response_construction_failed.
 STOP_TOP_K_REJECTED = "top_k_rejected"
 STOP_RESPONSE_CONSTRUCTION_FAILED = "response_construction_failed"
+# Every retrieved hit was refused by the ACL Guard. Reported separately from
+# `all_rejected_provenance` so an operator can tell "you are not allowed to
+# see this" apart from "this content's source is not approved" -- they have
+# different causes and different fixes.
+STOP_ALL_REJECTED_ACL = "all_rejected_acl"
 
 _ANSWER_INPUT_BLOCKED = (
     "Your query was blocked by the Input Guard and was not used for retrieval. "
     "Reason(s): {reasons}"
 )
 _ANSWER_NO_HITS = "No relevant information was found for this query."
+# Deliberately identical in shape to the no-hits answer: telling a caller
+# "there are 3 documents you may not read" is itself a disclosure about
+# content they have no access to.
+_ANSWER_ALL_REJECTED_ACL = "No relevant information was found for this query."
 _ANSWER_ALL_REJECTED_PROVENANCE = (
     "Retrieved content could not be verified as coming from an approved source "
     "and was excluded before reaching the language model."
@@ -198,6 +218,25 @@ def _bound_chunks_for_aggregate(
     return included, excluded, aggregate_text
 
 
+def _chunk_metadata(hit: RetrievalHit) -> dict:
+    """Build the metadata a `RAGContextChunk` carries, with access-control
+    internals removed.
+
+    ACL facts ride on a hit's metadata so the ACL Guard can re-derive them
+    without a second database round trip, but they must not travel any
+    further: a chunk's metadata reaches the provider (see
+    `app/services/providers/ollama.py`, which renders chunk metadata into
+    the prompt's context block), and a document's role/clearance rules are
+    authorization internals, not content the model should be reasoning
+    about.
+    """
+    return {
+        key: value
+        for key, value in dict(hit.metadata).items()
+        if not (isinstance(key, str) and key.startswith(ACL_METADATA_PREFIX))
+    }
+
+
 def _safe_rag_context_decision(chunks: list[RAGContextChunk]):
     """Run the existing RAG Context Guard, failing closed (BLOCK) on any
     unexpected exception instead of letting it escape."""
@@ -289,6 +328,8 @@ def run_rag_query(
     retriever: Retriever,
     request_id: str | None = None,
     provider: BaseLLMProvider | None = None,
+    principal: RetrievalPrincipal | None = None,
+    as_of: str | None = None,
 ) -> RagPipelineResult:
     """Run the full Phase 12C pipeline for one query and commit its
     terminal audit event immediately.
@@ -306,6 +347,7 @@ def run_rag_query(
     """
     result, audit_ctx = run_rag_query_uncommitted(
         query=query, top_k=top_k, retriever=retriever, request_id=request_id, provider=provider,
+        principal=principal, as_of=as_of,
     )
     commit_rag_query_audit(result, audit_ctx)
     return result
@@ -384,6 +426,8 @@ def run_rag_query_uncommitted(
     request_id: str | None = None,
     provider: BaseLLMProvider | None = None,
     guard_profile: GuardProfile = ALL_ON,
+    principal: RetrievalPrincipal | None = None,
+    as_of: str | None = None,
 ) -> tuple[RagPipelineResult, RagQueryAuditContext]:
     """Run the full Phase 12C pipeline for one query and return
     `(result, audit_ctx)` WITHOUT committing the terminal audit event --
@@ -413,6 +457,16 @@ def run_rag_query_uncommitted(
     t_start = _now_ms()
     latency_ms: dict[str, float] = {}
     stage_results: list[StageResult] = []
+    # Resolved once, up front, and shared by the retriever's in-SQL
+    # pre-filter and the ACL Guard's re-check -- if those two evaluated
+    # time-bounded rules at different instants they could disagree about a
+    # document whose validity window happened to end between them.
+    acl_as_of = as_of or canonical_timestamp(datetime.now(timezone.utc))
+    # ...but the query itself only carries an instant when access control is
+    # actually in play. A backend with no time-dependent behaviour must see
+    # exactly the `RetrievalQuery` it saw before this stage existed, so the
+    # legacy path keeps `as_of=None`.
+    retrieval_as_of = acl_as_of if (principal is not None or as_of is not None) else None
 
     # -- 1. Input Guard ----------------------------------------------
     input_result = None
@@ -481,7 +535,14 @@ def run_rag_query_uncommitted(
     # -- 2. Retrieval (server-side only; may raise, see docstring) -----
     t0 = _now_ms()
     try:
-        retrieval_result = retriever.search(RetrievalQuery(query=effective_query, top_k=top_k))
+        retrieval_result = retriever.search(
+            RetrievalQuery(
+                query=effective_query,
+                top_k=top_k,
+                principal=principal,
+                as_of=retrieval_as_of,
+            )
+        )
     except Exception as exc:
         stage_results.append(
             StageResult(
@@ -515,13 +576,66 @@ def run_rag_query_uncommitted(
             provider_metadata=None, query=query,
         )
 
+    # -- 2b. ACL Guard (authorization) ---------------------------------
+    # Deliberately NOT part of `guard_profile`: authorization is not an
+    # ablatable layer, and `GuardProfile.profile_id` is a hash over exactly
+    # six controls that already-adjudicated evaluation records depend on.
+    # See `app/guards/acl_guard.py` for the full reasoning.
+    #
+    # When neither the query carries a principal nor any hit carries ACL
+    # facts, access control does not apply to this corpus at all: the guard
+    # says so, and this stage leaves no trace in `stage_results` or
+    # `latency_ms`. That keeps the Phase 12B backend's pipeline output
+    # byte-for-byte what it was before this stage existed.
+    t_acl = _now_ms()
+    try:
+        acl_decisions: list[AclGuardDecision] = evaluate_access(
+            list(retrieval_result.hits), principal, as_of=acl_as_of
+        )
+    except Exception:  # noqa: BLE001 -- fail closed: reject every hit
+        acl_decisions = [
+            AclGuardDecision(hit=hit, accepted=False, reason_code="acl_guard_exception")
+            for hit in retrieval_result.hits
+        ]
+
+    acl_applies = any(
+        decision.reason_code != ACL_NOT_APPLICABLE for decision in acl_decisions
+    )
+    authorized_hits = [decision.hit for decision in acl_decisions if decision.accepted]
+
+    if acl_applies:
+        latency_ms["acl_guard"] = _now_ms() - t_acl
+        stage_results.append(
+            StageResult(
+                stage="acl_guard",
+                decision=(Decision.BLOCK if not authorized_hits else None),
+                reason_code="acl_evaluated",
+                detail=f"authorized={len(authorized_hits)}/{len(acl_decisions)}",
+            )
+        )
+
+        if not authorized_hits:
+            # Answered exactly like "no hits": revealing that results existed
+            # but were withheld is itself information about content the
+            # caller may not see.
+            return _finalize(
+                request_id=request_id, final_decision=Decision.BLOCK,
+                answer=_ANSWER_ALL_REJECTED_ACL, retrieved_count=len(retrieval_result.hits),
+                accepted_context_count=0, rejected_context_count=len(retrieval_result.hits),
+                provenance=[], stage_results=stage_results, redaction_count=0,
+                latency_ms=_with_total(latency_ms, t_start), stop_reason=STOP_ALL_REJECTED_ACL,
+                provider_called=False, error_category=None,
+                input_decision=input_result, rag_decision=None, output_decision=None,
+                provider_metadata=None, query=query,
+            )
+
     # -- 3. Provenance/Trust Guard -------------------------------------
     if guard_profile.provenance_guard:
         t0 = _now_ms()
         provenance_exception = False
         try:
             provenance_decisions: list[ProvenanceDecision] = evaluate_provenance(
-                list(retrieval_result.hits)
+                authorized_hits
             )
         except Exception:  # noqa: BLE001 -- fail closed: reject every hit
             provenance_exception = True
@@ -529,7 +643,7 @@ def run_rag_query_uncommitted(
                 ProvenanceDecision(
                     hit=hit, accepted=False, reason_code="provenance_guard_exception"
                 )
-                for hit in retrieval_result.hits
+                for hit in authorized_hits
             ]
         latency_ms["provenance_guard"] = _now_ms() - t0
         accepted_hits = [d.hit for d in provenance_decisions if d.accepted]
@@ -556,7 +670,7 @@ def run_rag_query_uncommitted(
                 accepted=True,
                 reason_code="provenance_guard_disabled_ablation",
             )
-            for hit in retrieval_result.hits
+            for hit in authorized_hits
         ]
         accepted_hits = [decision.hit for decision in provenance_decisions]
         stage_results.append(
@@ -591,7 +705,7 @@ def run_rag_query_uncommitted(
         t0 = _now_ms()
         for hit in accepted_hits:
             candidate = RAGContextChunk(
-                doc_id=hit.document_id, text=hit.text, metadata=dict(hit.metadata)
+                doc_id=hit.document_id, text=hit.text, metadata=_chunk_metadata(hit)
             )
             result, exc_name = _safe_rag_context_decision([candidate])
             if result is None:
@@ -643,7 +757,7 @@ def run_rag_query_uncommitted(
         )
         for hit in accepted_hits:
             candidate = RAGContextChunk(
-                doc_id=hit.document_id, text=hit.text, metadata=dict(hit.metadata)
+                doc_id=hit.document_id, text=hit.text, metadata=_chunk_metadata(hit)
             )
             context_outcomes[hit.chunk_id] = (
                 True, "rag_context_guard_disabled_ablation", Decision.ALLOW,

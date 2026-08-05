@@ -1,0 +1,20 @@
+{
+  "corpus_sha256": "67eaaf9b5b298d33de620494e883de8501fd4b907dd4f6ac1c5cd47ed0079b2b",
+  "document_count": 12,
+  "files": [
+    {
+      "path": "corpus/documents.jsonl",
+      "sha256": "67eaaf9b5b298d33de620494e883de8501fd4b907dd4f6ac1c5cd47ed0079b2b",
+      "size_bytes": 6886
+    }
+  ],
+  "manifest_status": "draft",
+  "schema_version": "enterprise-kb-1",
+  "sensitivity_counts": {
+    "confidential": 4,
+    "internal": 5,
+    "public": 1,
+    "restricted": 2
+  },
+  "source_key": "enterprise_kb"
+}

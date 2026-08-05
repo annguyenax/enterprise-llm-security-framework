@@ -24,6 +24,10 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Literal, Mapping
 
+# `app.retrieval.acl` imports nothing from this module, so this direction is
+# the only one that exists and there is no import cycle to manage.
+from app.retrieval.acl import RetrievalPrincipal
+
 _EMPTY_METADATA: Mapping[str, str] = MappingProxyType({})
 
 
@@ -71,8 +75,30 @@ class ChunkRecord:
 
 @dataclass(frozen=True)
 class RetrievalQuery:
+    """One retrieval request.
+
+    `principal` is the sole addition made for the enterprise ACL retriever,
+    and it defaults to `None` deliberately: `SqliteBM25Retriever` never reads
+    it, so its behaviour -- and therefore every existing evaluation over the
+    frozen benchmark -- is byte-for-byte unchanged. A backend that *does*
+    enforce access control (`app/retrieval/enterprise_acl_bm25.py`) requires
+    it and fails closed when it is absent.
+
+    It is a typed value built server-side from an authenticated session, not
+    a field a caller can populate over HTTP -- the same rule that keeps
+    `trust_level` out of `IngestionDocument`.
+    """
+
     query: str
     top_k: int
+    principal: RetrievalPrincipal | None = None
+    # Explicit evaluation instant for time-bounded access rules. Carried on
+    # the query rather than passed as a `search()` keyword so the `Retriever`
+    # ABC's signature stays exactly as Phase 12B defined it. `None` means
+    # "the backend may read the clock", which only a backend with no
+    # time-dependent behaviour can safely do; the ACL backend requires a
+    # value from any caller that needs reproducibility.
+    as_of: str | None = None
 
 
 @dataclass(frozen=True)

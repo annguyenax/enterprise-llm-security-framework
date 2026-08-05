@@ -9,10 +9,12 @@ from urllib.parse import unquote
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
+from app.core.decisions import Decision
 from app.guards.rag_guard import evaluate_rag_context
 from app.schemas.requests import RAGContextChunk
 from app.services.gateway import run_chat
 from app.workspace import store
+from app.workspace.history import MAX_REPLAYED_TURNS, screen_history
 
 router = APIRouter(prefix="/v1", tags=["workspace"])
 
@@ -138,11 +140,21 @@ def post_message(conversation_id: str, body: MessageBody, user: dict = Depends(a
     conv=store.conversation(user,conversation_id)
     if not conv: raise HTTPException(404,"Không tìm thấy hội thoại")
     if conv["user_id"] != user["id"]: raise HTTPException(403,"Superadmin chỉ được kiểm tra, không gửi thay người dùng")
-    history=store.messages(user,conversation_id)[-12:]
-    store.add_message(conversation_id,"user",body.content)
+    # Stored turns are re-screened before they may re-enter the provider's
+    # context; see app/workspace/history.py for the two replay holes this
+    # closes. `screening.turns` is the only history value allowed past here.
+    screening=screen_history(store.messages(user,conversation_id),max_turns=MAX_REPLAYED_TURNS)
+    user_message=store.add_message(conversation_id,"user",body.content)
     chunks,sources=store.retrieve(user,body.content)
     started=time.perf_counter()
-    result=run_chat(body.content,chunks,{"workspace_user_id":user["id"],"role":user["role"],"department":user["department"],"history":[{"role":m["role"],"content":m["content"]} for m in history]})
+    workspace_directory = store.authorized_workspace_context(user)
+    # `history` is provider-visible only. app/services/gateway.py replaces it
+    # with a `history_turns` count before anything reaches the audit log, so
+    # conversation content is never persisted to logs/audit.jsonl.
+    result=run_chat(body.content,chunks,{"workspace_user_id":user["id"],"role":user["role"],"department":user["department"],"workspace_directory":workspace_directory,"history":[dict(turn) for turn in screening.turns],"history_turns_dropped":screening.dropped_count,"history_turns_sanitized":screening.sanitized_count})
+    # Recorded so a turn the Input Guard refused can never be replayed on a
+    # later request (history.py drops blocking decisions).
+    store.set_message_decision(user_message["id"],result.input_guard.decision.value)
     assistant=store.add_message(conversation_id,"assistant",result.response,decision=result.final_decision.value,request_id=result.request_id,latency_ms=round((time.perf_counter()-started)*1000),sources=sources)
     return {"assistant_message":assistant,"provider_name":result.provider_name,"model_name":result.model_name}
 
@@ -166,8 +178,13 @@ def upload_document(content: Annotated[bytes, Body()], scope: str = Query("user"
     try: text=content.decode("utf-8")
     except UnicodeDecodeError: raise HTTPException(400,"Tệp phải dùng UTF-8")
     guard=evaluate_rag_context([RAGContextChunk(doc_id="upload",text=text,metadata={})])
-    if guard.decision.value in ("block","human_review"): raise HTTPException(422,"Tài liệu bị RAG Guard từ chối: "+"; ".join(guard.reasons))
-    try: return store.add_document(user,Path(filename).name,content,scope,audience,department or user["department"])
+    if guard.decision in (Decision.BLOCK,Decision.HUMAN_REVIEW): raise HTTPException(422,"Tài liệu bị RAG Guard từ chối: "+"; ".join(guard.reasons))
+    # Store exactly what the guard approved. On SANITIZE that is the cleaned
+    # text -- writing the caller's original bytes would leave the removed
+    # content on disk and hand it back on every later retrieval.
+    stored_text=guard.sanitized_chunks[0].text if guard.decision==Decision.SANITIZE and guard.sanitized_chunks else text
+    if not stored_text.strip(): raise HTTPException(422,"Tài liệu không còn nội dung hợp lệ sau khi RAG Guard làm sạch")
+    try: return store.add_document(user,Path(filename).name,stored_text.encode("utf-8"),scope,audience,department or user["department"],guard_decision=guard.decision.value)
     except Exception as exc: raise translate_error(exc)
 
 

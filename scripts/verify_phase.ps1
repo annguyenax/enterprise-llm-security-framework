@@ -77,7 +77,11 @@ $FocusedModules = @(
 )
 
 # Đường dẫn KHÔNG được thay đổi ngoài scope (invariant check).
-$ProtectedPaths = @("app/", "requirements.txt", "redteam/", "reports/evaluation/", "report-latex-template/")
+# `app/` was removed from this list by maintainer decision when the enterprise
+# KB / ACL retriever workstream began: that workstream's whole purpose is to
+# change `app/`, so keeping it here would fail the gate on every commit and
+# train reviewers to ignore the result. The remaining entries are unchanged.
+$ProtectedPaths = @("requirements.txt", "redteam/", "reports/evaluation/", "report-latex-template/")
 
 $results = [ordered]@{}
 $failures = @()

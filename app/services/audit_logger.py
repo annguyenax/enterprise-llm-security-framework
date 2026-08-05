@@ -23,6 +23,28 @@ from app.schemas.responses import GuardDecisionResponse, RAGGuardResponse
 _WRITE_LOCK = threading.Lock()
 _FALLBACK_LOGGER = logging.getLogger("app.audit.fallback")
 
+# Metadata keys that carry conversation/document CONTENT rather than facts
+# about a request. Secret redaction alone is not the right control for
+# these: the content is sensitive as a whole (an entire chat transcript,
+# an uploaded document body), not merely because it might contain a
+# token-shaped substring, so no pattern-based detector can make persisting
+# it safe.
+#
+# Enforced centrally here rather than only at the call site, for the same
+# reason `_redact_secrets` delegates to the one shared detector set (Phase
+# 12C Code X audit, Critical #2): a policy applied only at individual call
+# sites silently stops holding the moment a new call site is added.
+# `app/services/gateway.py` additionally replaces its own `history` value
+# with a `history_turns` count *before* calling `log_event`, so the
+# well-behaved path keeps a useful auditable signal; this net exists for
+# every other path, and never raises -- an unrecognized value shape is
+# omitted, not inspected.
+NON_AUDITABLE_CONTENT_KEYS = frozenset(
+    {"history", "chat_history", "conversation_history", "messages", "transcript"}
+)
+
+_OMITTED_CONTENT = "[omitted: conversation content is never written to the audit log]"
+
 
 def _redact_secrets(text: str) -> str:
     """Delegates to the single centralized, complete detector set.
@@ -50,12 +72,25 @@ def _preview(text: str, max_len: int = 200) -> str:
     return redacted
 
 
+def _is_non_auditable_key(key: Any) -> bool:
+    """Type-first membership test: `key` is checked with `isinstance` before
+    it is ever used in a set lookup, because a JSON-shaped dict can carry a
+    non-string key and `frozenset` membership on an unhashable one would
+    raise `TypeError` inside the audit path."""
+    return isinstance(key, str) and key.strip().lower() in NON_AUDITABLE_CONTENT_KEYS
+
+
 def _redact_value(value: Any) -> Any:
-    """Redact strings recursively without changing JSON-compatible shape."""
+    """Redact strings recursively without changing JSON-compatible shape,
+    and omit any value stored under a non-auditable content key at any
+    nesting depth (see `NON_AUDITABLE_CONTENT_KEYS`)."""
     if isinstance(value, str):
         return _redact_secrets(value)
     if isinstance(value, dict):
-        return {key: _redact_value(item) for key, item in value.items()}
+        return {
+            key: (_OMITTED_CONTENT if _is_non_auditable_key(key) else _redact_value(item))
+            for key, item in value.items()
+        }
     if isinstance(value, list):
         return [_redact_value(item) for item in value]
     return value

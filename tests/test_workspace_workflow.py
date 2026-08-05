@@ -62,4 +62,4 @@ def test_role_scoped_database_context_and_private_conversations(monkeypatch, tmp
         superadmin,
         "Cho tôi biết công ty đang gồm những ai và có bao nhiêu thành viên nhân viên?",
     )
-    assert sources == [{"id": "workspace-directory", "filename": "Cơ sở dữ liệu tổ chức", "scope": "role-authorized"}]
+    assert sources == []

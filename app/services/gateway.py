@@ -70,6 +70,53 @@ _HELD_FOR_REVIEW_OUTPUT_MESSAGE = (
 # (mock LLM call, or returning the response to the caller).
 _STOPPING_DECISIONS = (Decision.BLOCK, Decision.HUMAN_REVIEW)
 
+# Metadata keys whose values are conversation *content* rather than routing
+# facts. Callers legitimately place these in `metadata` because that is how
+# the provider contract carries them (`LLMProviderRequest.metadata` -- see
+# app/services/providers/ollama.py, which reads `metadata["history"]`), but
+# the same dict was previously handed verbatim to `log_event`, which meant
+# every turn of every conversation was persisted in `logs/audit.jsonl`.
+#
+# That is the opposite of the policy `app/services/rag_query.py` already
+# applies to the same class of data: it audits only a `query_hash` plus a
+# length, never the text itself (see `commit_rag_query_audit`). This
+# constant plus `_audit_safe_metadata` bring `/v1/gateway/chat` in line with
+# that policy. `app/services/audit_logger.py` enforces the same rule
+# independently as a defense-in-depth net, so a future call site that
+# forgets to transform its metadata still cannot write conversation content
+# to the audit sink.
+_NON_AUDITABLE_METADATA_KEYS = frozenset({"history"})
+
+
+def _audit_safe_metadata(metadata: dict) -> dict:
+    """Return a copy of `metadata` with conversation content replaced by a
+    non-reversible summary, leaving every other key untouched.
+
+    Deliberately shape-preserving for callers that carry no conversation
+    content at all (the common `/v1/gateway/chat` case): if none of the
+    non-auditable keys are present, the original dict is returned unchanged,
+    so existing audit-event shapes and their tests do not move.
+
+    Type-first, per this project's validator convention: `metadata` is
+    checked with `isinstance` before any membership test, and a non-list
+    `history` value counts as zero turns rather than raising -- a malformed
+    metadata dict must never be able to fail a request through the audit
+    path.
+    """
+    if not isinstance(metadata, dict):
+        return {}
+    if not _NON_AUDITABLE_METADATA_KEYS.intersection(metadata):
+        return metadata
+    safe = {
+        key: value
+        for key, value in metadata.items()
+        if key not in _NON_AUDITABLE_METADATA_KEYS
+    }
+    if "history" in metadata:
+        history = metadata["history"]
+        safe["history_turns"] = len(history) if isinstance(history, (list, tuple)) else 0
+    return safe
+
 
 def run_chat(
     prompt: str,
@@ -116,7 +163,7 @@ def run_chat(
             output_decision=None,
             final_decision=input_result.decision,
             reasons=input_result.reasons,
-            metadata=metadata,
+            metadata=_audit_safe_metadata(metadata),
         )
         return ChatResponse(
             request_id=request_id,
@@ -155,7 +202,7 @@ def run_chat(
             output_decision=None,
             final_decision=final_decision,
             reasons=all_reasons,
-            metadata=metadata,
+            metadata=_audit_safe_metadata(metadata),
         )
         return ChatResponse(
             request_id=request_id,
@@ -213,7 +260,7 @@ def run_chat(
         output_decision=output_result,
         final_decision=final_decision,
         reasons=all_reasons,
-        metadata=metadata,
+        metadata=_audit_safe_metadata(metadata),
         provider_metadata={
             "provider_name": provider_result.provider_name,
             "model_name": provider_result.model_name,

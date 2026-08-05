@@ -10,9 +10,41 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from app.core.config import settings
+from app.retrieval.acl import AclFacts, RetrievalPrincipal, DEPARTMENT_WILDCARD, acl_metadata, canonical_timestamp
+from app.retrieval.enterprise_acl_bm25 import (
+    EnterpriseAclBm25Retriever,
+    EnterpriseAclBm25Config,
+)
+from app.retrieval.models import DocumentRecord, ChunkRecord, RetrievalQuery
+from app.services.chunking import chunk_text
+
 DB_PATH = Path(os.getenv("WORKSPACE_DB_PATH", "data/workspace.db"))
 DOC_ROOT = Path(os.getenv("WORKSPACE_DOCUMENT_ROOT", "data/documents"))
 ROLE_RANK = {"member": 1, "leader": 2, "superadmin": 3}
+
+_RETRIEVER: EnterpriseAclBm25Retriever | None = None
+
+def get_retriever() -> EnterpriseAclBm25Retriever:
+    global _RETRIEVER
+    if _RETRIEVER is None:
+        _RETRIEVER = EnterpriseAclBm25Retriever(
+            EnterpriseAclBm25Config(
+                db_path=settings.enterprise_kb_db_path,
+                busy_timeout_ms=settings.retrieval_busy_timeout_ms,
+                max_query_chars=settings.retrieval_max_query_chars,
+                max_query_terms=settings.retrieval_max_query_terms,
+                max_top_k=settings.retrieval_max_top_k,
+            )
+        )
+        _RETRIEVER.initialize()
+    return _RETRIEVER
+
+# Guard decisions a stored document may legitimately carry. `block` and
+# `human_review` are absent by design: those uploads are refused by the
+# route and must never reach storage, so accepting them here would let a
+# future call site persist content the guard rejected.
+STORABLE_GUARD_DECISIONS = frozenset({"allow", "log_only", "sanitize"})
 
 
 def now() -> str:
@@ -178,6 +210,19 @@ def add_message(cid: str, role: str, content: str, **extra: Any) -> dict[str, An
     return {"id":cur.lastrowid,"conversation_id":cid,"role":role,"content":content,"decision":extra.get("decision"),"request_id":extra.get("request_id"),"latency_ms":extra.get("latency_ms"),"sources":sources,"created_at":stamp,"feedback":None}
 
 
+def set_message_decision(message_id: int, decision: str) -> None:
+    """Record the guard decision for an already-stored message.
+
+    `post_message` persists the user's turn before the gateway runs (so the
+    turn is never lost if the pipeline fails), which means the decision is
+    only known afterwards. Storing it matters for replay safety, not just
+    for display: `app/workspace/history.py` refuses to replay any turn whose
+    recorded decision was blocking, and a turn with no decision recorded at
+    all is treated as unscreened and re-inspected from scratch."""
+    with connect() as db:
+        db.execute("UPDATE messages SET decision=? WHERE id=?", (decision, message_id))
+
+
 def set_feedback(actor: dict[str, Any], message_id: int, value: int) -> None:
     with connect() as db:
         row=db.execute("SELECT c.user_id FROM messages m JOIN conversations c ON c.id=m.conversation_id WHERE m.id=? AND m.role='assistant'",(message_id,)).fetchone()
@@ -198,23 +243,17 @@ def accessible_documents(actor: dict[str, Any]) -> list[dict[str, Any]]:
 
 def retrieve(actor: dict[str, Any], query: str, limit: int = 4) -> tuple[list[Any], list[dict[str, Any]]]:
     from app.schemas.requests import RAGContextChunk
-    terms={x.lower() for x in query.split() if len(x)>2}; scored=[]
-    for doc in accessible_documents(actor):
-        try: text=Path(doc["storage_path"]).read_text(encoding="utf-8")
-        except OSError: continue
-        score=sum(text.lower().count(term) for term in terms)
-        if score: scored.append((score,doc,text[:3000]))
-    scored.sort(key=lambda x:x[0],reverse=True); scored=scored[:limit]
-    chunks=[RAGContextChunk(doc_id=d["id"],text=t,metadata={"filename":d["filename"],"scope":d["scope"]}) for _,d,t in scored]
-    sources=[{"id":d["id"],"filename":d["filename"],"scope":d["scope"]} for _,d,_ in scored]
-    workspace_text = authorized_workspace_context(actor)
-    workspace_chunk=RAGContextChunk(doc_id="workspace-directory", text=workspace_text, metadata={"filename":"Cơ sở dữ liệu tổ chức","scope":"role-authorized"})
-    workspace_source={"id":"workspace-directory","filename":"Cơ sở dữ liệu tổ chức","scope":"role-authorized"}
-    organization_phrases=("bao nhiêu thành viên","gồm những ai","có những ai","danh sách nhân","cơ cấu công ty","cơ cấu tổ chức","bao nhiêu tài khoản","danh sách tài khoản")
-    if any(phrase in query.lower() for phrase in organization_phrases):
-        return [workspace_chunk],[workspace_source]
-    chunks.insert(0,workspace_chunk); sources.insert(0,workspace_source)
-    return chunks,sources
+    from app.retrieval.sqlite_bm25 import EmptySearchQueryError
+    principal = RetrievalPrincipal(user_id=actor["id"], role=actor["role"], department=actor["department"], max_sensitivity_rank=ROLE_RANK[actor["role"]])
+    try:
+        as_of = canonical_timestamp(datetime.now(timezone.utc))
+        result = get_retriever().search(RetrievalQuery(query=query, top_k=limit, principal=principal, as_of=as_of))
+    except EmptySearchQueryError:
+        return [], []
+
+    chunks = [RAGContextChunk(doc_id=hit.document_id, text=hit.text, metadata={"filename": hit.metadata.get("filename", "unknown"), "scope": hit.metadata.get("scope", "unknown")}) for hit in result.hits]
+    sources = [{"id": hit.document_id, "filename": hit.metadata.get("filename", "unknown"), "scope": hit.metadata.get("scope", "unknown")} for hit in result.hits]
+    return chunks, sources
 
 
 def authorized_workspace_context(actor: dict[str, Any]) -> str:
@@ -256,14 +295,51 @@ def workspace_counts() -> dict[str, int]:
         return {name: db.execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0] for name in ("users","conversations","documents","tasks")}
 
 
-def add_document(actor: dict[str, Any], filename: str, content: bytes, scope: str, audience: str, department: str) -> dict[str, Any]:
+def add_document(actor: dict[str, Any], filename: str, content: bytes, scope: str, audience: str, department: str, *, guard_decision: str) -> dict[str, Any]:
+    """Persist one uploaded document. `content` must already be the exact
+    bytes the RAG Context Guard approved -- for a SANITIZE decision that is
+    the *sanitized* text, not the caller's original upload.
+
+    `guard_decision` is keyword-only and required, so no call site can
+    silently record a decision the guard did not actually make. It
+    previously read `"allow"` unconditionally, which meant a document the
+    guard had SANITIZEd was stored with its original bytes on disk *and* an
+    audit row claiming a clean pass -- and every later retrieval read the
+    unsanitized file back. Blocking decisions are rejected here as a
+    fail-closed backstop; the route already refuses them earlier."""
     if scope not in {"user","department","global"} or audience not in ROLE_RANK: raise ValueError("Phạm vi hoặc đối tượng tài liệu không hợp lệ")
+    if not isinstance(guard_decision, str) or guard_decision not in STORABLE_GUARD_DECISIONS:
+        raise ValueError("Quyết định của guard không hợp lệ cho việc lưu trữ tài liệu")
     if scope == "department" and actor["role"] == "member": raise PermissionError
     if scope == "global" and actor["role"] != "superadmin": raise PermissionError
     if actor["role"] != "superadmin": department=actor["department"]
     did=str(uuid.uuid4()); DOC_ROOT.mkdir(parents=True,exist_ok=True); path=DOC_ROOT/f"{did}.txt"; path.write_bytes(content)
-    row={"id":did,"owner_user_id":actor["id"],"department":department,"scope":scope,"audience_role":audience,"filename":filename,"mime_type":"text/plain","size_bytes":len(content),"guard_decision":"allow","storage_path":str(path),"created_at":now()}
+    row={"id":did,"owner_user_id":actor["id"],"department":department,"scope":scope,"audience_role":audience,"filename":filename,"mime_type":"text/plain","size_bytes":len(content),"guard_decision":guard_decision,"storage_path":str(path),"created_at":now()}
     with connect() as db: db.execute("INSERT INTO documents VALUES(:id,:owner_user_id,:department,:scope,:audience_role,:filename,:mime_type,:size_bytes,:guard_decision,:storage_path,:created_at)",row)
+
+    text = content.decode("utf-8", errors="replace")
+    chunks = []
+    for chunk in chunk_text(text):
+        chash = hashlib.sha256(chunk.text.encode()).hexdigest()
+        chunks.append(ChunkRecord(chunk_id=f"{did}_{chunk.chunk_index}", document_id=did, chunk_index=chunk.chunk_index, text=chunk.text, content_hash=chash, metadata={}))
+
+    access_roles = {"member", "leader", "superadmin"} if audience == "member" else ({"leader", "superadmin"} if audience == "leader" else {"superadmin"})
+    if scope == "global":
+        access_departments = {DEPARTMENT_WILDCARD}
+    elif scope == "department":
+        access_departments = {department}
+    else:
+        access_departments = {f"user_{actor['id']}"}
+
+    facts = AclFacts(sensitivity_rank=ROLE_RANK[audience], access_roles=frozenset(access_roles), access_departments=frozenset(access_departments))
+    dhash = hashlib.sha256(content).hexdigest()
+    dmeta = {"filename": filename, "scope": scope, "owner_department": department}
+    dmeta.update(acl_metadata(facts))
+
+    doc = DocumentRecord(document_id=did, external_id=did, source_key="workspace", source_id=did, source_type="workspace", classification="internal", trust_level="authenticated", title=filename, content_hash=dhash, created_at=row["created_at"], updated_at=row["created_at"], metadata=dmeta)
+
+    get_retriever().upsert_documents([(doc, chunks)])
+
     return row
 
 
@@ -273,6 +349,7 @@ def delete_document(actor: dict[str, Any], did: str) -> bool:
     with connect() as db: db.execute("DELETE FROM documents WHERE id=?",(did,))
     try: Path(doc["storage_path"]).unlink(missing_ok=True)
     except OSError: pass
+    get_retriever().delete_document(did)
     return True
 
 

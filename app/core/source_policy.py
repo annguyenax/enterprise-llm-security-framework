@@ -83,6 +83,28 @@ _INTERNAL_ONLY_SOURCE_POLICIES: dict[str, SourcePolicyDecision] = {
         trust_level="untrusted_external",
         policy_id="policy-v1-synthetic-external",
     ),
+    # Curated enterprise knowledge base (`datasets/enterprise-kb/`).
+    # Internal-only for exactly the reason the docstring above gives: the
+    # public ingestion route must never be able to select an elevated trust
+    # tier by naming a source_key.
+    #
+    # `source_type` reuses the existing `synthetic_corpus` value rather than
+    # introducing a new one. That is accurate -- the corpus is 100%
+    # synthetic, as `datasets/enterprise-kb/README.md` states -- and it
+    # avoids widening `provenance_guard.ALLOWED_SOURCE_TYPES`, which is an
+    # audited allow-list that this workstream has no cause to touch.
+    #
+    # `classification` stays `internal`. Enterprise data-sensitivity is a
+    # separate axis carried by `app/retrieval/acl.py`; routing it through
+    # `classification` would make every confidential document fail the
+    # provenance allow-list and stop the pipeline outright.
+    "enterprise_kb": SourcePolicyDecision(
+        source_key="enterprise_kb",
+        source_type="synthetic_corpus",
+        classification="internal",
+        trust_level="trusted_internal",
+        policy_id="policy-v1-enterprise-kb",
+    ),
 }
 
 UNKNOWN_SOURCE_POLICY = SourcePolicyDecision(
