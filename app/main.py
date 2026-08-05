@@ -18,6 +18,12 @@ from fastapi import FastAPI
 
 from app.api.routes import router
 from app.core.config import settings
+from app.workspace.routes import router as workspace_router
+
+# Ollama is an explicitly enabled, local-only provider. Importing its module
+# registers it through the existing ADR-004 provider seam.
+if settings.llm_provider.strip().lower() == "ollama":
+    from app.services.providers import ollama as _ollama  # noqa: F401
 
 
 @asynccontextmanager
@@ -39,3 +45,4 @@ app = FastAPI(
 )
 
 app.include_router(router)
+app.include_router(workspace_router)
