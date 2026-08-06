@@ -144,7 +144,18 @@ def run_chat(
     """
     request_id = str(uuid.uuid4())
 
+    from app.guards.semantic_guard import evaluate_input_semantic
+
     input_result = evaluate_input(prompt)
+    # Semantic path always runs after a non-stopping Input Guard result.
+    # evaluate_input_semantic uses a fast local pre-screen first and only
+    # calls Ollama when the provider is not mock and the pre-screen is
+    # inconclusive — so mock/dev stays low-latency while Vietnamese and
+    # other semantic attacks still get blocked.
+    if input_result.decision not in _STOPPING_DECISIONS:
+        semantic_result = evaluate_input_semantic(prompt)
+        if semantic_result.decision in _STOPPING_DECISIONS:
+            input_result = semantic_result
 
     if input_result.decision in _STOPPING_DECISIONS:
         template = (
@@ -230,7 +241,13 @@ def run_chat(
             request_id=request_id,
         )
     )
+    from app.guards.semantic_guard import evaluate_output_semantic
+
     output_result = evaluate_output(provider_result.text)
+    if output_result.decision not in _STOPPING_DECISIONS and getattr(settings, 'llm_provider', '') != 'mock':
+        semantic_out_result = evaluate_output_semantic(provider_result.text)
+        if semantic_out_result.decision in _STOPPING_DECISIONS:
+            output_result = semantic_out_result
 
     if output_result.decision == Decision.BLOCK:
         final_response_text = _BLOCKED_OUTPUT_MESSAGE
@@ -275,6 +292,45 @@ def run_chat(
         output_guard=output_result,
         final_decision=final_decision,
         response=final_response_text,
+        provider_name=provider_result.provider_name,
+        model_name=provider_result.model_name,
+        is_mock=provider_result.is_mock,
+    )
+
+
+def run_unguarded_chat(
+    prompt: str,
+    context_chunks: list[RAGContextChunk],
+    metadata: dict,
+    provider: BaseLLMProvider | None = None,
+) -> ChatResponse:
+    """Run the chat directly against the LLM without ANY security guards (for A/B demo purposes)."""
+    request_id = str(uuid.uuid4())
+    active_provider = provider or get_llm_provider(settings.llm_provider)
+
+    provider_result = active_provider.generate(
+        LLMProviderRequest(
+            prompt=prompt,
+            sanitized_prompt=prompt,
+            context_chunks=context_chunks,
+            metadata=metadata,
+            request_id=request_id,
+        )
+    )
+
+    from app.schemas.responses import GuardDecisionResponse, RAGGuardResponse
+
+    # Mock ALWAYS ALLOW for guards
+    dummy_decision = GuardDecisionResponse(decision=Decision.ALLOW)
+    dummy_rag = RAGGuardResponse(decision=Decision.ALLOW)
+
+    return ChatResponse(
+        request_id=request_id,
+        input_guard=dummy_decision,
+        rag_guard=dummy_rag,
+        output_guard=dummy_decision,
+        final_decision=Decision.ALLOW,
+        response=provider_result.text,
         provider_name=provider_result.provider_name,
         model_name=provider_result.model_name,
         is_mock=provider_result.is_mock,

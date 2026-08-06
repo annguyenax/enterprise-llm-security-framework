@@ -110,7 +110,28 @@ def initialize() -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_tasks_department ON tasks(department);
         CREATE INDEX IF NOT EXISTS idx_tasks_assignee ON tasks(assigned_user_id);
+        CREATE TABLE IF NOT EXISTS appeals (
+          id TEXT PRIMARY KEY,
+          message_id INTEGER NOT NULL UNIQUE REFERENCES messages(id) ON DELETE CASCADE,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          reason TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','accepted','rejected')),
+          created_at TEXT NOT NULL,
+          resolved_at TEXT,
+          resolved_by INTEGER REFERENCES users(id),
+          resolution_note TEXT NOT NULL DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS idx_appeals_status ON appeals(status);
         """)
+        # Additive column migration for databases created before guard risk
+        # scores were surfaced. `CREATE TABLE IF NOT EXISTS` above leaves an
+        # existing table untouched, so new columns have to be added
+        # explicitly -- and only when they are actually missing, since
+        # SQLite has no `ADD COLUMN IF NOT EXISTS`.
+        existing = {row["name"] for row in db.execute("PRAGMA table_info(messages)")}
+        for column in ("risk_input", "risk_rag", "risk_output"):
+            if column not in existing:
+                db.execute(f"ALTER TABLE messages ADD COLUMN {column} REAL")
         if db.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:
             stamp = now()
             db.executemany("INSERT OR IGNORE INTO departments(code,name,created_at) VALUES(?,?,?)", (("WORKSPACE","Workspace",stamp),("IT","Phòng IT",stamp),("HR","Phòng Nhân sự",stamp)))
@@ -218,8 +239,11 @@ def delete_conversation(actor: dict[str, Any], cid: str) -> bool:
 def messages(actor: dict[str, Any], cid: str) -> list[dict[str, Any]]:
     if not conversation(actor, cid): raise LookupError
     with connect() as db:
-        rows = db.execute("""SELECT m.*,f.value feedback FROM messages m LEFT JOIN feedback f
-                           ON f.message_id=m.id AND f.user_id=? WHERE m.conversation_id=? ORDER BY m.id""", (actor["id"], cid))
+        rows = db.execute("""SELECT m.*,f.value feedback,a.id appeal_id,a.status appeal_status,
+                             a.resolution_note appeal_note FROM messages m
+                           LEFT JOIN feedback f ON f.message_id=m.id AND f.user_id=?
+                           LEFT JOIN appeals a ON a.message_id=m.id
+                           WHERE m.conversation_id=? ORDER BY m.id""", (actor["id"], cid))
         result=[]
         for row in rows:
             item=dict(row); item["sources"]=json.loads(item.pop("sources_json") or "[]"); result.append(item)
@@ -227,12 +251,17 @@ def messages(actor: dict[str, Any], cid: str) -> list[dict[str, Any]]:
 
 
 def add_message(cid: str, role: str, content: str, **extra: Any) -> dict[str, Any]:
+    """Persist one message. `risk_input`/`risk_rag`/`risk_output` are the
+    per-stage `risk_score` values the guards already compute; storing them
+    means a reloaded conversation shows the same scores as the live reply
+    instead of losing them on refresh."""
     stamp=now(); sources=extra.get("sources", [])
+    risk={key:extra.get(key) for key in ("risk_input","risk_rag","risk_output")}
     with connect() as db:
-        cur=db.execute("""INSERT INTO messages(conversation_id,role,content,decision,request_id,latency_ms,sources_json,created_at)
-                        VALUES(?,?,?,?,?,?,?,?)""", (cid,role,content,extra.get("decision"),extra.get("request_id"),extra.get("latency_ms"),json.dumps(sources,ensure_ascii=False),stamp))
+        cur=db.execute("""INSERT INTO messages(conversation_id,role,content,decision,request_id,latency_ms,sources_json,created_at,risk_input,risk_rag,risk_output)
+                        VALUES(?,?,?,?,?,?,?,?,?,?,?)""", (cid,role,content,extra.get("decision"),extra.get("request_id"),extra.get("latency_ms"),json.dumps(sources,ensure_ascii=False),stamp,risk["risk_input"],risk["risk_rag"],risk["risk_output"]))
         db.execute("UPDATE conversations SET updated_at=? WHERE id=?", (stamp,cid))
-    return {"id":cur.lastrowid,"conversation_id":cid,"role":role,"content":content,"decision":extra.get("decision"),"request_id":extra.get("request_id"),"latency_ms":extra.get("latency_ms"),"sources":sources,"created_at":stamp,"feedback":None}
+    return {"id":cur.lastrowid,"conversation_id":cid,"role":role,"content":content,"decision":extra.get("decision"),"request_id":extra.get("request_id"),"latency_ms":extra.get("latency_ms"),"sources":sources,"created_at":stamp,"feedback":None,**risk,"appeal":None}
 
 
 def set_message_decision(message_id: int, decision: str) -> None:
@@ -253,6 +282,97 @@ def set_feedback(actor: dict[str, Any], message_id: int, value: int) -> None:
         row=db.execute("SELECT c.user_id FROM messages m JOIN conversations c ON c.id=m.conversation_id WHERE m.id=? AND m.role='assistant'",(message_id,)).fetchone()
         if not row or row["user_id"] != actor["id"]: raise LookupError
         db.execute("INSERT INTO feedback VALUES(?,?,?,?) ON CONFLICT(message_id,user_id) DO UPDATE SET value=excluded.value,created_at=excluded.created_at",(message_id,actor["id"],value,now()))
+
+
+APPEALABLE_DECISIONS = frozenset({"block", "human_review"})
+APPEAL_RESOLUTIONS = frozenset({"accepted", "rejected"})
+
+
+def _appeal_row(row: sqlite3.Row) -> dict[str, Any]:
+    return dict(row)
+
+
+def message_appeal(message_id: int) -> dict[str, Any] | None:
+    with connect() as db:
+        row = db.execute("SELECT * FROM appeals WHERE message_id=?", (message_id,)).fetchone()
+        return _appeal_row(row) if row else None
+
+
+def create_appeal(actor: dict[str, Any], message_id: int, reason: str) -> dict[str, Any]:
+    """Record one appeal against a message the gateway refused.
+
+    Ownership is re-checked here against the conversation, not taken from
+    the request: a message id is guessable, and `set_feedback` already
+    follows the same pattern for the same reason. Only decisions that
+    actually withheld an answer are appealable -- there is nothing to appeal
+    about a reply the user received.
+    """
+    text = reason.strip()
+    if not text:
+        raise ValueError("Bạn cần nêu lý do kháng cáo")
+    if len(text) > 2000:
+        raise ValueError("Lý do kháng cáo tối đa 2000 ký tự")
+    with connect() as db:
+        row = db.execute(
+            """SELECT m.id, m.decision, c.user_id FROM messages m
+               JOIN conversations c ON c.id=m.conversation_id
+               WHERE m.id=? AND m.role='assistant'""",
+            (message_id,),
+        ).fetchone()
+        if not row or row["user_id"] != actor["id"]:
+            raise LookupError("Không tìm thấy tin nhắn")
+        if (row["decision"] or "") not in APPEALABLE_DECISIONS:
+            raise ValueError("Chỉ tin nhắn bị chặn hoặc chờ duyệt mới có thể kháng cáo")
+        if db.execute("SELECT 1 FROM appeals WHERE message_id=?", (message_id,)).fetchone():
+            raise ValueError("Tin nhắn này đã được kháng cáo")
+        aid, stamp = str(uuid.uuid4()), now()
+        db.execute(
+            "INSERT INTO appeals(id,message_id,user_id,reason,status,created_at) VALUES(?,?,?,?,'pending',?)",
+            (aid, message_id, actor["id"], text, stamp),
+        )
+    return {"id": aid, "message_id": message_id, "status": "pending", "created_at": stamp, "reason": text}
+
+
+def list_appeals(actor: dict[str, Any]) -> list[dict[str, Any]]:
+    """Superadmin-only review queue.
+
+    Deliberately not readable by leaders: an appeal quotes the prompt that
+    was blocked, which is private conversation content, and `conversations`
+    already keeps those private from every role including superadmin. The
+    appeal is the one narrow, user-initiated exception -- the user chose to
+    escalate this specific message -- so it must not widen any further.
+    """
+    if actor["role"] != "superadmin":
+        raise PermissionError
+    with connect() as db:
+        rows = db.execute(
+            """SELECT a.*, u.username, u.department, m.content AS message_content,
+                      m.decision AS message_decision, m.request_id, r.username AS resolved_by_username
+               FROM appeals a
+               JOIN users u ON u.id=a.user_id
+               JOIN messages m ON m.id=a.message_id
+               LEFT JOIN users r ON r.id=a.resolved_by
+               ORDER BY CASE a.status WHEN 'pending' THEN 0 ELSE 1 END, a.created_at DESC"""
+        )
+        return [_appeal_row(row) for row in rows]
+
+
+def resolve_appeal(actor: dict[str, Any], appeal_id: str, status: str, note: str = "") -> dict[str, Any]:
+    if actor["role"] != "superadmin":
+        raise PermissionError
+    if status not in APPEAL_RESOLUTIONS:
+        raise ValueError("Kết quả xử lý không hợp lệ")
+    with connect() as db:
+        row = db.execute("SELECT status FROM appeals WHERE id=?", (appeal_id,)).fetchone()
+        if not row:
+            raise LookupError("Không tìm thấy kháng cáo")
+        if row["status"] != "pending":
+            raise ValueError("Kháng cáo này đã được xử lý")
+        db.execute(
+            "UPDATE appeals SET status=?,resolved_at=?,resolved_by=?,resolution_note=? WHERE id=?",
+            (status, now(), actor["id"], note.strip()[:1000], appeal_id),
+        )
+    return next(item for item in list_appeals(actor) if item["id"] == appeal_id)
 
 
 def accessible_documents(actor: dict[str, Any]) -> list[dict[str, Any]]:
@@ -348,6 +468,21 @@ def _direct_document_context(document: dict[str, Any]) -> tuple[list[Any], list[
     )
 
 
+def _display_cosine(score: Any) -> float | None:
+    """Clamp a cosine similarity to [0, 1] for display.
+
+    `hybrid_retrieval._cosine` returns the sentinel `-1.0` for a dimension
+    mismatch or a zero vector, and genuine cosines can be negative for
+    unrelated text. Neither is meaningful as a "relevance" percentage, so
+    both floor at 0 -- while `None` stays `None`, because "no semantic score
+    was computed" and "the semantic score was zero" are different facts and
+    the UI must not conflate them.
+    """
+    if not isinstance(score, (int, float)) or isinstance(score, bool):
+        return None
+    return round(max(0.0, min(1.0, float(score))), 4)
+
+
 def retrieve(actor: dict[str, Any], query: str, limit: int = 4) -> tuple[list[Any], list[dict[str, Any]]]:
     from app.schemas.requests import RAGContextChunk
     from app.retrieval.sqlite_bm25 import EmptySearchQueryError
@@ -423,6 +558,17 @@ def retrieve(actor: dict[str, Any], query: str, limit: int = 4) -> tuple[list[An
             did = str(document["id"])
             semantic_by_id[did] = document
             fused[did] = fused.get(did, 0.0) + 1.0 / (60 + rank)
+        # Per-source scores surfaced for the UI. Kept as three separate,
+        # honestly-named numbers rather than one blended "relevance": cosine
+        # similarity and BM25 are different scales measuring different
+        # things, which is precisely why fusion here is rank-based (RRF) and
+        # not a weighted sum of the raw values.
+        lexical_rank_by_id = {}
+        for rank, hit in enumerate(lexical_hits, start=1):
+            lexical_rank_by_id.setdefault(hit.document_id, rank)
+        semantic_score_by_id = {str(document["id"]): score for document, score in semantic_rows}
+        semantic_rank_by_id = {str(document["id"]): rank for rank, (document, _s) in enumerate(semantic_rows, start=1)}
+
         ordered_ids = sorted(fused, key=lambda did: (-fused[did], did))[:limit]
         chunks=[]; sources=[]
         for did in ordered_ids:
@@ -434,12 +580,22 @@ def retrieve(actor: dict[str, Any], query: str, limit: int = 4) -> tuple[list[An
                 document=semantic_by_id[did]; direct=_direct_document_context(document)
                 if direct is None: continue
                 chunks.extend(direct[0]); filename=document["filename"]; scope=document["scope"]
-            sources.append({"id":did,"filename":filename,"scope":scope,"retrieval":"hybrid"})
+            sources.append({
+                "id":did,"filename":filename,"scope":scope,"retrieval":"hybrid",
+                "semantic_score":_display_cosine(semantic_score_by_id.get(did)),
+                "semantic_rank":semantic_rank_by_id.get(did),
+                "lexical_rank":lexical_rank_by_id.get(did),
+                "fused_score":round(fused[did],6),
+            })
         return chunks,sources
 
     hits = lexical_hits[:limit]
     chunks = [RAGContextChunk(doc_id=hit.document_id, text=hit.text, metadata={"filename": hit.metadata.get("filename", "unknown"), "scope": hit.metadata.get("scope", "unknown")}) for hit in hits]
-    sources = [{"id": hit.document_id, "filename": hit.metadata.get("filename", "unknown"), "scope": hit.metadata.get("scope", "unknown"), "retrieval":"bm25"} for hit in hits]
+    # No `semantic_score` on this path, and deliberately not a zero: the
+    # embedding model was unavailable or disabled, which is not the same
+    # claim as "this document scored zero semantically". The UI shows the
+    # lexical rank alone rather than inventing a number.
+    sources = [{"id": hit.document_id, "filename": hit.metadata.get("filename", "unknown"), "scope": hit.metadata.get("scope", "unknown"), "retrieval":"bm25", "semantic_score":None, "semantic_rank":None, "lexical_rank":index, "fused_score":None} for index, hit in enumerate(hits, start=1)]
     return chunks, sources
 
 

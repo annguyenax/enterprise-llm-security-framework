@@ -1,0 +1,383 @@
+/* Shield AI — glassmorphism theme layer.
+ *
+ * Loaded AFTER styles.css and deliberately kept separate rather than
+ * rewriting that file: styles.css is a coherent 25 KB light theme whose
+ * layout works, and it already exposes design tokens (--ink, --primary,
+ * --sidebar, --line, --shadow). Re-pointing those tokens and adding glass
+ * surfaces on top changes the look without touching a single layout rule,
+ * so a regression here is a visual one, not a broken app — and reverting is
+ * removing one <link>.
+ *
+ * Motion is opt-out: every animation below is disabled under
+ * prefers-reduced-motion, which matters more than usual for a chat UI that
+ * animates on every incoming message.
+ */
+
+/* ---------- tokens ---------- */
+:root {
+  --ink: #0f1729;
+  --muted: #64708a;
+  --line: rgba(120, 130, 175, .22);
+  --primary: #6d5efc;
+  --primary-dark: #5546e0;
+  --lavender: rgba(122, 108, 255, .12);
+  --sidebar: rgba(255, 255, 255, .55);
+  --white: rgba(255, 255, 255, .72);
+  --shadow: 0 22px 60px rgba(38, 32, 92, .14);
+
+  --glass-bg: rgba(255, 255, 255, .62);
+  --glass-bg-strong: rgba(255, 255, 255, .82);
+  --glass-border: rgba(255, 255, 255, .75);
+  --glass-blur: saturate(165%) blur(20px);
+  --ring: 0 0 0 1px rgba(255, 255, 255, .6) inset;
+
+  --ok: #12a06a;
+  --warn: #d08700;
+  --danger: #dc4b5c;
+}
+
+/* ---------- animated aurora backdrop ---------- */
+body {
+  background: #eef0fb;
+  position: relative;
+  overflow: hidden;
+}
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  z-index: 0;
+  width: 62vmax;
+  height: 62vmax;
+  border-radius: 50%;
+  filter: blur(90px);
+  opacity: .55;
+  pointer-events: none;
+}
+body::before {
+  top: -22vmax; left: -14vmax;
+  background: radial-gradient(circle at 30% 30%, #8f7dff, transparent 62%);
+  animation: aurora-a 26s ease-in-out infinite alternate;
+}
+body::after {
+  right: -18vmax; bottom: -24vmax;
+  background: radial-gradient(circle at 70% 70%, #5ed6d0, transparent 62%);
+  animation: aurora-b 32s ease-in-out infinite alternate;
+}
+@keyframes aurora-a {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to   { transform: translate3d(8vmax, 6vmax, 0) scale(1.12); }
+}
+@keyframes aurora-b {
+  from { transform: translate3d(0, 0, 0) scale(1.08); }
+  to   { transform: translate3d(-7vmax, -5vmax, 0) scale(1); }
+}
+
+/* ---------- glass surfaces ---------- */
+.app-shell {
+  position: relative;
+  z-index: 1;
+  background: transparent;
+}
+.sidebar {
+  background: var(--sidebar);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border-right: 1px solid var(--glass-border);
+  box-shadow: var(--ring);
+}
+.chat-panel { background: transparent; }
+.topbar,
+.composer-wrap {
+  background: linear-gradient(180deg, rgba(255, 255, 255, .66), rgba(255, 255, 255, .38));
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border-color: var(--glass-border);
+}
+.composer {
+  background: var(--glass-bg-strong);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 18px 46px rgba(46, 38, 110, .13), var(--ring);
+  transition: box-shadow .28s ease, transform .28s ease;
+}
+.composer:focus-within {
+  box-shadow: 0 22px 58px rgba(84, 70, 224, .22), 0 0 0 1px rgba(109, 94, 252, .45);
+  transform: translateY(-1px);
+}
+.modal,
+.auth-card,
+.pro-card {
+  background: var(--glass-bg-strong);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow), var(--ring);
+}
+.modal::backdrop { background: rgba(18, 20, 46, .45); backdrop-filter: blur(5px); }
+.history-row.active,
+.history-item.active { background: rgba(255, 255, 255, .72); box-shadow: var(--ring); }
+.secure-pill,
+.icon-btn {
+  background: rgba(255, 255, 255, .58);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+/* ---------- message bubbles ---------- */
+.message .bubble {
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+}
+.message.assistant .bubble {
+  background: var(--glass-bg);
+  box-shadow: 0 12px 34px rgba(44, 38, 100, .09), var(--ring);
+}
+.message.user .bubble {
+  background: linear-gradient(140deg, rgba(120, 104, 255, .95), rgba(88, 72, 226, .95));
+  color: #fff;
+  border-color: rgba(255, 255, 255, .35);
+  box-shadow: 0 14px 32px rgba(84, 68, 224, .28);
+}
+.message { animation: message-in .42s cubic-bezier(.22, .9, .3, 1) both; }
+@keyframes message-in {
+  from { opacity: 0; transform: translateY(14px) scale(.985); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ---------- retrieval score strip ---------- */
+/* Three separate, honestly-labelled numbers rather than one blended
+ * "relevance": cosine similarity and BM25 are different scales measuring
+ * different things, which is why the backend fuses them by rank (RRF) and
+ * never by weighted sum. The UI must not re-imply a common scale. */
+.score-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 9px;
+  animation: fade-up .5s ease both .12s;
+}
+.score-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, .6);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  font-size: 10.5px;
+  color: #4a5372;
+  white-space: nowrap;
+}
+.score-chip b { font-weight: 700; color: var(--ink); }
+.score-chip .meter {
+  position: relative;
+  width: 46px;
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(120, 130, 180, .22);
+  overflow: hidden;
+}
+.score-chip .meter i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #7c6cff, #4fd1c5);
+  width: var(--value, 0%);
+  animation: meter-fill .75s cubic-bezier(.2, .8, .2, 1) both .18s;
+}
+@keyframes meter-fill { from { width: 0; } }
+.score-chip.risk .meter i { background: linear-gradient(90deg, #ffb020, #e0596b); }
+.score-chip.mode { font-weight: 600; color: #4b3fd0; background: rgba(122, 108, 255, .14); }
+.score-chip.muted { color: var(--muted); }
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(7px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Per-source rows inside the existing .sources block */
+.sources { flex-wrap: wrap; row-gap: 6px; }
+.source-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  border-radius: 9px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, .55);
+  font-size: 10.5px;
+}
+.source-item .sem {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: #3f8f7d;
+}
+.source-item .rank { color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* ---------- appeal ---------- */
+.appeal-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid rgba(220, 75, 92, .38);
+  background: rgba(220, 75, 92, .1);
+  color: #b93b4d;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform .18s ease, background .18s ease, box-shadow .18s ease;
+}
+.appeal-btn:hover {
+  transform: translateY(-1px);
+  background: rgba(220, 75, 92, .17);
+  box-shadow: 0 8px 18px rgba(200, 60, 80, .18);
+}
+.appeal-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, .6);
+}
+.appeal-state.pending  { color: var(--warn); }
+.appeal-state.accepted { color: var(--ok); }
+.appeal-state.rejected { color: var(--danger); }
+
+.appeal-queue { display: grid; gap: 10px; }
+.appeal-card {
+  padding: 13px 15px;
+  border-radius: 14px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, .62);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  animation: fade-up .4s ease both;
+}
+.appeal-card-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+  margin-bottom: 7px;
+}
+.appeal-card-head strong { font-size: 12.5px; }
+.appeal-card-head small { color: var(--muted); font-size: 10.5px; }
+.appeal-reason {
+  margin: 0 0 9px;
+  padding: 9px 11px;
+  border-radius: 10px;
+  background: rgba(120, 130, 180, .1);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.appeal-quote {
+  margin: 0 0 9px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+  border-left: 2px solid rgba(120, 130, 180, .35);
+  padding-left: 9px;
+  overflow-wrap: anywhere;
+}
+.appeal-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.appeal-actions input {
+  flex: 1 1 190px;
+  min-width: 0;
+  padding: 7px 11px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, .75);
+  font-size: 11.5px;
+}
+.appeal-actions button {
+  padding: 7px 14px;
+  border-radius: 9px;
+  border: 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform .16s ease, filter .16s ease;
+}
+.appeal-actions button:hover { transform: translateY(-1px); filter: brightness(1.06); }
+.appeal-actions .accept { background: rgba(18, 160, 106, .16); color: #0d7a51; }
+.appeal-actions .reject { background: rgba(220, 75, 92, .16); color: #b93b4d; }
+.appeal-badge {
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.appeal-badge.pending  { background: rgba(208, 135, 0, .16); color: #8a5c00; }
+.appeal-badge.accepted { background: rgba(18, 160, 106, .16); color: #0d7a51; }
+.appeal-badge.rejected { background: rgba(220, 75, 92, .16); color: #b93b4d; }
+
+#appealDialog form { display: grid; gap: 11px; }
+#appealDialog textarea {
+  width: 100%;
+  min-height: 116px;
+  padding: 11px 13px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, .8);
+  font: inherit;
+  font-size: 13px;
+  resize: vertical;
+}
+#appealDialog textarea:focus {
+  outline: none;
+  border-color: rgba(109, 94, 252, .55);
+  box-shadow: 0 0 0 3px rgba(109, 94, 252, .16);
+}
+.appeal-context {
+  padding: 10px 12px;
+  border-radius: 11px;
+  background: rgba(120, 130, 180, .1);
+  font-size: 11.5px;
+  color: #4a5372;
+  line-height: 1.55;
+}
+
+/* ---------- polish ---------- */
+.new-chat, .send-btn { box-shadow: 0 10px 24px rgba(101, 88, 232, .26); }
+.new-chat:hover, .send-btn:hover { transform: translateY(-1px); }
+.suggestions button {
+  background: rgba(255, 255, 255, .58);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  transition: transform .22s ease, box-shadow .22s ease;
+}
+.suggestions button:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 16px 34px rgba(52, 44, 120, .14);
+}
+.welcome { animation: fade-up .6s ease both; }
+.toast {
+  background: rgba(18, 20, 46, .88);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, .16);
+}
+
+/* ---------- motion opt-out ---------- */
+@media (prefers-reduced-motion: reduce) {
+  body::before, body::after { animation: none; }
+  .message, .welcome, .score-strip, .appeal-card { animation: none; }
+  .score-chip .meter i { animation: none; }
+  * { transition-duration: .01ms !important; }
+}

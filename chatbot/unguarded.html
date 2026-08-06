@@ -1,0 +1,175 @@
+﻿<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="Shield AI - trá»£ lÃ½ doanh nghiá»‡p an toÃ n" />
+  <title>Shield AI â€” Trá»£ lÃ½ thÃ´ng minh</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css?v=20260806-4" />
+  <link rel="stylesheet" href="glass.css?v=20260806-4" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">S</div>
+        <div><strong>Shield AI</strong><span>Secure workspace</span></div>
+      </div>
+
+      <button class="new-chat" id="newChatBtn" type="button"><span>ï¼‹</span> Cuá»™c trÃ² chuyá»‡n má»›i</button>
+      <nav class="history" aria-label="Lá»‹ch sá»­ trÃ² chuyá»‡n">
+        <p class="eyebrow">Gáº§n Ä‘Ã¢y</p>
+        <div id="historyList" class="history-list"></div>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="pro-card">
+          <span class="sparkle">âœ¦</span>
+          <div><strong>Báº£o vá»‡ bá»Ÿi Guardrails</strong><p>Ná»™i dung Ä‘Æ°á»£c kiá»ƒm tra trÆ°á»›c vÃ  sau khi xá»­ lÃ½.</p></div>
+        </div>
+        <div class="profile">
+          <div class="avatar" id="profileAvatar">?</div>
+          <div><strong id="profileName">ChÆ°a Ä‘Äƒng nháº­p</strong><span id="profileMeta">Workspace cÃ¡ nhÃ¢n</span></div>
+          <button id="logoutBtn" aria-label="ÄÄƒng xuáº¥t" title="ÄÄƒng xuáº¥t" type="button">â†ª</button>
+        </div>
+      </div>
+    </aside>
+
+    <main class="chat-panel">
+      <header class="topbar">
+        <button class="menu-btn" id="menuBtn" aria-label="Má»Ÿ menu" type="button">â˜°</button>
+        <div class="model-info">
+          <div class="bot-avatar small">âœ¦</div>
+          <div><strong id="conversationTitle">Shield Assistant</strong><span><i></i> Ollama Â· Äang hoáº¡t Ä‘á»™ng</span></div>
+        </div>
+        <div class="header-actions">
+          <button class="icon-btn" id="tasksBtn" aria-label="CÃ´ng viá»‡c" title="CÃ´ng viá»‡c" type="button">âœ“</button>
+          <span class="secure-pill">â—‰ Káº¿t ná»‘i an toÃ n</span>
+          <button class="icon-btn" id="documentsBtn" aria-label="Kho tÃ i liá»‡u" title="Kho tÃ i liá»‡u" type="button">â–¤</button>
+          <button class="icon-btn admin-only" id="adminBtn" aria-label="Quáº£n trá»‹" title="Quáº£n trá»‹" type="button" hidden>âŒ</button>
+          <button class="icon-btn" id="renameBtn" aria-label="Äá»•i tÃªn há»™i thoáº¡i" title="Äá»•i tÃªn" type="button">âœŽ</button>
+        </div>
+      </header>
+
+      <section class="messages" id="messages" aria-live="polite">
+        <div class="welcome" id="welcome">
+          <div class="bot-avatar hero">âœ¦</div>
+          <p class="eyebrow accent">TRá»¢ LÃ AI AN TOÃ€N</p>
+          <h1>Xin chÃ o, tÃ´i cÃ³ thá»ƒ<br><em>giÃºp gÃ¬ cho báº¡n?</em></h1>
+          <p class="welcome-copy">Há»™i thoáº¡i Ä‘Æ°á»£c lÆ°u tá»± Ä‘á»™ng. CÃ¢u tráº£ lá»i chá»‰ hiá»ƒn thá»‹ sau khi Guardrails kiá»ƒm tra.</p>
+          <div class="suggestions">
+            <button type="button" data-prompt="TÃ³m táº¯t cÃ¡c nguyÃªn táº¯c báº£o máº­t thÃ´ng tin quan trá»ng">
+              <span class="suggestion-icon violet">âŒ</span><span><strong>TÃ³m táº¯t chÃ­nh sÃ¡ch</strong><small>Náº¯m nhanh ná»™i dung quan trá»ng</small></span><b>â†’</b>
+            </button>
+            <button type="button" data-prompt="HÆ°á»›ng dáº«n tÃ´i láº­p má»™t káº¿ hoáº¡ch lÃ m viá»‡c hiá»‡u quáº£">
+              <span class="suggestion-icon mint">âœ“</span><span><strong>Láº­p káº¿ hoáº¡ch</strong><small>Nháº­n hÆ°á»›ng dáº«n tá»«ng bÆ°á»›c</small></span><b>â†’</b>
+            </button>
+            <button type="button" data-prompt="Giáº£i thÃ­ch cÃ¡ch há»‡ thá»‘ng báº£o vá»‡ dá»¯ liá»‡u cá»§a tÃ´i">
+              <span class="suggestion-icon amber">â—‡</span><span><strong>TÃ¬m hiá»ƒu báº£o máº­t</strong><small>CÃ¡ch dá»¯ liá»‡u Ä‘Æ°á»£c báº£o vá»‡</small></span><b>â†’</b>
+            </button>
+          </div>
+        </div>
+        <div class="message-list" id="messageList"></div>
+      </section>
+
+      <footer class="composer-wrap">
+        <form class="composer" id="chatForm">
+          <div class="chat-upload-panel" id="chatUploadPanel" hidden>
+            <div class="chat-upload-file">
+              <span class="chat-upload-icon">&#128196;</span>
+              <div><strong id="chatUploadName"></strong><small id="chatUploadSize"></small></div>
+              <button type="button" id="clearUploadBtn" aria-label="Bá» tá»‡p Ä‘Ã£ chá»n">&times;</button>
+            </div>
+            <div class="chat-upload-options">
+              <select id="documentScope" aria-label="Pháº¡m vi tÃ i liá»‡u"><option value="user">CÃ¡ nhÃ¢n</option><option value="department">PhÃ²ng ban</option><option value="global">ToÃ n workspace</option></select>
+              <select id="documentDepartment" aria-label="PhÃ²ng ban"></select>
+              <select id="documentAudience" aria-label="Äá»‘i tÆ°á»£ng Ä‘Æ°á»£c xem"><option value="member">NhÃ¢n viÃªn trá»Ÿ lÃªn</option><option value="leader">Leader trá»Ÿ lÃªn</option><option value="superadmin">Chá»‰ superadmin</option></select>
+              <button class="chat-upload-submit" id="uploadDocumentBtn" type="button">Táº£i &amp; kiá»ƒm tra</button>
+            </div>
+            <div class="chat-upload-sharing">
+              <input id="documentAllowedUsers" placeholder="Chia sáº» thÃªm cho user: it.user1, hr.leader" aria-label="User Ä‘Æ°á»£c chia sáº» thÃªm">
+              <input id="documentAllowedGroups" placeholder="NhÃ³m Ä‘Æ°á»£c chia sáº»: HR:leader" aria-label="NhÃ³m Ä‘Æ°á»£c chia sáº» thÃªm">
+              <small>KhÃ´ng báº¯t buá»™c Â· Ä‘á»‹nh dáº¡ng nhÃ³m: PHÃ’NG_BAN:member hoáº·c PHÃ’NG_BAN:leader</small>
+            </div>
+          </div>
+          <textarea id="messageInput" rows="1" maxlength="4000" placeholder="Nháº­p cÃ¢u há»i cá»§a báº¡n..." aria-label="Tin nháº¯n"></textarea>
+          <div class="composer-bottom">
+            <input id="documentFile" type="file" accept=".txt,.md,.csv,.json,.jsonl,.html,.htm,.pdf,.py,.js,.ts,.sh,.ps1,.bat,.cmd" hidden>
+            <button class="attach-btn" id="attachBtn" aria-label="ÄÃ­nh kÃ¨m tÃ i liá»‡u" title="ÄÃ­nh kÃ¨m tÃ i liá»‡u" type="button">&#128206;</button>
+            <span class="hint"><kbd>Enter</kbd> Ä‘á»ƒ gá»­i Â· <kbd>Shift + Enter</kbd> xuá»‘ng dÃ²ng</span>
+            <button class="stop-btn" id="stopBtn" aria-label="Dá»«ng tráº£ lá»i" type="button" hidden>â–  Dá»«ng</button>
+            <button class="send-btn" id="sendBtn" aria-label="Gá»­i tin nháº¯n" type="submit">âž¤</button>
+          </div>
+        </form>
+        <p class="disclaimer">Shield AI cÃ³ thá»ƒ máº¯c lá»—i. KhÃ´ng nháº­p dá»¯ liá»‡u tháº­t, bÃ­ máº­t hoáº·c thÃ´ng tin cÃ¡ nhÃ¢n.</p>
+      </footer>
+    </main>
+  </div>
+  <div class="overlay" id="overlay"></div>
+
+  <section class="auth-screen" id="authScreen" aria-label="ÄÄƒng nháº­p">
+    <div class="auth-card">
+      <div class="brand-mark auth-logo">S</div>
+      <p class="eyebrow accent">SECURE WORKSPACE</p>
+      <h2 id="authTitle">ÄÄƒng nháº­p Shield AI</h2>
+      <p class="auth-copy" id="authCopy">Tiáº¿p tá»¥c cuá»™c trÃ² chuyá»‡n cá»§a báº¡n trÃªn thiáº¿t bá»‹ nÃ y.</p>
+      <form id="authForm">
+        <label>TÃªn Ä‘Äƒng nháº­p<input id="authUsername" minlength="3" maxlength="32" autocomplete="username" required></label>
+        <label>Máº­t kháº©u<input id="authPassword" type="password" minlength="8" maxlength="128" autocomplete="current-password" required></label>
+        <label id="departmentField" hidden>PhÃ²ng ban<input id="authDepartment" maxlength="40" value="general"></label>
+        <p class="form-error" id="authError"></p>
+        <button class="new-chat auth-submit" type="submit" id="authSubmit">ÄÄƒng nháº­p</button>
+      </form>
+      <button class="text-btn" id="authToggle" type="button">ChÆ°a cÃ³ tÃ i khoáº£n? ÄÄƒng kÃ½</button>
+      <p class="auth-note">TÃ i khoáº£n Ä‘áº§u tiÃªn sáº½ cÃ³ quyá»n quáº£n trá»‹. Chá»‰ dÃ¹ng dá»¯ liá»‡u tá»•ng há»£p cho báº£n PoC.</p>
+    </div>
+  </section>
+
+  <dialog class="modal" id="documentsDialog">
+    <div class="modal-head"><div><p class="eyebrow accent">KNOWLEDGE STORE</p><h2>Kho tÃ i liá»‡u</h2></div><button type="button" data-close="documentsDialog">Ã—</button></div>
+    <p class="modal-copy">Táº£i tÃ i liá»‡u trá»±c tiáº¿p báº±ng nÃºt Ä‘Ã­nh kÃ¨m trong khung chat. Khu vá»±c nÃ y dÃ¹ng Ä‘á»ƒ xem tráº¡ng thÃ¡i vÃ  quáº£n lÃ½ tÃ i liá»‡u Ä‘Ã£ lÆ°u.</p>
+    <div class="document-list" id="documentList"></div>
+  </dialog>
+
+  <dialog class="modal admin-modal" id="adminDialog">
+    <div class="modal-head"><div><p class="eyebrow accent">ADMIN CONSOLE</p><h2>Báº£o máº­t vÃ  sá»­ dá»¥ng</h2></div><button type="button" data-close="adminDialog">Ã—</button></div>
+    <div class="stat-grid" id="statGrid"></div>
+    <h3>CÆ¡ cáº¥u phÃ²ng ban</h3>
+    <div class="org-list" id="orgList"></div>
+    <h3>Sá»± kiá»‡n audit gáº§n Ä‘Ã¢y</h3>
+    <div class="audit-list" id="auditList"></div>
+  </dialog>
+
+  <dialog class="modal task-modal" id="tasksDialog">
+    <div class="modal-head"><div><p class="eyebrow accent">WORKFLOW</p><h2>Quáº£n lÃ½ cÃ´ng viá»‡c</h2></div><button type="button" data-close="tasksDialog">Ã—</button></div>
+    <p class="modal-copy" id="taskRoleHelp"></p>
+    <form id="departmentTaskForm" class="task-form" hidden>
+      <input id="taskTitle" maxlength="160" placeholder="TÃªn cÃ´ng viá»‡c" required>
+      <select id="taskDepartment" required></select>
+      <textarea id="taskDescription" maxlength="4000" placeholder="MÃ´ táº£ yÃªu cáº§u"></textarea>
+      <input id="taskDueAt" type="date" aria-label="Háº¡n hoÃ n thÃ nh">
+      <button type="submit">Giao cho phÃ²ng ban</button>
+    </form>
+    <section id="teamSection" hidden><h3>NhÃ¢n sá»± trong phÃ²ng</h3><div class="team-list" id="teamList"></div></section>
+    <h3>Danh sÃ¡ch cÃ´ng viá»‡c</h3><div class="task-list" id="taskList"></div>
+  </dialog>
+
+  <dialog class="modal" id="delegateDialog">
+    <div class="modal-head"><div><p class="eyebrow accent">DELEGATE</p><h2>Giao viá»‡c cho nhÃ¢n viÃªn</h2></div><button type="button" data-close="delegateDialog">Ã—</button></div>
+    <form id="delegateForm" class="task-form">
+      <input id="delegateParentId" type="hidden">
+      <input id="delegateTitle" maxlength="160" placeholder="TÃªn pháº§n viá»‡c" required>
+      <select id="delegateUser" required></select>
+      <textarea id="delegateDescription" maxlength="4000" placeholder="MÃ´ táº£ pháº§n viá»‡c"></textarea>
+      <input id="delegateDueAt" type="date" aria-label="Háº¡n hoÃ n thÃ nh">
+      <button type="submit">Giao viá»‡c</button>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status"></div>
+  <script src="app.js?v=20260806-4"></script>
+</body>
+</html>

@@ -60,6 +60,33 @@ class ProgressBody(BaseModel):
     progress: int = Field(ge=0, le=100)
 
 
+class AppealBody(BaseModel):
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+class AppealResolutionBody(BaseModel):
+    status: str = Field(pattern="^(accepted|rejected)$")
+    note: str = Field(default="", max_length=1000)
+
+
+def guard_risk(result) -> dict:
+    """Extract the per-stage `risk_score` values already computed by the
+    guards, so the UI can show why a decision was made rather than only
+    what it was.
+
+    Nothing new is measured here: `risk_score` is the maximum weight among
+    the rules a stage matched (see `app/guards/rag_guard.py`), which is why
+    the UI labels it as a rule-based risk score and not a model confidence.
+    A stage that did not run is `None`, never `0.0` -- "not evaluated" and
+    "evaluated as harmless" are different facts.
+    """
+    return {
+        "risk_input": getattr(result.input_guard, "risk_score", None),
+        "risk_rag": getattr(result.rag_guard, "risk_score", None) if result.rag_guard else None,
+        "risk_output": getattr(result.output_guard, "risk_score", None) if result.output_guard else None,
+    }
+
+
 def bearer(authorization: Annotated[str | None, Header()] = None) -> str:
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(401, "Bạn cần đăng nhập")
@@ -161,7 +188,26 @@ def post_message(conversation_id: str, body: MessageBody, user: dict = Depends(a
     # Recorded so a turn the Input Guard refused can never be replayed on a
     # later request (history.py drops blocking decisions).
     store.set_message_decision(user_message["id"],result.input_guard.decision.value)
-    assistant=store.add_message(conversation_id,"assistant",result.response,decision=result.final_decision.value,request_id=result.request_id,latency_ms=round((time.perf_counter()-started)*1000),sources=sources)
+    assistant=store.add_message(conversation_id,"assistant",result.response,decision=result.final_decision.value,request_id=result.request_id,latency_ms=round((time.perf_counter()-started)*1000),sources=sources,**guard_risk(result))
+    return {"assistant_message":assistant,"provider_name":result.provider_name,"model_name":result.model_name}
+
+@router.post("/conversations/{conversation_id}/messages_unguarded")
+def post_message_unguarded(conversation_id: str, body: MessageBody, user: dict = Depends(actor)) -> dict:
+    conv=store.conversation(user,conversation_id)
+    if not conv: raise HTTPException(404,"Không tìm thấy hội thoại")
+    if conv["user_id"] != user["id"]: raise HTTPException(403,"Superadmin chỉ được kiểm tra, không gửi thay người dùng")
+
+    screening=screen_history(store.messages(user,conversation_id),max_turns=MAX_REPLAYED_TURNS)
+    user_message=store.add_message(conversation_id,"user",body.content)
+    chunks,sources=store.retrieve(user,body.content)
+    started=time.perf_counter()
+    workspace_directory = store.authorized_workspace_context(user)
+
+    from app.services.gateway import run_unguarded_chat
+    result=run_unguarded_chat(body.content,chunks,{"workspace_user_id":user["id"],"role":user["role"],"department":user["department"],"workspace_directory":workspace_directory,"history":[dict(turn) for turn in screening.turns],"history_turns_dropped":screening.dropped_count,"history_turns_sanitized":screening.sanitized_count})
+
+    store.set_message_decision(user_message["id"],result.input_guard.decision.value)
+    assistant=store.add_message(conversation_id,"assistant",result.response,decision=result.final_decision.value,request_id=result.request_id,latency_ms=round((time.perf_counter()-started)*1000),sources=sources,**guard_risk(result))
     return {"assistant_message":assistant,"provider_name":result.provider_name,"model_name":result.model_name}
 
 
@@ -170,6 +216,31 @@ def feedback(message_id: int, body: FeedbackBody, user: dict = Depends(actor)) -
     try: store.set_feedback(user,message_id,body.value)
     except LookupError: raise HTTPException(404,"Không tìm thấy tin nhắn")
     return Response(status_code=204)
+
+
+@router.post("/messages/{message_id}/appeal", status_code=201)
+def appeal_message(message_id: int, body: AppealBody, user: dict = Depends(actor)) -> dict:
+    """Submit an appeal against a message the gateway withheld.
+
+    Ownership, appealability, and duplicate submission are all enforced in
+    `store.create_appeal` against the database, never from the request.
+    """
+    try: return store.create_appeal(user, message_id, body.reason)
+    except LookupError: raise HTTPException(404, "Không tìm thấy tin nhắn")
+    except Exception as exc: raise translate_error(exc)
+
+
+@router.get("/admin/appeals")
+def admin_appeals(user: dict = Depends(actor)) -> list[dict]:
+    try: return store.list_appeals(user)
+    except PermissionError: raise HTTPException(403, "Chỉ superadmin được truy cập")
+
+
+@router.patch("/admin/appeals/{appeal_id}")
+def resolve_appeal(appeal_id: str, body: AppealResolutionBody, user: dict = Depends(actor)) -> dict:
+    try: return store.resolve_appeal(user, appeal_id, body.status, body.note)
+    except LookupError: raise HTTPException(404, "Không tìm thấy kháng cáo")
+    except Exception as exc: raise translate_error(exc)
 
 
 @router.get("/documents")

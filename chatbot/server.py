@@ -60,8 +60,20 @@ class ChatbotHandler(SimpleHTTPRequestHandler):
                         "metadata": {"client": "shield-web"},
                     }
                 ).encode()
+        elif api_path == "/chat_unguarded":
+            api_path = "/v1/gateway/chat_unguarded"
+            if body:
+                incoming = json.loads(body)
+                body = json.dumps(
+                    {
+                        "prompt": incoming.get("prompt", ""),
+                        "context_chunks": [],
+                        "metadata": {"client": "shield-web"},
+                    }
+                ).encode()
         else:
-            api_path = f"/v1{api_path}"
+            if not api_path.startswith("/v1"):
+                api_path = f"/v1{api_path}"
 
         headers = {"Content-Type": self.headers.get("Content-Type", "application/json")}
         for name in ("Authorization", "X-Filename"):

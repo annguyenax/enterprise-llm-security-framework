@@ -9,6 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css?v=20260806-3" />
+  <link rel="stylesheet" href="glass.css?v=20260806-4" />
 </head>
 <body>
   <div class="app-shell">
@@ -138,8 +139,22 @@
     <div class="stat-grid" id="statGrid"></div>
     <h3>Cơ cấu phòng ban</h3>
     <div class="org-list" id="orgList"></div>
+    <h3>Kháng cáo chờ xử lý</h3>
+    <div class="appeal-queue" id="appealQueue"></div>
     <h3>Sự kiện audit gần đây</h3>
     <div class="audit-list" id="auditList"></div>
+  </dialog>
+
+  <dialog class="modal" id="appealDialog">
+    <div class="modal-head"><div><p class="eyebrow accent">APPEAL</p><h2>Kháng cáo quyết định</h2></div><button type="button" data-close="appealDialog">×</button></div>
+    <p class="modal-copy">Nếu bạn cho rằng câu hỏi này bị chặn nhầm, hãy mô tả bối cảnh công việc. Superadmin sẽ xem xét và phản hồi.</p>
+    <div class="appeal-context" id="appealContext"></div>
+    <form id="appealForm">
+      <input id="appealMessageId" type="hidden">
+      <textarea id="appealReason" maxlength="2000" placeholder="Vì sao bạn cho rằng quyết định này chưa đúng?" required></textarea>
+      <p class="form-error" id="appealError"></p>
+      <button class="new-chat" type="submit">Gửi kháng cáo</button>
+    </form>
   </dialog>
 
   <dialog class="modal task-modal" id="tasksDialog">

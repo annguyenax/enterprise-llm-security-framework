@@ -249,13 +249,30 @@ def test_holdout_present_in_every_family(real_data):
 def test_default_validation_path_imports_no_guard_modules(validate_mod, real_data):
     """Required regression test #4: the default build/validate paths must
     not import any app.guards.* module."""
+    # The evicted modules are restored afterwards. Without that, this test
+    # leaks broken global state into every test that runs later: re-importing
+    # `app` creates a fresh package object that no longer has `workspace`,
+    # `services`, etc. bound as attributes, so any subsequent
+    # `monkeypatch.setattr("app.workspace.routes...", ...)` -- the dotted-string
+    # form, which resolves by walking getattr from `app` -- dies with
+    # `AttributeError: module 'app' has no attribute 'workspace'`. That made
+    # several later tests fail only in a full-suite run and pass in isolation.
+    #
+    # The eviction and the assertion below are unchanged: the Phase 12D
+    # guard-independence property (Code X audit, Critical #1) is still tested
+    # exactly as before, and restoration happens only after it has been
+    # asserted.
+    evicted = {}
     for name in list(sys.modules):
         if name.startswith("app.guards") or name == "app":
-            del sys.modules[name]
-    corpus, cases, labels = real_data
-    validate_mod.check_schemas(corpus, cases, labels)
-    validate_mod.check_cross_split_contamination(corpus, cases, labels)
-    assert not any(name.startswith("app.guards") for name in sys.modules)
+            evicted[name] = sys.modules.pop(name)
+    try:
+        corpus, cases, labels = real_data
+        validate_mod.check_schemas(corpus, cases, labels)
+        validate_mod.check_cross_split_contamination(corpus, cases, labels)
+        assert not any(name.startswith("app.guards") for name in sys.modules)
+    finally:
+        sys.modules.update(evicted)
 
 
 def test_schema_valid_label_disagreeing_with_current_input_guard_still_passes(validate_mod, real_data, tmp_path, monkeypatch):

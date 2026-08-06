@@ -97,6 +97,87 @@ function resetMessages() {
   welcome.hidden = false;
 }
 
+const BLOCKED_DECISIONS = new Set(['block', 'human_review']);
+const APPEAL_LABELS = { pending: 'Kháng cáo đang chờ duyệt', accepted: 'Kháng cáo được chấp nhận', rejected: 'Kháng cáo bị từ chối' };
+
+function percent(value) {
+  return `${Math.round(Number(value) * 100)}%`;
+}
+
+/* Guard risk, shown per stage rather than as one number.
+ * `risk_score` is the maximum weight of the rules a stage matched, so it is
+ * labelled as a rule-based risk score — not a model confidence, and not a
+ * probability. A stage that did not run is omitted entirely instead of
+ * being drawn as 0%, because "not evaluated" is not "evaluated as safe". */
+function riskStripHtml(message) {
+  const stages = [
+    ['Input', message.risk_input],
+    ['RAG', message.risk_rag],
+    ['Output', message.risk_output]
+  ].filter(([, value]) => typeof value === 'number');
+  if (!stages.length) return '';
+  const peak = Math.max(...stages.map(([, value]) => value));
+  const detail = stages.map(([name, value]) => `${name} ${value.toFixed(2)}`).join(' · ');
+  return `<span class="score-chip risk" title="Điểm rủi ro theo luật (trọng số rule cao nhất mỗi tầng) — ${escapeHtml(detail)}">
+    <span>Rủi ro (luật)</span><b>${peak.toFixed(2)}</b>
+    <span class="meter"><i style="--value:${percent(peak)}"></i></span>
+  </span>`;
+}
+
+/* Retrieval scores. Semantic (cosine) and lexical (BM25) are shown as two
+ * distinct facts, never merged into one bar: the backend fuses them by rank
+ * (RRF) precisely because the two scales are not comparable, and collapsing
+ * them in the UI would re-imply a shared scale the system does not have. */
+function retrievalStripHtml(message) {
+  const sources = message.sources || [];
+  const scored = sources.filter(source => typeof source.semantic_score === 'number');
+  const mode = sources.find(source => source.retrieval)?.retrieval;
+  const chips = [];
+  if (mode) {
+    chips.push(`<span class="score-chip mode" title="${mode === 'hybrid'
+      ? 'Hybrid: BM25 từ khoá + embedding ngữ nghĩa, hợp nhất bằng Reciprocal Rank Fusion'
+      : 'Chỉ BM25 từ khoá — mô hình embedding không khả dụng hoặc đang tắt'}">◎ ${escapeHtml(mode === 'hybrid' ? 'Hybrid RRF' : 'BM25')}</span>`);
+  }
+  if (scored.length) {
+    const best = Math.max(...scored.map(source => source.semantic_score));
+    chips.push(`<span class="score-chip" title="Cosine similarity giữa câu hỏi và tài liệu, tính bằng mô hình embedding cục bộ">
+      <span>Ngữ nghĩa</span><b>${best.toFixed(2)}</b>
+      <span class="meter"><i style="--value:${percent(best)}"></i></span>
+    </span>`);
+  } else if (mode === 'bm25' && sources.length) {
+    chips.push('<span class="score-chip muted" title="Không có điểm ngữ nghĩa cho lượt này">Ngữ nghĩa: không có</span>');
+  }
+  return chips.join('');
+}
+
+function scoreStripHtml(message) {
+  const chips = [riskStripHtml(message), retrievalStripHtml(message)].filter(Boolean).join('');
+  return chips ? `<div class="score-strip">${chips}</div>` : '';
+}
+
+function sourcesHtml(message) {
+  if (!message.sources?.length) return '';
+  const items = message.sources.map(source => {
+    const semantic = typeof source.semantic_score === 'number'
+      ? `<span class="sem" title="Điểm ngữ nghĩa (cosine)">${source.semantic_score.toFixed(2)}</span>` : '';
+    const rank = source.lexical_rank
+      ? `<span class="rank" title="Hạng theo BM25 từ khoá">#${source.lexical_rank}</span>` : '';
+    return `<span class="source-item" title="${escapeHtml(source.scope || '')}">▤ ${escapeHtml(source.filename)}${semantic}${rank}</span>`;
+  }).join('');
+  return `<div class="sources"><span>Tham khảo</span>${items}</div>`;
+}
+
+function appealHtml(message) {
+  if (message.role !== 'assistant' || !message.id) return '';
+  if (message.appeal_status) {
+    const label = APPEAL_LABELS[message.appeal_status] || message.appeal_status;
+    const note = message.appeal_note ? ` — ${message.appeal_note}` : '';
+    return `<span class="appeal-state ${escapeHtml(message.appeal_status)}">⚖ ${escapeHtml(label)}${escapeHtml(note)}</span>`;
+  }
+  if (!BLOCKED_DECISIONS.has(message.decision)) return '';
+  return `<button type="button" class="appeal-btn" data-action="appeal" title="Yêu cầu superadmin xem xét lại">⚖ Kháng cáo</button>`;
+}
+
 function messageActions(message) {
   if (message.role !== 'assistant' || !message.id) return '';
   const up = message.feedback === 1 ? 'active' : '';
@@ -106,6 +187,7 @@ function messageActions(message) {
     <button type="button" data-action="feedback" data-value="1" class="${up}" title="Hữu ích">♡</button>
     <button type="button" data-action="feedback" data-value="-1" class="${down}" title="Chưa tốt">♢</button>
     ${message.latency_ms != null ? `<span>${(message.latency_ms / 1000).toFixed(1)} giây</span>` : ''}
+    ${appealHtml(message)}
   </div>`;
 }
 
@@ -117,11 +199,9 @@ function addMessage(message, animate = false) {
   node.dataset.raw = message.content || '';
   const note = message.decision
     ? `<span class="guard-note">◈ Guardrail: ${escapeHtml(message.decision)}</span>` : '';
-  const sources = message.sources?.length
-    ? `<div class="sources"><span>Tham khảo</span>${message.sources.map(source => `<b title="${escapeHtml(source.scope)}">▤ ${escapeHtml(source.filename)}</b>`).join('')}</div>`
-    : '';
+  const sources = sourcesHtml(message);
   node.innerHTML = message.role === 'assistant'
-    ? `<span class="message-bot-icon">✦</span><div class="message-content"><div class="bubble markdown"></div>${sources}${note}${messageActions(message)}</div>`
+    ? `<span class="message-bot-icon">✦</span><div class="message-content"><div class="bubble markdown"></div>${sources}${scoreStripHtml(message)}${note}${messageActions(message)}</div>`
     : `<div class="bubble">${escapeHtml(message.content)}</div>`;
   messageList.appendChild(node);
   if (message.role === 'assistant') {
@@ -252,7 +332,9 @@ async function sendMessage(text) {
   state.abortController = new AbortController();
 
   try {
-    const data = await api(`/conversations/${conversationId}/messages`, {
+    const isUnguarded = window.location.pathname.includes('unguarded.html');
+    const endpoint = `/conversations/${conversationId}/messages${isUnguarded ? '_unguarded' : ''}`;
+    const data = await api(endpoint, {
       method: 'POST',
       body: JSON.stringify({ content: prompt }),
       signal: state.abortController.signal
@@ -513,6 +595,74 @@ async function uploadDocument() {
   }
 }
 
+function openAppeal(article) {
+  const messageId = article?.dataset.messageId;
+  const dialog = $('#appealDialog');
+  if (!messageId || !dialog) return;
+  $('#appealMessageId').value = messageId;
+  $('#appealReason').value = '';
+  $('#appealError').textContent = '';
+  const decision = article.querySelector('.guard-note')?.textContent?.trim() || '';
+  $('#appealContext').textContent = decision
+    ? `${decision} · Tin nhắn #${messageId}`
+    : `Tin nhắn #${messageId}`;
+  dialog.showModal();
+}
+
+async function submitAppeal(event) {
+  event.preventDefault();
+  const messageId = $('#appealMessageId').value;
+  const reason = $('#appealReason').value.trim();
+  if (!reason) { $('#appealError').textContent = 'Bạn cần nêu lý do kháng cáo'; return; }
+  try {
+    await api(`/messages/${messageId}/appeal`, { method: 'POST', body: JSON.stringify({ reason }) });
+    $('#appealDialog').close();
+    toast('Đã gửi kháng cáo. Superadmin sẽ xem xét.');
+    // Re-render from the server so the button becomes the real stored
+    // state rather than an optimistic guess.
+    if (state.activeId) await openConversation(state.activeId);
+  } catch (error) {
+    $('#appealError').textContent = error.message;
+  }
+}
+
+function renderAppealQueue(appeals) {
+  const node = $('#appealQueue');
+  if (!node) return;
+  if (!appeals.length) {
+    node.innerHTML = '<p class="empty-state">Chưa có kháng cáo nào.</p>';
+    return;
+  }
+  node.innerHTML = appeals.map(appeal => {
+    const quote = (appeal.message_content || '').slice(0, 240);
+    const pending = appeal.status === 'pending';
+    return `<article class="appeal-card" data-appeal="${escapeHtml(appeal.id)}">
+      <div class="appeal-card-head">
+        <span class="appeal-badge ${escapeHtml(appeal.status)}">${escapeHtml(appeal.status)}</span>
+        <strong>${escapeHtml(appeal.username)}</strong>
+        <small>${escapeHtml(appeal.department || '')} · ${escapeHtml(appeal.message_decision || '')} · ${escapeHtml(appeal.request_id || '')}</small>
+      </div>
+      <p class="appeal-reason">${escapeHtml(appeal.reason)}</p>
+      <p class="appeal-quote">${escapeHtml(quote)}</p>
+      ${pending ? `<div class="appeal-actions">
+        <input data-note placeholder="Ghi chú xử lý (không bắt buộc)" maxlength="1000">
+        <button type="button" class="accept" data-resolve="accepted">Chấp nhận</button>
+        <button type="button" class="reject" data-resolve="rejected">Từ chối</button>
+      </div>` : `<small>Xử lý bởi ${escapeHtml(appeal.resolved_by_username || '—')}${appeal.resolution_note ? ` · ${escapeHtml(appeal.resolution_note)}` : ''}</small>`}
+    </article>`;
+  }).join('');
+}
+
+async function resolveAppeal(card, status) {
+  const note = card.querySelector('[data-note]')?.value || '';
+  await api(`/admin/appeals/${card.dataset.appeal}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status, note })
+  });
+  toast(status === 'accepted' ? 'Đã chấp nhận kháng cáo' : 'Đã từ chối kháng cáo');
+  renderAppealQueue(await api('/admin/appeals'));
+}
+
 async function openAdmin() {
   const data = await api('/admin/stats');
   $('#adminDialog').showModal();
@@ -526,6 +676,13 @@ async function openAdmin() {
       : user.department === department.code && user.role !== 'superadmin');
     return `<div class="org-department"><strong>${escapeHtml(department.name)} (${escapeHtml(department.code)})</strong><div class="org-users">${users.map(user => `<span class="org-user ${user.role}"><b>${escapeHtml(user.role)}</b>${escapeHtml(user.username)}</span>`).join('') || '<span class="empty-state">Chưa có người dùng</span>'}</div></div>`;
   }).join('');
+  // Appeals share the admin console but are fetched separately: a failure
+  // to load the review queue must not blank out the security statistics.
+  try { renderAppealQueue(await api('/admin/appeals')); }
+  catch (error) {
+    const node = $('#appealQueue');
+    if (node) node.innerHTML = `<p class="empty-state">Không tải được kháng cáo: ${escapeHtml(error.message)}</p>`;
+  }
   $('#auditList').innerHTML = data.audit.recent.length ? data.audit.recent.map(event => `
     <div class="audit-row"><span class="decision ${event.decision}">${event.decision}</span><div><strong>${escapeHtml(event.request_id || '')}</strong><small>${escapeHtml(event.timestamp || '')}</small></div><small>${escapeHtml((event.matched_rules || []).join(', '))}</small></div>
   `).join('') : '<p class="empty-state">Chưa có sự kiện audit.</p>';
@@ -619,6 +776,16 @@ messageList.addEventListener('click', event => {
     navigator.clipboard.writeText(article.dataset.raw); toast('Đã sao chép câu trả lời');
   }
   if (button.dataset.action === 'feedback') submitFeedback(button).catch(error => toast(error.message));
+  if (button.dataset.action === 'appeal') openAppeal(article);
+});
+// Optional chaining, not a convenience: unguarded.html loads this same
+// script but has no appeal dialog, and addEventListener on null would throw
+// at parse time and take the whole chat UI down with it.
+$('#appealForm')?.addEventListener('submit', event => submitAppeal(event));
+$('#appealQueue')?.addEventListener('click', event => {
+  const button = event.target.closest('[data-resolve]');
+  if (!button) return;
+  resolveAppeal(button.closest('.appeal-card'), button.dataset.resolve).catch(error => toast(error.message));
 });
 $('#historyList').addEventListener('click', event => {
   const row = event.target.closest('.history-row');

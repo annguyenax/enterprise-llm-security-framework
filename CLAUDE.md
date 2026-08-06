@@ -9,11 +9,15 @@ Security Gateway / Guardrail Proxy đứng trước một ứng dụng RAG, phò
 prompt injection, indirect injection, jailbreak, rò rỉ dữ liệu, và data
 poisoning. **PoC học thuật, KHÔNG phải production**, dữ liệu tổng hợp hoàn toàn.
 
-## Đọc trước khi làm bất cứ việc gì
+## MỤC LỤC BẮT BUỘC ĐỌC CHO AI (AI ONBOARDING)
 
-1. `docs/ai-collaboration/00_PROJECT_STATE.md` — phase nào, commit nào, gate nào đã qua
-2. `AGENT_RULES.md` — luật cứng của dự án
-3. `docs/ai-collaboration/01_AGENT_ROLES.md` — vai của bạn và giới hạn quyền
+Nếu bạn là một AI Agent (Claude, Grok, Gemini, v.v...) vừa được giao task mới, BẠN PHẢI ĐỌC các file sau theo thứ tự để hiểu bối cảnh dự án, tránh lặp lại lỗi, và biết file nào cần sửa:
+
+1. `docs/ai-collaboration/00_PROJECT_STATE.md` — trạng thái hiện tại (phase nào, commit nào, gate nào đã qua). Cập nhật file này khi hoàn thành Phase.
+2. `AGENT_RULES.md` — luật cứng của dự án (KHÔNG dùng API trả phí, KHÔNG tự ý cài thư viện nặng, v.v...).
+3. `docs/ai-collaboration/01_AGENT_ROLES.md` — vai trò của bạn (Implementer, Auditor, v.v...) và quyền hạn tương ứng.
+4. `TASK_BOARD.md` & `PROJECT_PLAN.md` — roadmap tổng thể.
+5. `walkthrough.md` (nếu có trong workspace) — những thay đổi gần nhất vừa thực hiện.
 
 ## Trạng thái hiện tại (2026-07-19)
 

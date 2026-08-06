@@ -259,7 +259,12 @@ capture remain team review tasks.
 ### Phase 9 Report and Demo Finalization
 
 - [Report integration plan](reports/evidence/report-integration-plan.md) maps
-  every final report section to source evidence and target LaTeX chapters.
+  v1 report figures to scripts and files.
+
+### Local Environment Setup
+
+To run this project locally without configuration issues, create a `.env` file in the root directory. You can specify your `LLM_MODEL_NAME` (e.g., `qwen2.5-coder:7b`) there. The `scripts/run_workspace.ps1` script will automatically load these variables before starting the backend, preventing issues when pulling new code.
+
 - [Demo rehearsal checklist](reports/evidence/demo-rehearsal-checklist.md)
   provides preflight checks, timing, expected output, speaking points, common
   questions, and an offline fallback plan.
