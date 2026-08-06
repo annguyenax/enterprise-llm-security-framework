@@ -18,6 +18,7 @@ state.uploading = false;
 
 const form = $('#chatForm');
 const input = $('#messageInput');
+const IS_UNGUARDED = window.location.pathname.includes('unguarded.html');
 const sendButton = $('#sendBtn');
 const stopButton = $('#stopBtn');
 const messages = $('#messages');
@@ -110,6 +111,7 @@ function percent(value) {
  * probability. A stage that did not run is omitted entirely instead of
  * being drawn as 0%, because "not evaluated" is not "evaluated as safe". */
 function riskStripHtml(message) {
+  if (IS_UNGUARDED) return '';
   const stages = [
     ['Input', message.risk_input],
     ['RAG', message.risk_rag],
@@ -197,8 +199,8 @@ function addMessage(message, animate = false) {
   node.className = `message ${message.role}`;
   node.dataset.messageId = message.id || '';
   node.dataset.raw = message.content || '';
-  const note = message.decision
-    ? `<span class="guard-note">◈ Guardrail: ${escapeHtml(message.decision)}</span>` : '';
+  const note = (message.decision && !IS_UNGUARDED)
+    ? `<span class="guard-note">✦ Guardrail: ${escapeHtml(message.decision)}</span>` : '';
   const sources = sourcesHtml(message);
   node.innerHTML = message.role === 'assistant'
     ? `<span class="message-bot-icon">✦</span><div class="message-content"><div class="bubble markdown"></div>${sources}${scoreStripHtml(message)}${note}${messageActions(message)}</div>`
@@ -332,8 +334,7 @@ async function sendMessage(text) {
   state.abortController = new AbortController();
 
   try {
-    const isUnguarded = window.location.pathname.includes('unguarded.html');
-    const endpoint = `/conversations/${conversationId}/messages${isUnguarded ? '_unguarded' : ''}`;
+    const endpoint = `/conversations/${conversationId}/messages${IS_UNGUARDED ? '_unguarded' : ''}`;
     const data = await api(endpoint, {
       method: 'POST',
       body: JSON.stringify({ content: prompt }),

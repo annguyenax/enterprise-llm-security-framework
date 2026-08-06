@@ -26,9 +26,9 @@
       </nav>
 
       <div class="sidebar-footer">
-        <div class="pro-card">
-          <span class="sparkle">✦</span>
-          <div><strong>Bảo vệ bởi Guardrails</strong><p>Nội dung được kiểm tra trước và sau khi xử lý.</p></div>
+        <div class="pro-card" style="background: var(--surface-2); border-color: var(--danger-color);">
+          <span class="sparkle" style="color: var(--danger-color);">⚠</span>
+          <div><strong style="color: var(--danger-color);">Không có tường lửa</strong><p>Kết nối trực tiếp LLM, không qua Guardrails.</p></div>
         </div>
         <div class="profile">
           <div class="avatar" id="profileAvatar">?</div>
@@ -47,7 +47,7 @@
         </div>
         <div class="header-actions">
           <button class="icon-btn" id="tasksBtn" aria-label="Công việc" title="Công việc" type="button">✓</button>
-          <span class="secure-pill">◉ Kết nối an toàn</span>
+          <span class="secure-pill" style="color: var(--danger-color); border-color: var(--danger-color);">⚠ KHÔNG có tường lửa</span>
           <button class="icon-btn" id="documentsBtn" aria-label="Kho tài liệu" title="Kho tài liệu" type="button">▤</button>
           <button class="icon-btn admin-only" id="adminBtn" aria-label="Quản trị" title="Quản trị" type="button" hidden>⌁</button>
           <button class="icon-btn" id="renameBtn" aria-label="Đổi tên hội thoại" title="Đổi tên" type="button">✎</button>
@@ -57,9 +57,9 @@
       <section class="messages" id="messages" aria-live="polite">
         <div class="welcome" id="welcome">
           <div class="bot-avatar hero">✦</div>
-          <p class="eyebrow accent">TRỢ LÝ AI AN TOÀN</p>
+          <p class="eyebrow accent" style="color: var(--danger-color);">TRỢ LÝ AI UNGUARDED</p>
           <h1>Xin chào, tôi có thể<br><em>giúp gì cho bạn?</em></h1>
-          <p class="welcome-copy">Hội thoại được lưu tự động. Câu trả lời chỉ hiển thị sau khi Guardrails kiểm tra.</p>
+          <p class="welcome-copy">Hội thoại được lưu tự động. <strong style="color: var(--danger-color);">Nguy cơ rò rỉ dữ liệu cao.</strong></p>
           <div class="suggestions">
             <button type="button" data-prompt="Tóm tắt các nguyên tắc bảo mật thông tin quan trọng">
               <span class="suggestion-icon violet">⌁</span><span><strong>Tóm tắt chính sách</strong><small>Nắm nhanh nội dung quan trọng</small></span><b>→</b>
@@ -184,6 +184,6 @@
   </dialog>
 
   <div class="toast" id="toast" role="status"></div>
-  <script src="app.js?v=20260806-3"></script>
+  <script src="app.js?v=20260806-6"></script>
 </body>
 </html>
