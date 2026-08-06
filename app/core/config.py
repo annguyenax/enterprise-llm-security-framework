@@ -68,6 +68,10 @@ class Settings:
     # (`app/retrieval/registry.py`), which fails closed on an unknown name.
     retriever_name: str = "sqlite_bm25"
     enterprise_kb_db_path: str = "data/enterprise-kb.db"
+    # Optional local semantic leg for workspace hybrid retrieval. Empty keeps
+    # the existing BM25-only behavior without downloading a model implicitly.
+    workspace_embedding_model: str = ""
+    ollama_embedding_base_url: str = "http://127.0.0.1:11434"
 
     def __post_init__(self) -> None:
         """Fail startup/construction on unsafe Phase 12C limits."""
@@ -141,6 +145,8 @@ def load_settings() -> Settings:
         rag_return_provenance=_str_to_bool(os.getenv("RAG_RETURN_PROVENANCE", "true")),
         retriever_name=os.getenv("RETRIEVER_NAME", "sqlite_bm25"),
         enterprise_kb_db_path=os.getenv("ENTERPRISE_KB_DB_PATH", "data/enterprise-kb.db"),
+        workspace_embedding_model=os.getenv("WORKSPACE_EMBEDDING_MODEL", ""),
+        ollama_embedding_base_url=os.getenv("OLLAMA_EMBEDDING_BASE_URL", "http://127.0.0.1:11434"),
     )
 
 

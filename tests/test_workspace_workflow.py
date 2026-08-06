@@ -2,6 +2,10 @@ from pathlib import Path
 
 import pytest
 
+from app.retrieval.enterprise_acl_bm25 import (
+    EnterpriseAclBm25Config,
+    EnterpriseAclBm25Retriever,
+)
 from app.workspace import store
 
 
@@ -39,6 +43,11 @@ def test_hierarchical_task_permissions_and_parent_progress(monkeypatch, tmp_path
 def test_role_scoped_database_context_and_private_conversations(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(store, "DB_PATH", tmp_path / "workspace.db")
     monkeypatch.setattr(store, "DOC_ROOT", tmp_path / "documents")
+    isolated_retriever = EnterpriseAclBm25Retriever(
+        EnterpriseAclBm25Config(db_path=str(tmp_path / "enterprise-kb.db"))
+    )
+    isolated_retriever.initialize()
+    monkeypatch.setattr(store, "_RETRIEVER", isolated_retriever)
     store.initialize()
     superadmin = _login("superadmin", "SuperAdmin#2026")
     leader = _login("it.leader", "ITLeader#2026")

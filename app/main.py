@@ -18,6 +18,7 @@ from fastapi import FastAPI
 
 from app.api.routes import router
 from app.core.config import settings
+from app.workspace import store as workspace_store
 from app.workspace.routes import router as workspace_router
 
 # Ollama is an explicitly enabled, local-only provider. Importing its module
@@ -30,6 +31,10 @@ if settings.llm_provider.strip().lower() == "ollama":
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Ensure the audit log directory exists before the app starts serving.
     Path(settings.log_path).parent.mkdir(parents=True, exist_ok=True)
+    # Workspace rows/files are authoritative. Reconcile them at service
+    # startup so bundled/seeded documents and metadata are searchable even
+    # when the retrieval database was created later.
+    workspace_store.synchronize_document_index()
     yield
 
 

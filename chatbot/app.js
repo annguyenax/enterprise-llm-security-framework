@@ -14,6 +14,7 @@ const state = {
 state.team = [];
 state.tasks = [];
 state.departments = [];
+state.uploading = false;
 
 const form = $('#chatForm');
 const input = $('#messageInput');
@@ -62,11 +63,16 @@ async function api(path, options = {}) {
   }
   if (!response.ok) {
     let detail = `HTTP ${response.status}`;
+    let securityReport = null;
     try {
       const error = await response.json();
       detail = typeof error.detail === 'string' ? error.detail : error.detail?.message || detail;
+      securityReport = error.detail?.security_report || null;
     } catch (_) { /* response was not JSON */ }
-    throw new Error(detail);
+    const error = new Error(detail);
+    error.status = response.status;
+    error.securityReport = securityReport;
+    throw error;
   }
   if (response.status === 204) return null;
   return response.json();
@@ -125,6 +131,54 @@ function addMessage(message, animate = false) {
   }
   messages.scrollTop = messages.scrollHeight;
   return Promise.resolve(node);
+}
+
+function addUploadStatus(file) {
+  showConversation();
+  const node = document.createElement('article');
+  node.className = 'message assistant upload-status scanning';
+  node.innerHTML = `<span class="message-bot-icon">&#128737;</span>
+    <div class="message-content"><div class="bubble upload-status-bubble">
+      <div class="upload-status-head"><strong>Đang kiểm tra tài liệu</strong><span>SCANNING</span></div>
+      <p>${escapeHtml(file.name)} · ${formatFileSize(file.size)}</p>
+      <small>Upload Scanner và RAG Guard đang kiểm tra tệp trước khi lưu.</small>
+    </div></div>`;
+  messageList.appendChild(node);
+  messages.scrollTop = messages.scrollHeight;
+  return node;
+}
+
+function securityReportHtml(report) {
+  if (!report?.stages?.length) return '';
+  const labels = { upload_scanner: 'Upload Scanner', antivirus: 'Antivirus', rag_guard: 'RAG Guard' };
+  return `<details class="security-report" open><summary>Chi tiết kiểm tra</summary>${report.stages.map(stage => {
+    const rules = stage.rule_ids?.length ? stage.rule_ids.join(', ') : 'không có rule khớp';
+    const reasons = stage.reasons?.length ? stage.reasons.join('; ') : 'không phát hiện dấu hiệu nguy hiểm';
+    return `<div class="security-stage"><b>${escapeHtml(labels[stage.stage] || stage.stage)}</b><span class="decision ${escapeHtml(stage.decision)}">${escapeHtml(stage.decision)}</span><small>Engine: ${escapeHtml(stage.engine || 'unknown')} · ${escapeHtml(rules)}</small><small>${escapeHtml(reasons)}</small></div>`;
+  }).join('')}</details>`;
+}
+
+function finishUploadStatus(node, kind, file, detail, decision = '', securityReport = null) {
+  node.className = `message assistant upload-status ${kind}`;
+  const labels = {
+    allow: ['Tài liệu an toàn và đã được lưu', 'ALLOW'],
+    sanitize: ['Tài liệu đã được làm sạch và lưu', 'SANITIZE'],
+    blocked: ['Tài liệu bị từ chối', 'BLOCKED'],
+    error: ['Không thể kiểm tra tài liệu', 'ERROR']
+  };
+  const [title, badge] = labels[kind] || labels.error;
+  node.querySelector('.upload-status-bubble').innerHTML = `
+    <div class="upload-status-head"><strong>${title}</strong><span>${badge}</span></div>
+    <p>${escapeHtml(file.name)} · ${formatFileSize(file.size)}</p>
+    <small>${escapeHtml(detail)}</small>
+    ${decision ? `<em>Guard decision: ${escapeHtml(decision)}</em>` : ''}
+    ${securityReportHtml(securityReport)}`;
+  messages.scrollTop = messages.scrollHeight;
+}
+
+function formatFileSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  return `${(bytes / 1024).toFixed(1)} KB`;
 }
 
 function animateAnswer(bubble, content) {
@@ -380,32 +434,83 @@ async function submitAuth(event) {
 
 async function openDocuments() {
   $('#documentsDialog').showModal();
-  const departments = await api('/departments');
-  $('#documentDepartment').innerHTML = departments.map(item => `<option value="${escapeHtml(item.code)}">${escapeHtml(item.name)}</option>`).join('');
   await loadDocuments();
 }
 
 async function loadDocuments() {
   const documents = await api('/documents');
   $('#documentList').innerHTML = documents.length ? documents.map(doc => `
-    <div class="document-row"><span>▤</span><div><strong>${escapeHtml(doc.filename)}</strong><small>${doc.scope} · ${doc.audience_role} · ${(doc.size_bytes / 1024).toFixed(1)} KB · ${doc.guard_decision}</small></div><button type="button" data-document-delete="${doc.id}">×</button></div>
+    <div class="document-row"><span>▤</span><div><strong>${escapeHtml(doc.filename)}</strong><small>${doc.scope} · ${doc.audience_role} · ${(doc.size_bytes / 1024).toFixed(1)} KB · ${doc.guard_decision} · quyền: ${escapeHtml(doc.access_reason || 'scope')}</small>${doc.allowed_users?.length || doc.allowed_groups?.length ? `<small>Chia sẻ: ${escapeHtml([...(doc.allowed_users || []), ...(doc.allowed_groups || [])].join(', '))}</small>` : ''}</div><button type="button" data-document-delete="${doc.id}">×</button></div>
   `).join('') : '<p class="empty-state">Chưa có tài liệu trong phạm vi của bạn.</p>';
 }
 
-async function uploadDocument(event) {
-  event.preventDefault();
-  const file = $('#documentFile').files[0];
+async function prepareUpload(file) {
   if (!file) return;
-  $('#uploadError').textContent = '';
+  if (!$('#documentDepartment').options.length) {
+    const departments = await api('/departments');
+    $('#documentDepartment').innerHTML = departments.map(item => `<option value="${escapeHtml(item.code)}">${escapeHtml(item.name)}</option>`).join('');
+    if (state.user?.department) $('#documentDepartment').value = state.user.department;
+  }
+  $('#chatUploadName').textContent = file.name;
+  $('#chatUploadSize').textContent = `${formatFileSize(file.size)} · kiểm tra trước khi lưu`;
+  $('#chatUploadPanel').hidden = false;
+}
+
+function clearUploadSelection() {
+  $('#documentFile').value = '';
+  $('#documentAllowedUsers').value = '';
+  $('#documentAllowedGroups').value = '';
+  $('#chatUploadPanel').hidden = true;
+}
+
+async function uploadDocument() {
+  const file = $('#documentFile').files[0];
+  if (!file || state.uploading) return;
+  await ensureConversation();
+  state.uploading = true;
+  $('#uploadDocumentBtn').disabled = true;
+  $('#clearUploadBtn').disabled = true;
+  const statusNode = addUploadStatus(file);
   try {
-    await api(`/documents?scope=${encodeURIComponent($('#documentScope').value)}&audience=${encodeURIComponent($('#documentAudience').value)}&department=${encodeURIComponent($('#documentDepartment').value)}`, {
+    const query = new URLSearchParams({
+      scope: $('#documentScope').value,
+      audience: $('#documentAudience').value,
+      department: $('#documentDepartment').value,
+      allowed_users: $('#documentAllowedUsers').value,
+      allowed_groups: $('#documentAllowedGroups').value
+    });
+    const result = await api(`/documents?${query}`, {
       method: 'POST', body: file,
       headers: { 'Content-Type': 'application/octet-stream', 'X-Filename': encodeURIComponent(file.name) }
     });
-    event.target.reset();
-    toast('Tài liệu đã qua kiểm tra và được lưu');
-    await loadDocuments();
-  } catch (error) { $('#uploadError').textContent = error.message; }
+    const systemCode = result.upload_scan?.detected_type === 'system-code';
+    finishUploadStatus(
+      statusNode,
+      'allow',
+      file,
+      systemCode
+        ? 'Đã nhận diện mã script/hệ thống, nhưng không phát hiện hành vi nguy hiểm. Tệp được phép lưu.'
+        : 'Không phát hiện nội dung nguy hiểm. Tệp đã được thêm vào kho tài liệu.',
+      result.guard_decision,
+      result.security_report
+    );
+    clearUploadSelection();
+    if ($('#documentsDialog').open) await loadDocuments();
+  } catch (error) {
+    const blocked = [400, 413, 415, 422].includes(error.status);
+    finishUploadStatus(
+      statusNode,
+      blocked ? 'blocked' : 'error',
+      file,
+      blocked ? `${error.message} Tệp không được lưu.` : error.message,
+      error.securityReport?.final_decision || '',
+      error.securityReport
+    );
+  } finally {
+    state.uploading = false;
+    $('#uploadDocumentBtn').disabled = false;
+    $('#clearUploadBtn').disabled = false;
+  }
 }
 
 async function openAdmin() {
@@ -542,7 +647,13 @@ $('#taskList').addEventListener('change', async event => {
   await api(`/tasks/${select.dataset.progress}/progress`, { method: 'PATCH', body: JSON.stringify({ progress: Number(select.value) }) });
   state.tasks = await api('/tasks'); renderTasks(); toast('Đã cập nhật tiến độ');
 });
-$('#uploadForm').addEventListener('submit', uploadDocument);
+$('#attachBtn').addEventListener('click', () => $('#documentFile').click());
+$('#documentFile').addEventListener('change', event => prepareUpload(event.target.files[0]).catch(error => {
+  clearUploadSelection();
+  addMessage({ role: 'assistant', content: `Không thể chuẩn bị tải tệp: ${error.message}`, decision: 'error' });
+}));
+$('#clearUploadBtn').addEventListener('click', clearUploadSelection);
+$('#uploadDocumentBtn').addEventListener('click', () => uploadDocument());
 $('#documentList').addEventListener('click', async event => {
   const button = event.target.closest('[data-document-delete]');
   if (!button || !confirm('Xóa tài liệu này?')) return;
@@ -550,7 +661,12 @@ $('#documentList').addEventListener('click', async event => {
   await loadDocuments();
 });
 $('#adminBtn').addEventListener('click', () => openAdmin().catch(error => toast(error.message)));
-document.querySelectorAll('[data-close]').forEach(button => button.addEventListener('click', () => $(`#${button.dataset.close}`).close()));
+document.addEventListener('click', event => {
+  const button = event.target.closest('[data-close]');
+  if (!button) return;
+  const dialog = document.getElementById(button.dataset.close);
+  if (dialog instanceof HTMLDialogElement && dialog.open) dialog.close();
+});
 $('#menuBtn').addEventListener('click', () => { sidebar.classList.add('open'); overlay.classList.add('show'); });
 overlay.addEventListener('click', closeMobileSidebar);
 

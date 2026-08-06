@@ -30,15 +30,33 @@ class OllamaLLMProvider(BaseLLMProvider):
             "Không suy đoán hoặc tiết lộ dữ liệu của người dùng/phòng ban khác. "
             "Khi trả lời về cơ cấu tổ chức, phải phân biệt rõ tổng tài khoản, SuperAdmin, Leader và nhân viên(member); không gọi Leader là nhân viên."
         )
-        if request.context_chunks:
-            context = "\n\n".join(f"[{c.metadata.get('filename', c.doc_id)}]\n{c.text}" for c in request.context_chunks)
-            system += "\n\nCONTEXT ĐÃ ĐƯỢC PHÂN QUYỀN:\n" + context
         messages = [{"role": "system", "content": system}]
         history = request.metadata.get("history", [])
         if isinstance(history, list):
             for item in history[-12:]:
                 if isinstance(item, dict) and item.get("role") in {"user", "assistant"} and isinstance(item.get("content"), str):
                     messages.append({"role": item["role"], "content": item["content"][:4000]})
+        if request.context_chunks:
+            context = "\n\n".join(
+                f"[{c.metadata.get('filename', c.doc_id)}]\n{c.text}"
+                for c in request.context_chunks
+            )
+            # Keep freshly retrieved evidence next to the current question. Small
+            # local models otherwise tend to copy an earlier assistant refusal
+            # from conversation history even after retrieval has been corrected.
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "CONTEXT HIỆN TẠI ĐÃ ĐƯỢC PHÂN QUYỀN VÀ ÁP DỤNG CHO CÂU HỎI KẾ TIẾP. "
+                        "Đây là nguồn dữ liệu ưu tiên cao nhất. Mỗi khối bắt đầu bằng [tên-file]. "
+                        "Nếu lịch sử trước đó nói file không tồn tại, không hợp lệ hoặc là mã độc "
+                        "nhưng file xuất hiện dưới đây, hãy coi nhận định cũ là lỗi thời và trả lời "
+                        "theo nội dung hiện tại. Không tự gọi tài liệu là mã độc và không trộn file khác."
+                        "\n\n" + context
+                    ),
+                }
+            )
         messages.append({"role": "user", "content": request.sanitized_prompt})
         payload = json.dumps({"model": self.model_name, "messages": messages, "stream": False, "think": False, "options": {"temperature": 0.4, "num_predict": 512}}).encode()
         http_request = Request(self.base_url + "/api/chat", data=payload, headers={"Content-Type": "application/json"}, method="POST")

@@ -13,7 +13,13 @@ from app.core.decisions import Decision
 from app.guards.rag_guard import evaluate_rag_context
 from app.schemas.requests import RAGContextChunk
 from app.services.gateway import run_chat
+from app.services.upload_scanner import scan_upload
 from app.workspace import store
+from app.workspace.file_parsing import (
+    SUPPORTED_TEXT_SUFFIXES,
+    FileParseError,
+    extract_text_from_bytes,
+)
 from app.workspace.history import MAX_REPLAYED_TURNS, screen_history
 
 router = APIRouter(prefix="/v1", tags=["workspace"])
@@ -170,21 +176,45 @@ def feedback(message_id: int, body: FeedbackBody, user: dict = Depends(actor)) -
 def documents(user: dict = Depends(actor)) -> list[dict]: return store.accessible_documents(user)
 
 
+@router.get("/documents/sharing-options")
+def document_sharing_options(user: dict = Depends(actor)) -> dict:
+    return store.sharing_options(user)
+
+
 @router.post("/documents")
-def upload_document(content: Annotated[bytes, Body()], scope: str = Query("user"), audience: str = Query("member"), department: str = Query(""), x_filename: Annotated[str | None, Header()] = None, user: dict = Depends(actor)) -> dict:
+def upload_document(content: Annotated[bytes, Body()], scope: str = Query("user"), audience: str = Query("member"), department: str = Query(""), allowed_users: str = Query(""), allowed_groups: str = Query(""), x_filename: Annotated[str | None, Header()] = None, user: dict = Depends(actor)) -> dict:
+    # Keep direct function-level tests/callers compatible with FastAPI's Query
+    # marker defaults; HTTP requests always provide plain strings here.
+    if not isinstance(allowed_users, str): allowed_users = ""
+    if not isinstance(allowed_groups, str): allowed_groups = ""
     if len(content)>1_000_000: raise HTTPException(413,"Tệp vượt quá giới hạn 1 MB")
     filename=unquote(x_filename or "document.txt")
-    if Path(filename).suffix.lower() not in (".txt",".md"): raise HTTPException(415,"Chỉ hỗ trợ TXT và Markdown")
-    try: text=content.decode("utf-8")
-    except UnicodeDecodeError: raise HTTPException(400,"Tệp phải dùng UTF-8")
+    suffix=Path(filename).suffix.lower()
+    if suffix not in SUPPORTED_TEXT_SUFFIXES:
+        raise HTTPException(415,"Chỉ hỗ trợ tài liệu văn bản, mã nguồn UTF-8 và PDF")
+    scan_result=scan_upload(filename,content)
+    if not scan_result.allowed:
+        message="Tệp bị Upload Scanner từ chối: "+(scan_result.reason or "Nội dung không an toàn")
+        stages=list(scan_result.checks) or [{"stage":"upload_scanner","engine":scan_result.engine,"decision":"block","rule_ids":[scan_result.rule_id] if scan_result.rule_id else [],"reasons":[scan_result.reason] if scan_result.reason else [],"detected_type":scan_result.detected_type}]
+        raise HTTPException(422,{"message":message,"security_report":{"final_decision":"block","stages":stages}})
+    try:
+        text, mime_type = extract_text_from_bytes(filename, content)
+    except FileParseError as exc:
+        raise HTTPException(400, str(exc)) from exc
     guard=evaluate_rag_context([RAGContextChunk(doc_id="upload",text=text,metadata={})])
-    if guard.decision in (Decision.BLOCK,Decision.HUMAN_REVIEW): raise HTTPException(422,"Tài liệu bị RAG Guard từ chối: "+"; ".join(guard.reasons))
-    # Store exactly what the guard approved. On SANITIZE that is the cleaned
-    # text -- writing the caller's original bytes would leave the removed
-    # content on disk and hand it back on every later retrieval.
-    stored_text=guard.sanitized_chunks[0].text if guard.decision==Decision.SANITIZE and guard.sanitized_chunks else text
-    if not stored_text.strip(): raise HTTPException(422,"Tài liệu không còn nội dung hợp lệ sau khi RAG Guard làm sạch")
-    try: return store.add_document(user,Path(filename).name,stored_text.encode("utf-8"),scope,audience,department or user["department"],guard_decision=guard.decision.value)
+    if guard.decision in (Decision.BLOCK,Decision.HUMAN_REVIEW,Decision.SANITIZE):
+        message="Tài liệu có nội dung không an toàn và đã bị từ chối toàn bộ: "+"; ".join(guard.reasons)
+        stages=list(scan_result.checks) or [{"stage":"upload_scanner","engine":scan_result.engine,"decision":"allow","rule_ids":[],"reasons":[],"detected_type":scan_result.detected_type}]
+        stages.append({"stage":"rag_guard","engine":"rag-context-guard","decision":guard.decision.value,"rule_ids":guard.matched_rules,"reasons":guard.reasons,"risk_score":guard.risk_score})
+        raise HTTPException(422,{"message":message,"security_report":{"final_decision":"block","stages":stages}})
+    if not text.strip(): raise HTTPException(422,"Tài liệu không có nội dung hợp lệ")
+    try:
+        stored=store.add_document(user,Path(filename).name,text.encode("utf-8"),scope,audience,department or user["department"],guard_decision=guard.decision.value,mime_type=mime_type or "text/plain",allowed_users=[value.strip() for value in allowed_users.split(",") if value.strip()],allowed_groups=[value.strip() for value in allowed_groups.split(",") if value.strip()])
+        stored["upload_scan"]={"engine":scan_result.engine,"detected_type":scan_result.detected_type}
+        stages=list(scan_result.checks) or [{"stage":"upload_scanner","engine":scan_result.engine,"decision":"allow","rule_ids":[],"reasons":[],"detected_type":scan_result.detected_type}]
+        stages.append({"stage":"rag_guard","engine":"rag-context-guard","decision":guard.decision.value,"rule_ids":guard.matched_rules,"reasons":guard.reasons,"risk_score":guard.risk_score})
+        stored["security_report"]={"final_decision":guard.decision.value,"stages":stages}
+        return stored
     except Exception as exc: raise translate_error(exc)
 
 

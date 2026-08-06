@@ -146,6 +146,7 @@ SELECT
     c.document_id         AS document_id,
     c.text                AS text,
     c.metadata_json       AS chunk_metadata_json,
+    d.metadata_json       AS document_metadata_json,
     d.title               AS title,
     d.source_id           AS source_id,
     d.source_type         AS source_type,
@@ -483,9 +484,13 @@ class EnterpriseAclBm25Retriever(Retriever):
         )
 
     def _row_to_hit(self, row: sqlite3.Row, index: int) -> RetrievalHit:
+        document_metadata = json.loads(row["document_metadata_json"])
+        if not isinstance(document_metadata, dict):
+            document_metadata = {}
         chunk_metadata = json.loads(row["chunk_metadata_json"])
         if not isinstance(chunk_metadata, dict):
             chunk_metadata = {}
+        document_metadata.update(chunk_metadata)
         roles = [
             r["role"] for r in self._acl_rows("document_acl_roles", "role", row["document_id"])
         ]
@@ -502,7 +507,7 @@ class EnterpriseAclBm25Retriever(Retriever):
             valid_from=row["valid_from"],
             valid_to=row["valid_to"],
         )
-        chunk_metadata.update(acl_metadata(facts))
+        document_metadata.update(acl_metadata(facts))
         return RetrievalHit(
             chunk_id=row["chunk_id"],
             document_id=row["document_id"],
@@ -514,8 +519,18 @@ class EnterpriseAclBm25Retriever(Retriever):
             source_type=row["source_type"],
             classification=row["classification"],
             trust_level=row["trust_level"],
-            metadata=chunk_metadata,
+            metadata=document_metadata,
         )
+
+    def document_ids_for_source(self, source_key: str) -> set[str]:
+        """Return IDs for one server-controlled source, for index reconciliation."""
+        with self._connection() as conn:
+            self._ensure_ready(conn)
+            rows = conn.execute(
+                "SELECT document_id FROM documents WHERE source_key = ?",
+                (source_key,),
+            ).fetchall()
+        return {str(row["document_id"]) for row in rows}
 
     def _acl_rows(self, table: str, column: str, document_id: str) -> list[sqlite3.Row]:
         # `table`/`column` are module-private literals, never caller input.

@@ -2,7 +2,10 @@
 
 Giao diện chatbot web kết nối với **LLM Security Gateway** trong workspace.
 Hỗ trợ tài khoản local, hội thoại SQLite, Markdown/code, phản hồi, dừng hiển
-thị, kho TXT/Markdown được quét và bảng audit cho quản trị viên.
+thị, upload tài liệu được quét ngay trong khung chat và bảng audit cho quản trị
+viên. Nút kẹp giấy trong composer mở trình chọn tệp; kết quả `ALLOW`,
+`SANITIZE`, `BLOCKED` hoặc lỗi được hiển thị thành một bubble trong cuộc trò
+chuyện. Hộp thoại Kho tài liệu chỉ dùng để xem và xóa tài liệu đã lưu.
 
 ## Chạy ứng dụng
 
