@@ -10,6 +10,10 @@ nội dung. Chỉ những tài liệu đã qua ACL của người đang hỏi m�
 embedding và xếp hạng semantic. Kết quả từ index tiếp tục được lọc lại bằng ACL
 workspace trước khi trở thành context cho LLM.
 
+Với `nomic-embed-text`, query và document dùng đúng tiền tố `search_query` /
+`search_document`. Tài liệu chưa có cache được xử lý theo batch nhỏ để lần truy
+vấn đầu không tạo một request embedding quá lớn.
+
 Không có model nào được tự tải. Để kích hoạt sau khi đã cài một model embedding
 trong Ollama:
 

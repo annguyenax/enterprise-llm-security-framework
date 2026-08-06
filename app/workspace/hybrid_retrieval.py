@@ -70,6 +70,9 @@ def semantic_rank(
     if not query.strip() or not documents or not model.strip():
         return []
     embedder = embedder or OllamaEmbedder(model, base_url)
+    uses_nomic_prefix = "nomic-embed-text" in model.casefold()
+    cache_model = model + ("|search-document-v1" if uses_nomic_prefix else "")
+    query_input = f"search_query: {query}" if uses_nomic_prefix else query
     prepared: list[tuple[dict[str, Any], str, str]] = []
     for document in documents:
         try:
@@ -84,28 +87,33 @@ def semantic_rank(
         for document, _text, content_hash in prepared:
             row = db.execute(
                 "SELECT vector_json FROM document_embeddings WHERE document_id=? AND model=? AND content_hash=?",
-                (document["id"], model, content_hash),
+                (document["id"], cache_model, content_hash),
             ).fetchone()
             if row is not None:
                 cached[str(document["id"])] = [float(value) for value in json.loads(row[0])]
 
     missing = [item for item in prepared if str(item[0]["id"]) not in cached]
-    inputs = [query] + [text for _document, text, _hash in missing]
-    vectors = embedder.embed(inputs)
-    query_vector = vectors[0]
+    query_vector = embedder.embed([query_input])[0]
     if missing:
         with connect_factory() as db:
-            for (document, _text, content_hash), vector in zip(missing, vectors[1:]):
-                cached[str(document["id"])] = vector
-                db.execute(
-                    """INSERT INTO document_embeddings(document_id,model,content_hash,vector_json,updated_at)
-                       VALUES(?,?,?,?,datetime('now'))
-                       ON CONFLICT(document_id,model) DO UPDATE SET
-                         content_hash=excluded.content_hash,
-                         vector_json=excluded.vector_json,
-                         updated_at=excluded.updated_at""",
-                    (document["id"], model, content_hash, json.dumps(vector)),
-                )
+            for start in range(0, len(missing), 8):
+                batch = missing[start:start + 8]
+                inputs = [
+                    f"search_document: {text}" if uses_nomic_prefix else text
+                    for _document, text, _hash in batch
+                ]
+                vectors = embedder.embed(inputs)
+                for (document, _text, content_hash), vector in zip(batch, vectors):
+                    cached[str(document["id"])] = vector
+                    db.execute(
+                        """INSERT INTO document_embeddings(document_id,model,content_hash,vector_json,updated_at)
+                           VALUES(?,?,?,?,datetime('now'))
+                           ON CONFLICT(document_id,model) DO UPDATE SET
+                             content_hash=excluded.content_hash,
+                             vector_json=excluded.vector_json,
+                             updated_at=excluded.updated_at""",
+                        (document["id"], cache_model, content_hash, json.dumps(vector)),
+                    )
 
     ranked = [
         (document, _cosine(query_vector, cached[str(document["id"])]))

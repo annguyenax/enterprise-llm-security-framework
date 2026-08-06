@@ -61,8 +61,9 @@ def test_semantic_rank_prefers_meaning_and_caches_document_vectors(tmp_path: Pat
 
     assert first[0][0]["id"] == "salary"
     assert second[0][0]["id"] == "salary"
-    assert len(embedder.calls[0]) == 3  # query plus two uncached documents
-    assert len(embedder.calls[1]) == 1  # only the query is recomputed
+    assert len(embedder.calls[0]) == 1  # query
+    assert len(embedder.calls[1]) == 2  # two uncached documents in one batch
+    assert len(embedder.calls[2]) == 1  # only the query is recomputed
 
 
 def test_ollama_embedder_rejects_non_local_endpoint():
