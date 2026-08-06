@@ -26,6 +26,11 @@ or errors. `optional` preserves local development availability but reports the
 antivirus stage as `unavailable`; `off` reports it as `disabled`. No uploaded
 bytes are included in the security report.
 
+Trên Windows có thể đặt đường dẫn tuyệt đối cho executable và thư mục chữ ký:
+`CLAMAV_COMMAND=C:\Program Files\ClamAV\clamscan.exe` và
+`CLAMAV_DATABASE_PATH=E:\TTTN\.clamav\database`. Database chữ ký là runtime
+artifact và không được commit vào repository.
+
 The built-in rules remain deterministic heuristics for this lab-scale
 proof-of-concept. ClamAV is signature scanning, not behavioral detonation. A
 full execution sandbox is not included and files are never executed by this

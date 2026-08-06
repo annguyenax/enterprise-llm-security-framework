@@ -142,3 +142,20 @@ def test_clamav_signature_blocks_upload(monkeypatch):
     assert result.allowed is False
     assert result.rule_id == "clamav-signature-detected"
     assert result.checks[-1]["engine"] == "clamav"
+
+
+def test_clamav_uses_configured_signature_database(monkeypatch, tmp_path):
+    captured = {}
+    monkeypatch.setenv("UPLOAD_ANTIVIRUS_MODE", "required")
+    monkeypatch.setenv("CLAMAV_DATABASE_PATH", str(tmp_path / "signatures"))
+    monkeypatch.setattr(upload_scanner.shutil, "which", lambda _command: "clamscan")
+
+    def fake_run(command, **_kwargs):
+        captured["command"] = command
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(upload_scanner.subprocess, "run", fake_run)
+    result = upload_scanner.scan_upload("sample.txt", b"synthetic scanner fixture")
+
+    assert result.allowed is True
+    assert f"--database={tmp_path / 'signatures'}" in captured["command"]

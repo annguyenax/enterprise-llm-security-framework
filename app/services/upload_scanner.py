@@ -280,13 +280,18 @@ def _scan_with_clamav(filename: str, content: bytes) -> UploadScanResult:
             reason="ClamAV chưa được cài đặt hoặc không có trong PATH.",
         )
     timeout_seconds = int(os.getenv("CLAMAV_TIMEOUT_SECONDS", "20"))
+    database_path = os.getenv("CLAMAV_DATABASE_PATH", "").strip()
     safe_name = Path(filename).name or "upload.bin"
     try:
         with tempfile.TemporaryDirectory(prefix="shield-av-") as directory:
             target = Path(directory) / safe_name
             target.write_bytes(content)
+            command = [executable, "--no-summary", "--infected"]
+            if database_path:
+                command.append(f"--database={database_path}")
+            command.append(str(target))
             completed = subprocess.run(
-                [executable, "--no-summary", "--infected", str(target)],
+                command,
                 capture_output=True,
                 text=True,
                 timeout=timeout_seconds,
