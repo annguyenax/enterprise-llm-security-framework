@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260806-5" />
+  <link rel="stylesheet" href="styles.css?v=20260806-7" />
   <link rel="stylesheet" href="glass.css?v=20260806-5" />
 </head>
 <body>
@@ -46,6 +46,7 @@
           <div><strong id="conversationTitle">Shield Assistant</strong><span><i></i> Ollama · Đang hoạt động</span></div>
         </div>
         <div class="header-actions">
+          <button class="icon-btn" id="baselineBtn" aria-label="Mở chatbot baseline không Guard" title="So sánh với Baseline AI" type="button">∅</button>
           <button class="icon-btn" id="tasksBtn" aria-label="Công việc" title="Công việc" type="button">✓</button>
           <span class="secure-pill">◉ Kết nối an toàn</span>
           <button class="icon-btn" id="documentsBtn" aria-label="Kho tài liệu" title="Kho tài liệu" type="button">▤</button>
@@ -141,8 +142,12 @@
     <div class="org-list" id="orgList"></div>
     <h3>Kháng cáo chờ xử lý</h3>
     <div class="appeal-queue" id="appealQueue"></div>
-    <h3>Sự kiện audit gần đây</h3>
-    <div class="audit-list" id="auditList"></div>
+    <div class="audit-section-head">
+      <div><h3>Cảnh báo bảo mật gần đây</h3><p>Chỉ hiển thị các trường hợp nguy hại hoặc cần xem xét</p></div>
+      <div class="audit-legend" aria-label="Chú thích trạng thái"><span class="sanitize">Làm sạch</span><span class="block">Bị chặn</span></div>
+    </div>
+    <div class="audit-toolbar" id="auditToolbar" role="group" aria-label="Lọc sự kiện audit"></div>
+    <div class="audit-list" id="auditList" aria-live="polite"></div>
   </dialog>
 
   <dialog class="modal" id="appealDialog">
@@ -184,6 +189,6 @@
   </dialog>
 
   <div class="toast" id="toast" role="status"></div>
-  <script src="app.js?v=20260806-3"></script>
+  <script src="app.js?v=20260806-8"></script>
 </body>
 </html>

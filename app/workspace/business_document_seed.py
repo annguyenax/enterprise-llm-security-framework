@@ -165,7 +165,23 @@ Mã hợp đồng giả lập: HDLD-DEMO-IT01. Chức danh: Kỹ sư phần mề
         """# Phiếu lương mẫu của it.user1 tháng 07/2026
 
 Lương cơ bản giả lập: 24 triệu đồng; phụ cấp giả lập: 2 triệu đồng; khấu trừ giả
-lập: 1,8 triệu đồng; thực nhận giả lập: 24,2 triệu đồng.""",
+        lập: 1,8 triệu đồng; thực nhận giả lập: 24,2 triệu đồng.""",
+    ),
+    _document(
+        "hop-dong-lao-dong-it-user2.md", "it.user2", "user", "member", "IT",
+        "employment_contract", "personal_confidential",
+        """# Hợp đồng lao động mẫu của it.user2
+
+Mã hợp đồng giả lập: HDLD-DEMO-IT02. Chức danh: Kỹ sư kiểm thử. Thời hạn mẫu:
+01/03/2026 đến 28/02/2027. Mức lương cơ bản giả lập: 22 triệu đồng mỗi tháng.""",
+    ),
+    _document(
+        "phieu-luong-it-user2-thang-07-2026.md", "it.user2", "user", "member", "IT",
+        "payslip", "personal_confidential",
+        """# Phiếu lương mẫu của it.user2 tháng 07/2026
+
+Lương cơ bản giả lập: 22 triệu đồng; phụ cấp giả lập: 1,8 triệu đồng; khấu trừ
+giả lập: 1,6 triệu đồng; thực nhận giả lập: 22,2 triệu đồng.""",
     ),
     _document(
         "hop-dong-lao-dong-hr-user1.md", "hr.user1", "user", "member", "HR",
@@ -181,15 +197,71 @@ mẫu: 01/02/2026 đến 31/01/2027. Mức lương cơ bản giả lập: 21 tri
         """# Phiếu lương mẫu của hr.user1 tháng 07/2026
 
 Lương cơ bản giả lập: 21 triệu đồng; phụ cấp giả lập: 1,5 triệu đồng; khấu trừ
-giả lập: 1,4 triệu đồng; thực nhận giả lập: 21,1 triệu đồng.""",
+        giả lập: 1,4 triệu đồng; thực nhận giả lập: 21,1 triệu đồng.""",
     ),
     _document(
-        "phieu-luong-it-leader-thang-07-2026.md", "it.leader", "user", "member", "IT",
+        "hop-dong-lao-dong-hr-user2.md", "hr.user2", "user", "member", "HR",
+        "employment_contract", "personal_confidential",
+        """# Hợp đồng lao động mẫu của hr.user2
+
+Mã hợp đồng giả lập: HDLD-DEMO-HR02. Chức danh: Chuyên viên tuyển dụng. Thời hạn
+mẫu: 01/04/2026 đến 31/03/2027. Mức lương cơ bản giả lập: 20 triệu đồng mỗi tháng.""",
+    ),
+    _document(
+        "phieu-luong-hr-user2-thang-07-2026.md", "hr.user2", "user", "member", "HR",
+        "payslip", "personal_confidential",
+        """# Phiếu lương mẫu của hr.user2 tháng 07/2026
+
+Lương cơ bản giả lập: 20 triệu đồng; phụ cấp giả lập: 1,2 triệu đồng; khấu trừ
+giả lập: 1,3 triệu đồng; thực nhận giả lập: 19,9 triệu đồng.""",
+    ),
+    _document(
+        "hop-dong-lao-dong-hr-leader.md", "hr.leader", "user", "leader", "HR",
+        "employment_contract", "personal_confidential",
+        """# Hợp đồng lao động mẫu của hr.leader
+
+Mã hợp đồng giả lập: HDLD-DEMO-HRL. Chức danh: Trưởng phòng Nhân sự. Thời hạn
+mẫu: 01/01/2026 đến 31/12/2027. Mức lương cơ bản giả lập: 34 triệu đồng mỗi tháng.""",
+    ),
+    _document(
+        "phieu-luong-hr-leader-thang-07-2026.md", "hr.leader", "user", "leader", "HR",
+        "payslip", "personal_confidential",
+        """# Phiếu lương mẫu của hr.leader tháng 07/2026
+
+Lương cơ bản giả lập: 34 triệu đồng; phụ cấp quản lý giả lập: 4,5 triệu đồng;
+khấu trừ giả lập: 2,8 triệu đồng; thực nhận giả lập: 35,7 triệu đồng.""",
+    ),
+    _document(
+        "hop-dong-lao-dong-it-leader.md", "it.leader", "user", "leader", "IT",
+        "employment_contract", "personal_confidential",
+        """# Hợp đồng lao động mẫu của it.leader
+
+Mã hợp đồng giả lập: HDLD-DEMO-ITL. Chức danh: Trưởng phòng Công nghệ thông tin.
+Thời hạn mẫu: 01/01/2026 đến 31/12/2027. Mức lương cơ bản giả lập: 36 triệu đồng mỗi tháng.""",
+    ),
+    _document(
+        "phieu-luong-it-leader-thang-07-2026.md", "it.leader", "user", "leader", "IT",
         "payslip", "personal_confidential",
         """# Phiếu lương mẫu của it.leader tháng 07/2026
 
 Lương cơ bản giả lập: 36 triệu đồng; phụ cấp quản lý giả lập: 5 triệu đồng; khấu
-trừ giả lập: 3 triệu đồng; thực nhận giả lập: 38 triệu đồng.""",
+        trừ giả lập: 3 triệu đồng; thực nhận giả lập: 38 triệu đồng.""",
+    ),
+    _document(
+        "hop-dong-lao-dong-superadmin.md", "superadmin", "user", "superadmin", "WORKSPACE",
+        "employment_contract", "restricted",
+        """# Hợp đồng lao động mẫu của superadmin
+
+Mã hợp đồng giả lập: HDLD-DEMO-SA. Chức danh: Giám đốc điều hành hệ thống mẫu.
+Thời hạn mẫu: 01/01/2026 đến 31/12/2028. Mức lương cơ bản giả lập: 48 triệu đồng mỗi tháng.""",
+    ),
+    _document(
+        "phieu-luong-superadmin-thang-07-2026.md", "superadmin", "user", "superadmin", "WORKSPACE",
+        "payslip", "restricted",
+        """# Phiếu lương mẫu của superadmin tháng 07/2026
+
+Lương cơ bản giả lập: 48 triệu đồng; phụ cấp điều hành giả lập: 8 triệu đồng;
+khấu trừ giả lập: 4,5 triệu đồng; thực nhận giả lập: 51,5 triệu đồng.""",
     ),
     _document(
         "phu-luc-thuong-dieu-hanh-2026.md", "superadmin", "user", "superadmin", "WORKSPACE",

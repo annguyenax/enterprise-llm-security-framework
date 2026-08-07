@@ -19,11 +19,11 @@ def test_business_seed_is_idempotent_and_enforces_acl(monkeypatch, tmp_path: Pat
 
     first = seed_business_documents()
     second = seed_business_documents()
-    assert len(first["created"]) == len(BUSINESS_DOCUMENTS) == 18
+    assert len(first["created"]) == len(BUSINESS_DOCUMENTS) == 27
     assert second == {
         "created": [],
         "skipped": [item["filename"] for item in BUSINESS_DOCUMENTS],
-        "total": 18,
+        "total": 27,
     }
 
     users = {user["username"]: user for user in store.users()}
@@ -42,12 +42,40 @@ def test_business_seed_is_idempotent_and_enforces_acl(monkeypatch, tmp_path: Pat
     assert "hop-dong-lao-dong-it-user1.md" not in visible["it.user2"]
     assert "hop-dong-lao-dong-hr-user1.md" not in visible["it.user1"]
 
+    for username in users:
+        own_private = {
+            doc["filename"] for doc in store.accessible_documents(users[username])
+            if doc["scope"] == "user" and doc["owner_user_id"] == users[username]["id"]
+        }
+        assert any(name.startswith("hop-dong-lao-dong-") for name in own_private), username
+        assert any(name.startswith("phieu-luong-") for name in own_private), username
+
     chunks, sources = store.retrieve(
         users["it.user1"], "đọc file hop-dong-lao-dong-it-user1.md"
     )
     assert len(chunks) == 1
     assert sources[0]["filename"] == "hop-dong-lao-dong-it-user1.md"
     assert "24 triệu đồng" in chunks[0].text
+
+    hr_leader_chunks, hr_leader_sources = store.retrieve(
+        users["hr.leader"], "lương của tôi"
+    )
+    assert hr_leader_sources[0]["filename"] == "phieu-luong-hr-leader-thang-07-2026.md"
+    assert "35,7 triệu đồng" in hr_leader_chunks[0].text
+
+    contract_chunks, contract_sources = store.retrieve(
+        users["hr.leader"], "hợp đồng lao động của tôi"
+    )
+    assert [source["filename"] for source in contract_sources] == [
+        "hop-dong-lao-dong-hr-leader.md"
+    ]
+    assert "hr.leader" in contract_chunks[0].text
+
+    _other_chunks, other_sources = store.retrieve(
+        users["hr.user1"], "lương của tôi"
+    )
+    assert other_sources[0]["filename"] == "phieu-luong-hr-user1-thang-07-2026.md"
+    assert all(source["filename"] != "phieu-luong-hr-leader-thang-07-2026.md" for source in other_sources)
 
 
 def test_explicit_user_and_group_grants_are_authoritative(monkeypatch, tmp_path: Path):

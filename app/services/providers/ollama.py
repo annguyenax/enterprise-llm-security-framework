@@ -49,6 +49,9 @@ class OllamaLLMProvider(BaseLLMProvider):
                     "role": "system",
                     "content": (
                         "CONTEXT HIỆN TẠI ĐÃ ĐƯỢC PHÂN QUYỀN VÀ ÁP DỤNG CHO CÂU HỎI KẾ TIẾP. "
+                        "Backend đã kiểm tra ACL: file xuất hiện ở đây nghĩa là người dùng hiện tại được phép đọc. "
+                        "Metadata audience là cấp vai trò tối thiểu, không phải vai trò duy nhất; Leader bao gồm quyền member. "
+                        "Không được tự từ chối một file đã có trong CONTEXT vì suy diễn lại role hoặc department. "
                         "Đây là nguồn dữ liệu ưu tiên cao nhất. Mỗi khối bắt đầu bằng [tên-file]. "
                         "Nếu lịch sử trước đó nói file không tồn tại, không hợp lệ hoặc là mã độc "
                         "nhưng file xuất hiện dưới đây, hãy coi nhận định cũ là lỗi thời và trả lời "

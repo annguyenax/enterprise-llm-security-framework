@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 from urllib.parse import unquote
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Response
@@ -12,9 +12,9 @@ from pydantic import BaseModel, Field
 from app.core.decisions import Decision
 from app.guards.rag_guard import evaluate_rag_context
 from app.schemas.requests import RAGContextChunk
-from app.services.gateway import run_chat
+from app.services.gateway import run_chat, run_unguarded_chat
 from app.services.upload_scanner import scan_upload
-from app.workspace import store
+from app.workspace import store, unguarded_store
 from app.workspace.file_parsing import (
     SUPPORTED_TEXT_SUFFIXES,
     FileParseError,
@@ -36,6 +36,15 @@ class ConversationBody(BaseModel):
 
 class MessageBody(BaseModel):
     content: str = Field(min_length=1, max_length=4000)
+
+
+class UnguardedHistoryItem(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=4000)
+
+
+class UnguardedChatBody(MessageBody):
+    history: list[UnguardedHistoryItem] = Field(default_factory=list, max_length=12)
 
 
 class FeedbackBody(BaseModel):
@@ -211,6 +220,65 @@ def post_message_unguarded(conversation_id: str, body: MessageBody, user: dict =
     return {"assistant_message":assistant,"provider_name":result.provider_name,"model_name":result.model_name}
 
 
+@router.post("/unguarded/chat")
+def unguarded_lab_chat(body: UnguardedChatBody, user: dict = Depends(actor)) -> dict:
+    chunks, sources = unguarded_store.retrieve(user, body.content)
+    started = time.perf_counter()
+    result = run_unguarded_chat(
+        body.content,
+        chunks,
+        {
+            "workspace_user_id": user["id"],
+            "role": user["role"],
+            "department": user["department"],
+            "history": [item.model_dump() for item in body.history],
+            "unguarded_lab": True,
+        },
+    )
+    return {
+        "response": result.response,
+        "provider_name": result.provider_name,
+        "model_name": result.model_name,
+        "sources": sources,
+        "latency_ms": round((time.perf_counter() - started) * 1000),
+        "guards_enabled": False,
+    }
+
+
+@router.get("/unguarded/documents")
+def unguarded_documents(user: dict = Depends(actor)) -> list[dict]:
+    return unguarded_store.documents(user)
+
+
+@router.post("/unguarded/documents")
+def upload_unguarded_document(
+    content: Annotated[bytes, Body()],
+    x_filename: Annotated[str | None, Header()] = None,
+    user: dict = Depends(actor),
+) -> dict:
+    if len(content) > 1_000_000:
+        raise HTTPException(413, "Tệp vượt quá giới hạn 1 MB")
+    filename = Path(unquote(x_filename or "document.txt")).name
+    if Path(filename).suffix.lower() not in SUPPORTED_TEXT_SUFFIXES:
+        raise HTTPException(415, "Định dạng tài liệu không được hỗ trợ")
+    try:
+        text, mime_type = extract_text_from_bytes(filename, content)
+    except FileParseError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not text.strip():
+        raise HTTPException(422, "Tài liệu không có nội dung có thể đọc")
+    return unguarded_store.add_document(
+        user, filename, text, mime_type or "text/plain", len(content)
+    )
+
+
+@router.delete("/unguarded/documents/{document_id}", status_code=204)
+def delete_unguarded_document(document_id: str, user: dict = Depends(actor)) -> Response:
+    if not unguarded_store.delete_document(user, document_id):
+        raise HTTPException(404, "Không tìm thấy tài liệu baseline")
+    return Response(status_code=204)
+
+
 @router.put("/messages/{message_id}/feedback", status_code=204)
 def feedback(message_id: int, body: FeedbackBody, user: dict = Depends(actor)) -> Response:
     try: store.set_feedback(user,message_id,body.value)
@@ -326,6 +394,55 @@ def admin_stats(user: dict = Depends(actor)) -> dict:
     if log.exists():
         for line in log.read_text(encoding="utf-8",errors="ignore").splitlines()[-100:]:
             try:
-                event=json.loads(line); decision=event.get("final_decision") or event.get("decision") or "unknown"; decisions[decision]=decisions.get(decision,0)+1; recent.append({"decision":decision,"request_id":event.get("request_id"),"timestamp":event.get("timestamp"),"matched_rules":event.get("matched_rules",[])})
+                event=json.loads(line)
+                decision=event.get("final_decision") or event.get("decision") or "unknown"
+                decisions[decision]=decisions.get(decision,0)+1
+                stages={}
+                matched_rules=[]
+                for stage_name, field_name in (("input", "input_decision"), ("rag", "rag_decision"), ("output", "output_decision")):
+                    raw_stage=event.get(field_name)
+                    if not isinstance(raw_stage,dict):
+                        continue
+                    rules=[str(rule) for rule in raw_stage.get("matched_rules",[]) if rule]
+                    matched_rules.extend(rules)
+                    stages[stage_name]={
+                        "decision":raw_stage.get("decision","unknown"),
+                        "risk_score":raw_stage.get("risk_score"),
+                        "matched_rules":rules,
+                    }
+                matched_rules.extend(str(rule) for rule in event.get("matched_rules",[]) if rule)
+                metadata=event.get("metadata") if isinstance(event.get("metadata"),dict) else {}
+                provider=event.get("provider") if isinstance(event.get("provider"),dict) else {}
+                recent.append({
+                    "decision":decision,
+                    "request_id":event.get("request_id"),
+                    "timestamp":event.get("timestamp"),
+                    "endpoint":event.get("endpoint"),
+                    "input_preview":event.get("input_preview"),
+                    "matched_rules":list(dict.fromkeys(matched_rules)),
+                    "reasons":[str(reason) for reason in event.get("reasons",[]) if reason],
+                    "stages":stages,
+                    "actor":{
+                        "user_id":metadata.get("workspace_user_id"),
+                        "role":metadata.get("role"),
+                        "department":metadata.get("department"),
+                    },
+                    "provider":{
+                        "name":provider.get("provider_name"),
+                        "model":provider.get("model_name"),
+                        "is_mock":provider.get("is_mock"),
+                    },
+                })
             except json.JSONDecodeError: pass
-    return {"workspace":counts,"users":all_users,"departments":store.departments(),"audit":{"total":sum(decisions.values()),"decisions":decisions,"recent":list(reversed(recent[-20:]))}}
+    dangerous_recent=[event for event in recent if event["decision"] != "allow"]
+    return {
+        "workspace":counts,
+        "users":all_users,
+        "departments":store.departments(),
+        "audit":{
+            "total":sum(decisions.values()),
+            "dangerous_total":sum(count for decision,count in decisions.items() if decision != "allow"),
+            "decisions":decisions,
+            "recent":list(reversed(dangerous_recent[-20:])),
+        },
+    }

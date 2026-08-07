@@ -63,5 +63,7 @@ def test_current_retrieval_is_after_stale_history(monkeypatch):
     assert "[it-ke-hoach-leader.md]" in messages[-2]["content"]
     assert "Leader IT tổng hợp báo cáo tuần." in messages[-2]["content"]
     assert "lỗi thời" in messages[-2]["content"]
+    assert "Backend đã kiểm tra ACL" in messages[-2]["content"]
+    assert "Leader bao gồm quyền member" in messages[-2]["content"]
     assert messages[-3]["role"] == "assistant"
     assert response.text == "Nội dung đúng"

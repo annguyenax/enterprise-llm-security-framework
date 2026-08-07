@@ -1,9 +1,13 @@
 # Bộ tài liệu nghiệp vụ mẫu
 
-`scripts/seed_business_documents.py` tạo 18 tài liệu hoàn toàn giả lập để thử
+`scripts/seed_business_documents.py` tạo 27 tài liệu hoàn toàn giả lập để thử
 nghiệm truy xuất và phân quyền của workspace proof-of-concept. Bộ dữ liệu gồm
 chính sách lương, mẫu/hồ sơ hợp đồng lao động, phiếu lương, báo cáo ngân sách và
 hợp đồng với đối tác giả lập.
+
+Mỗi tài khoản demo (`superadmin`, hai leader và bốn member) có một hợp đồng lao
+động cùng một phiếu lương cá nhân. Câu hỏi sở hữu như "lương của tôi" được định
+tuyến thẳng tới phiếu lương `scope=user` do chính tài khoản đang hỏi sở hữu.
 
 Metadata phân quyền được lưu ở bảng `documents`: `scope`, `audience_role`,
 `department`, `owner_user_id`, `mime_type` và `guard_decision`. Nội dung Markdown

@@ -444,7 +444,11 @@ def sharing_options(actor: dict[str, Any]) -> dict[str, list[str]]:
 
 def _filename_terms(value: str) -> set[str]:
     """Comparable ASCII terms for Vietnamese queries and slug-like names."""
-    normalized = unicodedata.normalize("NFKD", value.casefold())
+    # Vietnamese đ/Đ is a distinct letter and NFKD does not decompose it.
+    # Translate it explicitly so "hợp đồng" matches "hop-dong".
+    normalized = unicodedata.normalize(
+        "NFKD", value.casefold().translate(str.maketrans({"đ": "d"}))
+    )
     ascii_value = "".join(char for char in normalized if not unicodedata.combining(char))
     return {
         term
@@ -501,10 +505,33 @@ def retrieve(actor: dict[str, Any], query: str, limit: int = 4) -> tuple[list[An
         if direct is not None:
             return direct
 
+    # Possessive questions such as "lương của tôi" describe ownership, not a
+    # filename. Prefer the caller's own private payslip/contract before global
+    # policies or department aggregates can enter the context.
+    query_terms = _filename_terms(query)
+    personal_reference = {"cua", "toi"} <= query_terms or {"cua", "minh"} <= query_terms
+    if personal_reference:
+        own_documents = [
+            document for document in accessible
+            if document["scope"] == "user" and document["owner_user_id"] == actor["id"]
+        ]
+        category_terms: set[str] = set()
+        if "luong" in query_terms or {"thu", "nhap"} <= query_terms:
+            category_terms = {"phieu", "luong"}
+        elif {"hop", "dong"} <= query_terms:
+            category_terms = {"hop", "dong", "lao", "dong"}
+        personal_matches = [
+            document for document in own_documents
+            if category_terms and category_terms <= _filename_terms(str(document["filename"]))
+        ]
+        if len(personal_matches) == 1:
+            direct = _direct_document_context(personal_matches[0])
+            if direct is not None:
+                return direct
+
     # Natural-language references such as "file kế hoạch" should resolve a
     # unique slug-like filename (`it-ke-hoach-leader.md`) without mixing in
     # unrelated BM25 hits. Never guess when two accessible files tie.
-    query_terms = _filename_terms(query)
     scored = [
         (len(query_terms & _filename_terms(str(document["filename"]))), document)
         for document in accessible

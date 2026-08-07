@@ -15,6 +15,8 @@ state.team = [];
 state.tasks = [];
 state.departments = [];
 state.uploading = false;
+state.audit = null;
+state.auditFilter = 'attention';
 
 const form = $('#chatForm');
 const input = $('#messageInput');
@@ -664,6 +666,91 @@ async function resolveAppeal(card, status) {
   renderAppealQueue(await api('/admin/appeals'));
 }
 
+const AUDIT_DECISION_LABELS = {
+  allow: 'An toàn',
+  sanitize: 'Làm sạch',
+  block: 'Bị chặn',
+  human_review: 'Chờ duyệt',
+  log_only: 'Chỉ ghi log',
+  unknown: 'Chưa xác định'
+};
+
+function auditDecisionLabel(decision = 'unknown') {
+  return AUDIT_DECISION_LABELS[decision] || decision;
+}
+
+function formatAuditTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value || 'Không rõ thời gian';
+  return new Intl.DateTimeFormat('vi-VN', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', second: '2-digit'
+  }).format(date);
+}
+
+function auditStageHtml(name, stage) {
+  if (!stage) return `<div class="audit-stage muted"><span>${name}</span><b>Không chạy</b></div>`;
+  const decision = stage.decision || 'unknown';
+  const risk = typeof stage.risk_score === 'number' ? stage.risk_score.toFixed(2) : '—';
+  const rules = stage.matched_rules || [];
+  return `<div class="audit-stage ${escapeHtml(decision)}">
+    <span>${name}</span><b>${escapeHtml(auditDecisionLabel(decision))}</b><em>Rủi ro ${escapeHtml(risk)}</em>
+    ${rules.length ? `<small>${rules.map(rule => escapeHtml(rule)).join(' · ')}</small>` : ''}
+  </div>`;
+}
+
+function renderAudit() {
+  const audit = state.audit || { recent: [], decisions: {}, total: 0 };
+  const events = audit.recent || [];
+  const attentionCount = events.filter(event => event.decision !== 'allow').length;
+  const filters = [
+    ['attention', 'Tất cả cảnh báo', attentionCount],
+    ['block', 'Bị chặn', events.filter(event => event.decision === 'block').length],
+    ['sanitize', 'Làm sạch', events.filter(event => event.decision === 'sanitize').length],
+    ['human_review', 'Chờ duyệt', events.filter(event => event.decision === 'human_review').length]
+  ];
+  $('#auditToolbar').innerHTML = filters.map(([value, label, count]) => `
+    <button type="button" data-audit-filter="${value}" class="${state.auditFilter === value ? 'active' : ''}">
+      ${label}<b>${count}</b>
+    </button>`).join('');
+
+  const filtered = events.filter(event => state.auditFilter === 'attention'
+    ? event.decision !== 'allow'
+    : event.decision === state.auditFilter);
+  $('#auditList').innerHTML = filtered.length ? filtered.map(event => {
+    const decision = event.decision || 'unknown';
+    const actor = event.actor || {};
+    const provider = event.provider || {};
+    const requestId = event.request_id || '';
+    const shortId = requestId ? `${requestId.slice(0, 8)}…${requestId.slice(-4)}` : 'Không có ID';
+    const rules = event.matched_rules || [];
+    return `<article class="audit-card ${escapeHtml(decision)}">
+      <div class="audit-card-head">
+        <span class="audit-status ${escapeHtml(decision)}"><i></i>${escapeHtml(auditDecisionLabel(decision))}</span>
+        <span class="audit-endpoint">${escapeHtml(event.endpoint || 'Sự kiện hệ thống')}</span>
+        <time datetime="${escapeHtml(event.timestamp || '')}">${escapeHtml(formatAuditTime(event.timestamp))}</time>
+      </div>
+      <p class="audit-preview">${escapeHtml(event.input_preview || 'Không có bản xem trước nội dung.')}</p>
+      <div class="audit-context">
+        ${actor.role ? `<span>Vai trò: <b>${escapeHtml(actor.role)}</b></span>` : ''}
+        ${actor.department ? `<span>Phòng: <b>${escapeHtml(actor.department)}</b></span>` : ''}
+        ${actor.user_id ? `<span>User ID: <b>${escapeHtml(actor.user_id)}</b></span>` : ''}
+        ${provider.name ? `<span>LLM: <b>${escapeHtml(provider.name)}${provider.model ? ` / ${escapeHtml(provider.model)}` : ''}</b></span>` : ''}
+      </div>
+      <div class="audit-stages">
+        ${auditStageHtml('Input', event.stages?.input)}
+        ${auditStageHtml('RAG', event.stages?.rag)}
+        ${auditStageHtml('Output', event.stages?.output)}
+      </div>
+      ${rules.length ? `<div class="audit-rules"><strong>Rule kích hoạt</strong>${rules.map(rule => `<span>${escapeHtml(rule)}</span>`).join('')}</div>` : ''}
+      <div class="audit-card-foot">
+        <code title="${escapeHtml(requestId)}">${escapeHtml(shortId)}</code>
+        ${requestId ? `<button type="button" data-copy-request="${escapeHtml(requestId)}" aria-label="Sao chép request ID">Sao chép ID</button>` : ''}
+      </div>
+    </article>`;
+  }).join('') : '<p class="empty-state audit-empty">Chưa ghi nhận cảnh báo nguy hại phù hợp.</p>';
+}
+
 async function openAdmin() {
   const data = await api('/admin/stats');
   $('#adminDialog').showModal();
@@ -684,9 +771,9 @@ async function openAdmin() {
     const node = $('#appealQueue');
     if (node) node.innerHTML = `<p class="empty-state">Không tải được kháng cáo: ${escapeHtml(error.message)}</p>`;
   }
-  $('#auditList').innerHTML = data.audit.recent.length ? data.audit.recent.map(event => `
-    <div class="audit-row"><span class="decision ${event.decision}">${event.decision}</span><div><strong>${escapeHtml(event.request_id || '')}</strong><small>${escapeHtml(event.timestamp || '')}</small></div><small>${escapeHtml((event.matched_rules || []).join(', '))}</small></div>
-  `).join('') : '<p class="empty-state">Chưa có sự kiện audit.</p>';
+  state.audit = data.audit;
+  state.auditFilter = 'attention';
+  renderAudit();
 }
 
 function taskStatusLabel(status) {
@@ -829,6 +916,20 @@ $('#documentList').addEventListener('click', async event => {
   await loadDocuments();
 });
 $('#adminBtn').addEventListener('click', () => openAdmin().catch(error => toast(error.message)));
+$('#baselineBtn').addEventListener('click', () => { window.location.href = 'unguarded.html'; });
+$('#auditToolbar').addEventListener('click', event => {
+  const button = event.target.closest('[data-audit-filter]');
+  if (!button) return;
+  state.auditFilter = button.dataset.auditFilter;
+  renderAudit();
+});
+$('#auditList').addEventListener('click', event => {
+  const button = event.target.closest('[data-copy-request]');
+  if (!button) return;
+  navigator.clipboard.writeText(button.dataset.copyRequest)
+    .then(() => toast('Đã sao chép request ID'))
+    .catch(() => toast('Không thể sao chép request ID'));
+});
 document.addEventListener('click', event => {
   const button = event.target.closest('[data-close]');
   if (!button) return;
