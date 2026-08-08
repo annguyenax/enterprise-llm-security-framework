@@ -1,0 +1,84 @@
+{
+  "company": "Northwind Retail Group",
+  "document_count": 14,
+  "files": [
+    {
+      "path": "00-Dung-chung/chinh-sach-nghi-phep.md",
+      "sha256": "1bf455a54f26f9b71a4a8f2aa1779a24f10d6c23b61e634c7aad305d41b33701",
+      "size_bytes": 717
+    },
+    {
+      "path": "00-Dung-chung/noi-quy-lao-dong.md",
+      "sha256": "afd6ca12ddeb7218354c4599b4d250520eb1bb8ee6da1b7cd36e30d755089fd9",
+      "size_bytes": 870
+    },
+    {
+      "path": "00-Dung-chung/quy-dinh-an-toan-thong-tin.md",
+      "sha256": "8442a4493a0a5bced6799e269b5cf3fcce3d9f7f58175938300977dff2c10d54",
+      "size_bytes": 670
+    },
+    {
+      "path": "01-Ke-toan/Bao-cao-tai-chinh/bao-cao-tai-chinh-Q1-2026.md",
+      "sha256": "26bf251055e3ed22023678b512b6a87e34ede67eda464f8d8b229d80045cdf69",
+      "size_bytes": 953
+    },
+    {
+      "path": "01-Ke-toan/Hoa-don/danh-muc-hoa-don-thang-06-2026.md",
+      "sha256": "4170bd2bc29208e87e677c71fc3f8e0bcf46f9c3262d362b3fc91d4d36937dbd",
+      "size_bytes": 1006
+    },
+    {
+      "path": "01-Ke-toan/Thue/quyet-toan-thue-TNDN-2025.md",
+      "sha256": "4ab12b9eab1d8def2873151241cd30d5ec9770cd3480b7ced796e86925853ba2",
+      "size_bytes": 695
+    },
+    {
+      "path": "02-IT/Cau-hinh/runbook-khoi-phuc-he-thong-kho.md",
+      "sha256": "86267c56d95edb49bad2ab3fdc94bf1893e64330f4132989def51128ef545f3a",
+      "size_bytes": 959
+    },
+    {
+      "path": "02-IT/Huong-dan/huong-dan-dat-lai-mat-khau.md",
+      "sha256": "c11c5f31c398cdd37a367b905ad03f46ed4ccb1a1a6e660098545fd6b9b1cb83",
+      "size_bytes": 687
+    },
+    {
+      "path": "02-IT/Tai-lieu-ky-thuat/kien-truc-he-thong-kho.md",
+      "sha256": "e3ed5cdca8f50eea2af9d816bd6a4c6e741fffbb332f180d581e5f73023d3ad5",
+      "size_bytes": 717
+    },
+    {
+      "path": "03-Nhan-su/Cham-cong/quy-dinh-cham-cong.md",
+      "sha256": "5247e39d739601e5992a68bff6d6ca17b4a0fc72c28f4496caca8ef919c9dada",
+      "size_bytes": 602
+    },
+    {
+      "path": "03-Nhan-su/Hop-dong-lao-dong/hop-dong-lao-dong-mau.md",
+      "sha256": "07311641a0a2fc6022c325d840ae1b97954057c1fd60120d9940ea43360dfd01",
+      "size_bytes": 725
+    },
+    {
+      "path": "03-Nhan-su/Luong/bang-luong-thang-07-2026.md",
+      "sha256": "ea3bb074c7b0e76bfb27e480f4715a58b37e115c75a5afe3a8aaab7595f2f816",
+      "size_bytes": 1609
+    },
+    {
+      "path": "03-Nhan-su/Tuyen-dung/ke-hoach-tuyen-dung-2027.md",
+      "sha256": "d975196547ec95a9808d88709d6e12817fdb6f12a6a7b76fcd3d2aa1194716d9",
+      "size_bytes": 608
+    },
+    {
+      "path": "04-Quan-tri/du-an-hai-au-tom-tat.md",
+      "sha256": "49d9a6786e089b7477dc1de1aa0b179bdba3f9b9d3a47c16af694705b0cd0916",
+      "size_bytes": 735
+    }
+  ],
+  "manifest_status": "draft",
+  "schema_version": "enterprise-kb-full-1",
+  "sensitivity_counts": {
+    "confidential": 5,
+    "internal": 3,
+    "public": 3,
+    "restricted": 3
+  }
+}

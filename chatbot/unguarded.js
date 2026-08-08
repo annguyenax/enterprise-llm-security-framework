@@ -82,4 +82,16 @@ document.querySelectorAll('[data-prompt]').forEach(button => button.addEventList
 $('#newSessionBtn').addEventListener('click', resetSession); $('#uploadBtn').addEventListener('click', () => $('#uploadDialog').showModal()); $('#attachBtn').addEventListener('click', () => $('#uploadDialog').showModal());
 $('#closeUploadBtn').addEventListener('click', () => $('#uploadDialog').close()); $('#uploadDocumentBtn').addEventListener('click', uploadDocument);
 $('#documentList').addEventListener('click', async event => { const button = event.target.closest('[data-delete-document]'); if (!button) return; await api(`/unguarded/documents/${button.dataset.deleteDocument}`, { method:'DELETE' }); await loadDocuments(); toast('Đã xóa tài liệu baseline'); });
+
+// Log out so the demo can switch roles without going back to the guarded
+// page. The token is shared with Shield AI via localStorage, so this
+// invalidates the session server-side, clears it locally, and returns to
+// index.html where the login form lives (this page has no login form of its
+// own). `keepalive` lets the POST finish even though we navigate away.
+$('#logoutBtn')?.addEventListener('click', async () => {
+  try { await api('/auth/logout', { method: 'POST', keepalive: true }); } catch (_) { /* log out locally regardless */ }
+  localStorage.removeItem('shield_token');
+  window.location.href = 'index.html';
+});
+
 bootstrap();
