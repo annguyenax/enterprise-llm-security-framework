@@ -132,6 +132,21 @@ def initialize() -> None:
         for column in ("risk_input", "risk_rag", "risk_output"):
             if column not in existing:
                 db.execute(f"ALTER TABLE messages ADD COLUMN {column} REAL")
+        # Embedding vectors are additionally stored as raw little-endian
+        # float32 (`vector_f32`), L2-normalized at write time. `vector_json`
+        # is kept so an existing cache stays readable and can be backfilled
+        # lazily rather than forcing a full re-embed on upgrade.
+        #
+        # The BLOB is not a micro-optimization: `json.loads` on a 768-dim
+        # vector costs ~768 float parses per document per query, which is the
+        # same order as the cosine loop it was meant to replace. Reading a
+        # BLOB with `np.frombuffer` is a memcpy, so the vectorized dot
+        # product actually becomes the dominant cost instead of the parser.
+        embedding_columns = {row["name"] for row in db.execute("PRAGMA table_info(document_embeddings)")}
+        if "vector_f32" not in embedding_columns:
+            db.execute("ALTER TABLE document_embeddings ADD COLUMN vector_f32 BLOB")
+        if "dim" not in embedding_columns:
+            db.execute("ALTER TABLE document_embeddings ADD COLUMN dim INTEGER")
         if db.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:
             stamp = now()
             db.executemany("INSERT OR IGNORE INTO departments(code,name,created_at) VALUES(?,?,?)", (("WORKSPACE","Workspace",stamp),("IT","Phòng IT",stamp),("HR","Phòng Nhân sự",stamp)))

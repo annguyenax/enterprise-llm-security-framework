@@ -15,6 +15,13 @@ pydantic>=2.5,<3.0
 uvicorn[standard]>=0.27,<1.0
 pytest>=7.4,<9.0
 httpx>=0.26,<1.0
+
+# Vectorized cosine similarity for workspace hybrid retrieval
+# (app/workspace/hybrid_retrieval.py). Added on explicit request; it was
+# already present in the local .venv but missing here, so a clean install
+# would have failed at import. Wheels are prebuilt for every supported
+# platform, so this does not introduce a build toolchain requirement.
+numpy>=1.26,<3.0
 pypdf>=5.0,<7.0
 
 # python-dotenv intentionally NOT included: config.py reads plain

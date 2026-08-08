@@ -222,7 +222,7 @@ def post_message_unguarded(conversation_id: str, body: MessageBody, user: dict =
 
 @router.post("/unguarded/chat")
 def unguarded_lab_chat(body: UnguardedChatBody, user: dict = Depends(actor)) -> dict:
-    chunks, sources = unguarded_store.retrieve(user, body.content)
+    chunks, sources = store.retrieve(user, body.content)
     started = time.perf_counter()
     result = run_unguarded_chat(
         body.content,

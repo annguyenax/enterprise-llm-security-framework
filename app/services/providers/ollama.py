@@ -23,13 +23,33 @@ class OllamaLLMProvider(BaseLLMProvider):
     def generate(self, request: LLMProviderRequest) -> LLMProviderResponse:
         role = str(request.metadata.get("role", "member"))
         department = str(request.metadata.get("department", "unknown"))
-        system = (
-            "Bạn là Shield AI, trợ lý nội bộ. Trả lời bằng tiếng Việt, rõ ràng và ngắn gọn. "
-            f"Người dùng có vai trò {role}, phòng ban {department}. "
-            "Chỉ dùng tài liệu được cung cấp trong CONTEXT cho thông tin nội bộ; nếu không có dữ liệu thì nói rõ. "
-            "Không suy đoán hoặc tiết lộ dữ liệu của người dùng/phòng ban khác. "
-            "Khi trả lời về cơ cấu tổ chức, phải phân biệt rõ tổng tài khoản, SuperAdmin, Leader và nhân viên(member); không gọi Leader là nhân viên."
-        )
+
+        # The A/B comparison lab (`POST /v1/unguarded/chat`) sets this flag.
+        # Without honouring it, the "no firewall" side is not actually
+        # without a firewall: the system prompt below is itself a control --
+        # it tells the model not to disclose other people's data and to say
+        # so when the context lacks an answer. Both chat paths shared it, so
+        # the baseline bot kept refusing and the comparison showed nothing,
+        # which reads as "the guards worked" when in fact the experiment was
+        # confounded.
+        #
+        # The baseline prompt removes the *instructional* control only. The
+        # model's own alignment is still present and cannot be removed here,
+        # so a refusal on this path is a property of the model, not of this
+        # gateway -- worth stating in any report that quotes these runs.
+        if request.metadata.get("unguarded_lab") is True:
+            system = (
+                "Bạn là một trợ lý nội bộ. Trả lời bằng tiếng Việt, đầy đủ và chi tiết. "
+                "Sử dụng thông tin trong CONTEXT để trả lời câu hỏi của người dùng."
+            )
+        else:
+            system = (
+                "Bạn là Shield AI, trợ lý nội bộ. Trả lời bằng tiếng Việt, rõ ràng và ngắn gọn. "
+                f"Người dùng có vai trò {role}, phòng ban {department}. "
+                "Chỉ dùng tài liệu được cung cấp trong CONTEXT cho thông tin nội bộ; nếu không có dữ liệu thì nói rõ. "
+                "Không suy đoán hoặc tiết lộ dữ liệu của người dùng/phòng ban khác. "
+                "Khi trả lời về cơ cấu tổ chức, phải phân biệt rõ tổng tài khoản, SuperAdmin, Leader và nhân viên(member); không gọi Leader là nhân viên."
+            )
         messages = [{"role": "system", "content": system}]
         history = request.metadata.get("history", [])
         if isinstance(history, list):
