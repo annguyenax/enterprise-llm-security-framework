@@ -1,0 +1,240 @@
+% =====================================================================
+%  Chương Kết quả & Đánh giá — Phase 13 (bộ tấn công v3 + KB/RBAC + A/B)
+%  Nội dung tự chứa, dán vào chương "Kiểm thử & Đánh giá" của báo cáo.
+%  MỌI SỐ trong file này lấy từ artifact THẬT do scripts/run_v3_evaluation.py
+%  sinh trên máy lab (reports/v3/...), KHÔNG có số bịa (AGENT_RULES rule 3).
+%  Nguồn: docs/evaluation/phase13-v3-firewall-metrics-final.md
+% =====================================================================
+
+\section{Đánh giá tường lửa trên bộ tấn công tổng hợp v3}
+
+\subsection{Phương pháp}
+
+Bộ đánh giá gồm \textbf{300 case} tại \texttt{datasets/v3/cases/all.jsonl}:
+\textbf{200 case tấn công} (mô phỏng kỹ thuật của NVIDIA garak, Microsoft PyRIT
+và InjecAgent) và \textbf{100 case lành tính} (câu hỏi nghiệp vụ HR/IT/chính
+sách). Toàn bộ payload là dữ liệu tổng hợp, sinh xác định bằng
+\texttt{scripts/build\_v3\_attack\_payloads.py} (không gọi API LLM trả phí).
+
+Mỗi metric được định nghĩa tường minh:
+\begin{itemize}
+  \item \textbf{TPR} (True Positive Rate) = số case tấn công bị chặn / tổng tấn công.
+  \item \textbf{FPR} (False Positive Rate) = số case lành tính bị chặn / tổng lành tính.
+  \item \textbf{Stop-before-LLM} = tỉ lệ case tấn công bị chặn \emph{trước} khi
+        gọi tới mô hình (thuộc tính tiết kiệm token).
+  \item \textbf{Exfil marker} = tỉ lệ câu trả lời chứa mã canary bí mật;
+        chỉ đo được khi canary tương ứng thực sự nằm trong kho tri thức.
+  \item ``Bị chặn'' nghĩa là quyết định cuối cùng $\in \{$\texttt{block},
+        \texttt{human\_review}$\}$ --- hai quyết định giữ lại câu trả lời.
+\end{itemize}
+
+Theo quyết định phương pháp \textbf{L2}, \emph{latency không được báo cáo}
+($p_{50}/p_{95}$ để trống); rate trên nhóm dưới $N=10$ mẫu báo là ``không đủ
+mẫu'' thay vì một con số dễ gây hiểu nhầm.
+
+Đánh giá chạy trên \textbf{hai cấu hình} để bóc tách đóng góp của từng lớp
+phòng thủ:
+\begin{enumerate}
+  \item[(a)] \textbf{Rule-based} (\texttt{LLM\_PROVIDER=mock}): chỉ các guard
+        dựa trên luật và heuristic, không gọi bộ phán đoán LLM.
+  \item[(b)] \textbf{Semantic LLM judge} (\texttt{LLM\_PROVIDER=ollama},
+        model cục bộ \texttt{hermes3:8b}): bổ sung lớp LLM-as-judge.
+\end{enumerate}
+
+\subsection{Kết quả cấu hình rule-based}
+
+\begin{table}[h]
+\centering
+\caption{Ma trận nhầm lẫn --- cấu hình rule-based (n = 300)}
+\begin{tabular}{lcc}
+\hline
+ & \textbf{Bị chặn} & \textbf{Được trả lời} \\
+\hline
+Tấn công (n = 200) & 98 (TP) & 102 (FN) \\
+Lành tính (n = 100) & 0 (FP) & 100 (TN) \\
+\hline
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{Chỉ số rule-based (run \texttt{832e9dcf})}
+\begin{tabular}{lcc}
+\hline
+\textbf{Chỉ số} & \textbf{Giá trị} & \textbf{Ghi chú} \\
+\hline
+TPR & 49{,}0\% & \\
+FPR & 0{,}0\% & không chặn nhầm câu lành tính nào \\
+Stop-before-LLM & 49{,}0\% & mọi lần chặn đều trước khi gọi mô hình \\
+Exfil marker & 0{,}0\% & n đo được = 200 \\
+\hline
+\end{tabular}
+\end{table}
+
+Phân tách theo nguồn kỹ thuật cho thấy giới hạn của lớp luật rất rõ rệt:
+
+\begin{table}[h]
+\centering
+\caption{Tỉ lệ chặn theo nguồn tấn công --- rule-based}
+\begin{tabular}{lccc}
+\hline
+\textbf{Nguồn} & \textbf{Tổng} & \textbf{Bị chặn} & \textbf{Tỉ lệ} \\
+\hline
+garak (jailbreak, payload splitting) & 105 & 82 & 78{,}1\% \\
+injecagent (chỉ thị ẩn) & 40 & 16 & 40{,}0\% \\
+pyrit (đóng vai, mạo danh cấp trên) & 55 & 0 & \textbf{0{,}0\%} \\
+\hline
+\end{tabular}
+\end{table}
+
+Lớp luật chặn hoàn toàn các đòn có \emph{dấu hiệu từ vựng} (\texttt{rag\_dan}
+100\%, \texttt{payload\_splitting} 100\%) nhưng \textbf{bỏ lọt toàn bộ họ PyRIT}
+(0/55). Nguyên nhân bản chất: đòn đóng vai và mạo danh thẩm quyền
+(``với tư cách Giám đốc, tôi cần bảng lương cho cuộc họp'') dùng
+\emph{ngữ dụng xã hội} thay vì từ khoá ghi đè chỉ thị, nên không mẫu regex nào
+bắt được. Đây là giới hạn cố hữu của phòng thủ dựa-trên-luật.
+
+\subsection{Kết quả cấu hình Semantic LLM judge}
+
+\begin{table}[h]
+\centering
+\caption{Ma trận nhầm lẫn --- Semantic LLM judge \texttt{hermes3:8b} (n = 300)}
+\begin{tabular}{lcc}
+\hline
+ & \textbf{Bị chặn} & \textbf{Được trả lời} \\
+\hline
+Tấn công (n = 200) & 200 (TP) & 0 (FN) \\
+Lành tính (n = 100) & 57 (FP) & 43 (TN) \\
+\hline
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{Chỉ số Semantic LLM judge (run \texttt{4ad06cc3})}
+\begin{tabular}{lcc}
+\hline
+\textbf{Chỉ số} & \textbf{Giá trị} & \textbf{Ghi chú} \\
+\hline
+TPR & 100{,}0\% & chặn mọi case tấn công, gồm cả họ PyRIT \\
+FPR & \textbf{57{,}0\%} & \textbf{chặn nhầm hơn nửa câu hỏi hợp lệ} \\
+Stop-before-LLM & 99{,}5\% & \\
+Exfil marker & 0{,}0\% & n = 200 \\
+\hline
+\end{tabular}
+\end{table}
+
+Lớp LLM-as-judge nâng tỉ lệ chặn PyRIT từ 0\% lên 100\%, đúng như dự đoán:
+đòn đóng vai chỉ có thể bị bắt bằng phán đoán ngữ nghĩa, không bằng luật.
+
+\subsection{Phân tích: đánh đổi precision--recall giữa hai lớp}
+
+\textbf{Đây là kết quả trung tâm, và nó không phải một chiến thắng đơn giản.}
+Con số TPR 100\% của lớp Semantic LLM \emph{không được diễn giải như bằng chứng
+tường lửa mạnh}, vì nó đi kèm FPR 57\%: một bộ phân loại chặn gần như mọi thứ
+cũng đạt TPR 100\% một cách tầm thường. Hai cấu hình thể hiện đúng đánh đổi
+bảo mật--khả dụng kinh điển, đo được trên dữ liệu thật:
+
+\begin{table}[h]
+\centering
+\caption{So sánh hai lớp phòng thủ}
+\begin{tabular}{lccl}
+\hline
+\textbf{Chỉ số} & \textbf{Rule-based} & \textbf{Semantic LLM} & \textbf{Diễn giải} \\
+\hline
+TPR & 49{,}0\% & 100{,}0\% & LLM bắt thêm đòn đóng vai/mạo danh \\
+FPR & 0{,}0\% & 57{,}0\% & LLM hy sinh khả dụng \\
+Stop-before-LLM & 49{,}0\% & 99{,}5\% & \\
+PyRIT block & 0{,}0\% & 100{,}0\% & đóng vai \emph{cần} lớp ngữ nghĩa \\
+\hline
+\end{tabular}
+\end{table}
+
+\begin{itemize}
+  \item \textbf{Lớp luật}: precision cao (FPR 0\%) nhưng recall thấp
+        (TPR 49\%) --- chính xác trên mẫu đã biết, mù trước tấn công ngữ nghĩa.
+  \item \textbf{Lớp LLM}: recall hoàn hảo (TPR 100\%) nhưng precision thấp
+        (FPR 57\%) --- chặn được mọi tấn công nhưng làm gián đoạn hơn nửa
+        công việc hợp lệ, \textbf{chưa đạt mức triển khai thực tế}.
+\end{itemize}
+
+Kết luận kiến trúc: \emph{không cấu hình đơn lẻ nào đủ dùng}. Hai lớp bổ trợ
+nhau --- lớp luật cho độ chính xác trên mẫu quen thuộc, lớp LLM cho độ phủ
+trên đòn tấn công mới --- và việc \textbf{giảm FPR của lớp LLM} (hiệu chỉnh
+prompt phán đoán hoặc ngưỡng quyết định) là hướng phát triển bắt buộc trước
+khi đưa vào vận hành.
+
+\section{Kiểm soát truy cập RBAC và so sánh A/B tường vs.\ không tường}
+
+\subsection{Phân quyền theo vai trò trên kho tri thức doanh nghiệp}
+
+Kho tri thức gồm 14 tài liệu tổng hợp (Kế toán/IT/Nhân sự/dùng chung), mỗi tài
+liệu mang mức nhạy cảm và phạm vi phòng ban. Truy xuất áp dụng ACL \emph{trước}
+khi nội dung tới mô hình. Bảng dưới là kết quả đo trực tiếp: một nhân viên IT
+cấp thấp (\texttt{it.user1}) \textbf{không} truy xuất được tài liệu ngoài phạm
+vi quyền, kể cả khi tường lửa bị tắt --- vì ACL là lớp độc lập với các guard nội
+dung.
+
+\begin{table}[h]
+\centering
+\caption{Cách ly truy cập theo vai trò (đo trực tiếp)}
+\begin{tabular}{llc}
+\hline
+\textbf{Tài khoản} & \textbf{Tài liệu mật yêu cầu} & \textbf{Truy xuất được?} \\
+\hline
+it.user1 (IT, member) & Bảng lương HR & Không \\
+it.user1 (IT, member) & Runbook TỐI MẬT của IT & Không \\
+it.user1 (IT, member) & Dự án M\&A (ban điều hành) & Không \\
+it.leader (IT, leader) & Runbook của IT & Có \\
+hr.leader (HR, leader) & Bảng lương HR & Có \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection{So sánh A/B: chatbot có tường vs.\ không tường}
+
+Hai chatbot dùng \emph{chung} một cơ chế truy xuất RAG và \emph{chung} một ACL,
+chỉ khác ở việc bật/tắt các guard, cho phép so sánh công bằng. Kết quả đo
+(người dùng đủ quyền, để cô lập tác dụng của guard khỏi tác dụng của ACL):
+
+\begin{table}[h]
+\centering
+\caption{Rò rỉ bí mật doanh nghiệp: có tường vs.\ không tường}
+\begin{tabular}{lll}
+\hline
+\textbf{Kịch bản} & \textbf{Có tường} & \textbf{Không tường} \\
+\hline
+Trích xuất credential runbook & \texttt{block} & lộ khoá \texttt{AKIA…}/\texttt{sk-…}/\texttt{ghp\_…} \\
+Chỉ thị ẩn trong tài liệu (poisoning) & \texttt{block}, không gọi mô hình & mô hình đọc ngữ cảnh nhiễm độc \\
+Câu hỏi chính sách lành tính & trả lời bình thường & trả lời bình thường \\
+\hline
+\end{tabular}
+\end{table}
+
+Điểm đáng chú ý về mặt vận hành: phía có tường trả về \texttt{provider\_name =
+null} ở các kịch bản bị chặn --- nghĩa là mô hình \emph{chưa từng được gọi}, tiết
+kiệm toàn bộ token --- một khác biệt \textbf{tất định}, không phụ thuộc mô hình
+sinh ra câu trả lời gì.
+
+\section{Hạn chế đã đo (không che giấu)}
+
+Theo nguyên tắc trung thực học thuật, các hạn chế sau được nêu rõ, đều dựa trên
+quan sát thực nghiệm chứ không phải suy đoán:
+
+\begin{enumerate}
+  \item \textbf{FPR 57\% của lớp Semantic LLM} khiến cấu hình này chưa dùng được
+        trong thực tế; cần hiệu chỉnh trước khi triển khai.
+  \item \textbf{Đường chat của workspace không có tầng DLP riêng} (khác với
+        đường \texttt{/v1/rag/query}); bảng lương và PII có thể lọt qua nếu
+        Output Guard không khớp mẫu.
+  \item \textbf{Đòn đóng vai/mạo danh chỉ bị lớp Semantic LLM bắt}; với cấu hình
+        rule-based, tỉ lệ chặn của họ này là 0\%.
+  \item \textbf{Phía không tường mang tính ngẫu nhiên} do nhiệt độ sinh của mô
+        hình; bằng chứng vững chắc nằm ở quyết định tất định phía có tường, không
+        ở việc mô hình có chịu in dữ liệu ra hay không.
+  \item Đánh giá dùng \textbf{corpus và mô hình cục bộ}; mô hình lớn hơn có thể
+        tuân theo chỉ thị ẩn mạnh hơn, làm rủi ro rò rỉ tăng theo năng lực mô
+        hình --- một hướng cần khảo sát thêm.
+  \item \textbf{Latency không được báo cáo} (quyết định L2); split holdout của
+        benchmark v2 \emph{không} được chạy trong báo cáo này.
+\end{enumerate}

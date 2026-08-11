@@ -1,0 +1,82 @@
+\documentclass[a4paper,oneside]{book}
+\input{styles/settings}
+\begin{document}
+\frontmatter
+\pagenumbering{roman}
+
+% --- Bìa ngoài ---
+\coverpage
+% --- Bìa đệm ---
+\coverpageinner
+
+% --- Phiếu giao đề cương TTTN được phê duyệt ---
+\input{pages/approved-proposal-placeholder}
+
+% --- Mục lục ---
+\cleardoublepage
+\begin{spacing}{1.15}
+\tableofcontents
+\end{spacing}
+
+% --- Lời cảm ơn ---
+\input{pages/acknowledgments}
+
+% --- Thuật ngữ và từ viết tắt ---
+\input{pages/abbreviations}
+
+% --- Danh mục bảng ---
+\cleardoublepage
+\phantomsection
+\addcontentsline{toc}{chapter}{Danh mục các bảng}
+\chapter*{DANH MỤC CÁC BẢNG}
+\begingroup
+\singlespacing
+\makeatletter
+\@starttoc{lot}
+\makeatother
+\endgroup
+
+% --- Danh mục hình ---
+\cleardoublepage
+\phantomsection
+\addcontentsline{toc}{chapter}{Danh mục các hình vẽ, sơ đồ}
+\chapter*{DANH MỤC CÁC HÌNH VẼ, SƠ ĐỒ}
+\begingroup
+\singlespacing
+\makeatletter
+\@starttoc{lof}
+\makeatother
+\endgroup
+
+% --- Kế hoạch thực hiện công việc nhóm ---
+\cleardoublepage
+\input{pages/group-work-plan}
+
+% --- Phần nội dung chính ---
+\mainmatter
+\pagenumbering{arabic}
+\input{chapters/chap-0.phan-mo-dau}
+\input{chapters/chap-1-background}
+\input{chapters/chap-2-method}
+\input{chapters/chap-3}
+\input{chapters/chap4}
+\input{chapters/conclusion}
+
+% --- Phụ lục ---
+\appendix
+\titleformat{name=\chapter}[block]
+  {\normalfont\fontsize{14pt}{20pt}\bfseries\centering}
+  {Phụ lục \thechapter.}{1em}{\MakeUppercase}
+\renewcommand{\cftchappresnum}{Phụ lục }
+\input{chapters/appendix}
+
+% --- Tài liệu tham khảo ---
+\cleardoublepage
+\phantomsection
+\addcontentsline{toc}{chapter}{Danh mục tài liệu tham khảo}
+\chapter*{DANH MỤC TÀI LIỆU THAM KHẢO}
+\markboth{DANH MỤC TÀI LIỆU THAM KHẢO}{}
+\bibliographystyle{plain}
+\bibliography{refs}
+
+\end{document}

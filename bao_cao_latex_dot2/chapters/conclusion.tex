@@ -1,0 +1,31 @@
+\chapter*{Kết luận và kiến nghị}
+\addcontentsline{toc}{chapter}{Kết luận và kiến nghị}
+\markboth{KẾT LUẬN VÀ KIẾN NGHỊ}{}
+
+\section*{Kết quả chính đã đạt được}
+
+Đề tài đã hoàn thành một vòng khép kín ở quy mô lab: khảo sát rủi ro LLM/RAG; thiết kế và hiện thực gateway/guard cùng pipeline RAG demo; xây dựng công cụ đóng gói và kiểm tra gói phát hành; tổ chức kiểm thử tự động với kết quả đạt ở các nhóm release/CI/policy/readiness/full suite đã báo cáo; cố định định danh mã nguồn và candidate đã rà soát.
+
+\section*{Mức độ hoàn thành mục tiêu}
+
+Các mục tiêu về xây dựng khung kiểm soát, kiểm thử có kiểm soát và minh bạch hạn chế bằng chứng cơ bản đã đạt trong phạm vi lab. Mục tiêu đánh giá trên holdout và trên LLM thật \textbf{chưa} nằm trong kết quả submission này.
+
+\section*{Ý nghĩa thực tiễn}
+
+Kết quả phục vụ đào tạo và nghiên cứu: minh họa guardrail rule-based, quy trình fail-closed, và kỷ luật phát hành artifact. Không thay thế giải pháp bảo mật doanh nghiệp.
+
+\section*{Hạn chế}
+
+Chưa chạy holdout; chưa đánh giá hiệu quả bảo mật thực tế; \texttt{NOT\_CHECKED} về lỗ hổng phụ thuộc; không production/enterprise-ready; không tag/public release; không tự xướng PASS cấp dự án. Số liệu đánh giá tổng hợp không suy rộng ra môi trường thật.
+
+\section*{Hướng phát triển và kiến nghị}
+
+\begin{enumerate}
+    \item Bổ sung phiếu giao đề cương đã ký và hình sơ đồ kỹ thuật chi tiết.
+    \item Khi được uỷ quyền, chạy holdout one-shot và báo cáo trung thực.
+    \item Mở rộng đọc toàn văn tài liệu học thuật còn để mức xác minh tồn tại.
+    \item (Tuỳ chọn) thí nghiệm Real LLM tách bạch claim khỏi Mock Provider.
+    \item Maintainer/giảng viên hướng dẫn phán quyết mức độ chấp nhận đồ án trên bằng chứng đã nộp.
+\end{enumerate}
+
+Báo cáo này là quyển báo cáo thực tập tốt nghiệp/đồ án học thuật, \textbf{không} phải báo cáo tiến độ hay biên bản audit, và \textbf{không} tự phát hành kết luận ``dự án đã PASS'' vượt thẩm quyền giảng viên/người duy trì.

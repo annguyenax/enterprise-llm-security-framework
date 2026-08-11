@@ -1,0 +1,47 @@
+\chapter*{Mở đầu}
+\addcontentsline{toc}{chapter}{Mở đầu}
+\markboth{MỞ ĐẦU}{}
+
+\section*{Lý do chọn đề tài}
+
+Trong những năm gần đây, mô hình ngôn ngữ lớn (Large Language Model --- LLM) được tích hợp ngày càng sâu vào các hệ thống truy vấn tri thức, trợ lý nội bộ và kiến trúc sinh văn bản tăng cường truy hồi (Retrieval-Augmented Generation --- RAG). Lợi ích về khả năng hiểu ngôn ngữ tự nhiên đi kèm các rủi ro an toàn đặc thù: tấn công chèn chỉ dẫn (prompt injection), rò rỉ dữ liệu nhạy cảm, đầu ra không an toàn, và sai lệch do dữ liệu hoặc thành phần tích hợp. Việc chỉ dựa vào mô hình ``tự phòng thủ'' là không đủ trong bối cảnh học thuật và lab-scale khi cần cơ chế kiểm soát có thể kiểm thử, tái lập và giải thích được.
+
+\section*{Bối cảnh và vấn đề}
+
+Hệ thống RAG kết hợp kho tài liệu với LLM, tạo ra bề mặt tấn công mới: nội dung tài liệu có thể chứa chỉ dẫn độc hại (indirect injection); đầu vào người dùng có thể cố ghi đè chỉ dẫn hệ thống; đầu ra có thể vô tình phát tán chuỗi nhạy cảm. Đồng thời, khi đóng gói và bàn giao mã nguồn/đồ án, cần đảm bảo gói phát hành không lẫn dữ liệu thô, đường dẫn không an toàn hay cấu trúc lưu trữ không chuẩn. Bài toán của đề tài là xây dựng và kiểm thử một \textbf{khung kiểm soát an toàn} (guardrail / release-assurance) ở quy mô lab, dùng dữ liệu tổng hợp và mô hình giả lập, phục vụ nghiên cứu và đánh giá có kiểm soát --- không thay thế hệ thống bảo mật production.
+
+\section*{Mục tiêu}
+
+\begin{enumerate}
+    \item Khảo sát rủi ro an toàn liên quan LLM/RAG và các nguyên tắc kiểm soát đầu vào, đầu ra, chính sách và ghi nhận.
+    \item Phân tích yêu cầu, thiết kế kiến trúc khung kiểm soát và luồng xử lý.
+    \item Xây dựng các thành phần: gateway/guard, pipeline RAG demo, công cụ đóng gói và kiểm tra gói phát hành.
+    \item Tổ chức kiểm thử tự động, đánh giá kết quả trên dữ liệu tổng hợp, và nêu rõ hạn chế bằng chứng.
+\end{enumerate}
+
+\section*{Đối tượng và phạm vi}
+
+\textbf{Đối tượng:} cơ chế guardrail cho ứng dụng RAG/LLM lab-scale; công cụ kiểm tra gói phát hành và chính sách include/exclude. \textbf{Phạm vi:} dữ liệu tổng hợp 100\%; Mock LLM Provider ngoại tuyến; không gọi API trả phí; không holdout benchmark như thí nghiệm cuối trong báo cáo này; không tuyên bố production-ready hay enterprise-ready.
+
+\section*{Phương pháp}
+
+Nhóm kết hợp nghiên cứu tài liệu (OWASP LLM Top 10, LLMSVS và các công trình liên quan đã xác minh tồn tại), thiết kế có kiểm soát, hiện thực phần mềm, kiểm thử tự động và xác minh độc lập (kỹ thuật, phương pháp). Số liệu đánh giá chỉ lấy từ lần chạy/script có thể tái lập.
+
+\section*{Đóng góp chính}
+
+\begin{itemize}
+    \item \textbf{Kiến trúc phòng thủ nhiều lớp} cho ứng dụng RAG/LLM: Input
+    Guard, RAG Context Guard, Output Guard/DLP và Semantic Judge, kết hợp
+    quyết định theo nguyên tắc fail-closed.
+    \item \textbf{Cơ chế truy hồi lai được tối ưu} (BM25 kết hợp embedding ngữ
+    nghĩa, vector \texttt{float32} lưu BLOB và chấm điểm bằng nhân ma trận), kèm
+    \textbf{kiểm soát truy cập theo vai trò} (RBAC) áp dụng trước truy hồi.
+    \item \textbf{Khung so sánh A/B có tường vs.\ không tường} trên cùng một cơ
+    chế RAG, cho phép đo tách bạch tác dụng của tường lửa.
+    \item \textbf{Bộ đánh giá bảo mật tổng hợp} (300 case tấn công/lành tính) và
+    quy trình đo các chỉ số TPR/FPR/Stop-before-LLM/Exfil trên hai cấu hình
+    guard, trung thực về hạn chế và không báo cáo số liệu chưa đo được.
+    \item \textbf{Công cụ đóng gói và kiểm tra gói phát hành} bảo đảm tính toàn
+    vẹn (allowlist, kiểm tra ZIP/đường dẫn, đầu ra content-free, verify trước
+    khi phát hành).
+\end{itemize}

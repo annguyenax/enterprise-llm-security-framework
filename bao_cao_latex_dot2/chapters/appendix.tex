@@ -1,0 +1,75 @@
+\chapter{Cấu trúc thư mục và thành phần mã nguồn}
+\label{ap:source-tree}
+\markboth{PHỤ LỤC \Alph{chapter}. CẤU TRÚC THƯ MỤC VÀ THÀNH PHẦN MÃ NGUỒN}{}
+
+\begin{itemize}
+    \item \texttt{app/} --- gateway, guards, RAG pipeline, mock provider.
+    \item \texttt{scripts/} --- đánh giá, verify phase, release builder/verifier.
+    \item \texttt{tests/} --- pytest (release, CI, chức năng).
+    \item \texttt{datasets/v2/} --- benchmark đóng băng (không nằm trong claim holdout).
+    \item \texttt{release/} --- allowlist và tài liệu chính sách phát hành.
+    \item \texttt{docs/} --- thiết kế, quyết định, hướng dẫn.
+\end{itemize}
+
+\chapter{Danh sách nhóm kịch bản kiểm thử}
+\label{ap:test-groups}
+\markboth{PHỤ LỤC \Alph{chapter}. DANH SÁCH NHÓM KỊCH BẢN KIỂM THỬ}{}
+
+Bộ đánh giá bảo mật tổng hợp gồm 300 case: 200 case tấn công theo các họ kỹ thuật (jailbreak, chèn chỉ dẫn trực tiếp/gián tiếp, đóng vai/mạo danh, chia tách payload, làm rối ký tự, trích xuất dữ liệu) và 100 câu lành tính (gồm nhóm \emph{hard benign} --- câu hợp lệ nhưng bề mặt trông đáng ngờ). Một bộ dữ liệu chuẩn đóng băng (120 case, 23 họ kịch bản) được dùng bổ trợ cho kiểm thử tính toàn vẹn; phần holdout không chạy trong báo cáo này.
+
+\chapter{Bảng kết quả kiểm thử tóm tắt}
+\label{ap:test-detail}
+\markboth{PHỤ LỤC \Alph{chapter}. BẢNG KẾT QUẢ KIỂM THỬ TÓM TẮT}{}
+
+Xem Bảng~\ref{tab:test-summary} và các bảng ma trận nhầm lẫn~\ref{tab:v3-cm-mock},~\ref{tab:v3-cm-semantic} trong Chương~4. Full suite: 1263 passed, 0 failed, 5 skipped, 1 warning.
+
+\chapter{Thông tin gói phát hành đã rà soát}
+\label{ap:release-package}
+\markboth{PHỤ LỤC \Alph{chapter}. THÔNG TIN GÓI PHÁT HÀNH ĐÃ RÀ SOÁT}{}
+
+\begin{itemize}
+    \item Commit: \texttt{adf4ab5f86a0e19e1d61cfb778c525ed3a3c65c7}
+    \item Parent: \texttt{f5f1016bc84761fa622583b6831de76a972a7d8b}
+    \item Tree: \texttt{4ac0d87174d2d723b6116e908ad9ec318bf6f788}
+    \item Candidate SHA-256: \texttt{ba52c91133ab13f1ba1d6654bf3d527b547699cc644383a204a39b3a989ef80d}
+    \item Size: 2452504 bytes; 301 entries; manifest schema 5; policy schema 4; generated 0
+\end{itemize}
+
+\chapter{Lịch sử các phiên bản ứng viên}
+\label{ap:hist-candidates}
+\markboth{PHỤ LỤC \Alph{chapter}. LỊCH SỬ CÁC PHIÊN BẢN ỨNG VIÊN}{}
+
+Tám ứng viên trước được giữ byte-không đổi; ứng viên hiện tại là phiên bản thứ chín (định danh rút gọn): 5a973e4, 3c949ed, 7d31a10, e8f8c65, 8a5db08, cd0df66, 19ba483, f5f1016, và \textbf{adf4ab5} (hiện tại). Băm đầy đủ được lưu trong hồ sơ kiểm tra kỹ thuật kèm theo đồ án, không in lại toàn bộ 64 hex tại đây để tránh làm phình phụ lục.
+
+\chapter{Bảng truy vết yêu cầu và cơ chế kiểm soát}
+\label{ap:traceability}
+\markboth{PHỤ LỤC \Alph{chapter}. BẢNG TRUY VẾT YÊU CẦU VÀ CƠ CHẾ KIỂM SOÁT}{}
+
+\begin{table}[H]
+\centering
+\caption{Truy vết yêu cầu -- cơ chế -- kiểm thử (tóm tắt)}
+\label{tab:trace}
+\begin{tabular}{@{}p{0.15\linewidth}p{0.35\linewidth}p{0.40\linewidth}@{}}
+\toprule
+\textbf{Yêu cầu} & \textbf{Cơ chế} & \textbf{Kiểm thử liên quan} \\
+\midrule
+FR-IN/OUT & Input/Output/DLP guards & Bộ đánh giá bảo mật; pytest chức năng \\
+FR-RAG & BM25 + provenance & Pipeline tests \\
+FR-POL & Allowlist schema & Policy gate; verifier \\
+FR-REL & Builder/verifier/ZIP & Release tests; candidate hash \\
+FR-LOG & Content-free emitter & Emission/negative tests \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\chapter{Các giới hạn và giả định}
+\label{ap:limits}
+\markboth{PHỤ LỤC \Alph{chapter}. CÁC GIỚI HẠN VÀ GIẢ ĐỊNH}{}
+
+\begin{itemize}
+    \item Dữ liệu và secret đều giả định; không dùng PII/secret thật.
+    \item Mock LLM không mô phỏng đầy đủ hành vi mô hình thương mại.
+    \item Vulnerability inventory: \texttt{NOT\_CHECKED}.
+    \item Không holdout; không tag; không public release trong phạm vi báo cáo.
+    \item Xác minh web bên thứ ba không có package local không được dùng làm cổng.
+\end{itemize}
