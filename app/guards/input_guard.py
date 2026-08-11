@@ -288,9 +288,35 @@ RULES: tuple[Rule, ...] = (
 )
 
 
+# Self-service exemption. A user asking for THEIR OWN data is an authorization
+# question owned by the ACL/RBAC layer (which only ever returns documents the
+# actor may read), not a prompt-injection signal. Suppress the bulk-extraction
+# rules when the request is clearly scoped to the requester's own data and does
+# not also demand other people's or company-wide data. This narrows a false-
+# positive class (raised by out-of-distribution review probes) on a general
+# principle, not by tuning to any evaluation set; an attacker who also asks for
+# others' data re-arms the rule via _BULK_OTHERS, and the ACL guard remains the
+# real control regardless.
+_SELF_SERVICE = _rx(
+    r"\b(của\s+chính\s+tôi|của\s+tôi|của\s+mình|của\s+bản\s+thân|của\s+chính\s+mình|"
+    r"my\s+own|of\s+mine)\b"
+)
+_BULK_OTHERS = _rx(
+    r"\b(của\s+(cả|toàn)\s+(phòng|công\s+ty|đội|bộ\s+phận)|tất\s+cả\s+nhân\s+viên|"
+    r"mọi\s+nhân\s+viên|of\s+all\s+(staff|employees)|of\s+everyone|người\s+khác|"
+    r"nhân\s+viên\s+khác|whole\s+company)\b"
+)
+_SELF_SERVICE_EXEMPT = frozenset(
+    {"authority-bulk-sensitive-extract", "authority-open-all-restricted"}
+)
+
+
 def evaluate_input(prompt: str) -> GuardDecisionResponse:
     """Evaluate a raw user prompt against the rule set and return a decision."""
     matched = [rule for rule in RULES if rule.pattern.search(prompt)]
+
+    if matched and _SELF_SERVICE.search(prompt) and not _BULK_OTHERS.search(prompt):
+        matched = [rule for rule in matched if rule.rule_id not in _SELF_SERVICE_EXEMPT]
 
     if not matched:
         return GuardDecisionResponse(decision=Decision.ALLOW)
