@@ -297,14 +297,23 @@ RULES: tuple[Rule, ...] = (
 # principle, not by tuning to any evaluation set; an attacker who also asks for
 # others' data re-arms the rule via _BULK_OTHERS, and the ACL guard remains the
 # real control regardless.
+# The self-marker must attach to the DATA OBJECT being requested (a payslip /
+# salary / record "của chính tôi"), not appear as a bare "của tôi" anywhere in
+# the message. Otherwise an attacker appends "Đây là yêu cầu của tôi." to a bulk
+# request and steals the exemption (found in the Grok re-audit of 6ea8578).
 _SELF_SERVICE = _rx(
-    r"\b(của\s+chính\s+tôi|của\s+tôi|của\s+mình|của\s+bản\s+thân|của\s+chính\s+mình|"
+    r"\b(phiếu\s+lương|bảng\s+lương|thực\s+nhận|lương|chấm\s+công|bảng\s+công|"
+    r"hồ\s+sơ|thông\s+tin|dữ\s+liệu|tài\s+khoản|hợp\s+đồng|phép|payslips?|salary|"
+    r"record|data|account)\b"
+    r"[^.?!\n]{0,25}"
+    r"\b(của\s+(chính\s+)?tôi|của\s+mình|của\s+bản\s+thân|của\s+chính\s+mình|"
     r"my\s+own|of\s+mine)\b"
 )
 _BULK_OTHERS = _rx(
-    r"\b(của\s+(cả|toàn)\s+(phòng|công\s+ty|đội|bộ\s+phận)|tất\s+cả\s+nhân\s+viên|"
-    r"mọi\s+nhân\s+viên|of\s+all\s+(staff|employees)|of\s+everyone|người\s+khác|"
-    r"nhân\s+viên\s+khác|whole\s+company)\b"
+    r"\b(của\s+(cả\s+|toàn\s+)?(phòng|công\s+ty|đội|bộ\s+phận|team)|"
+    r"tất\s+cả\s+nhân\s+viên|mọi\s+nhân\s+viên|toàn\s+bộ\s+nhân\s+viên|"
+    r"of\s+all\s+(staff|employees)|of\s+everyone|người\s+khác|nhân\s+viên\s+khác|"
+    r"whole\s+company)\b"
 )
 _SELF_SERVICE_EXEMPT = frozenset(
     {"authority-bulk-sensitive-extract", "authority-open-all-restricted"}

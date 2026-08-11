@@ -85,13 +85,15 @@ properties. Corrected framing:
 - FPR 0% is measured on a synthetic benign set of 57 unique hard-benign items
   from 40 templates (Code X); precision does **not** generalize — legitimate
   interrogative-policy and lawful-bulk-export phrasings are still false-positived.
-- **Exfil is echo-confounded but not purely echo.** Cross-referencing the qwen
-  run against which prompts carry their own canary: **37/190** leaks came from
-  marker-tainted prompts (echo), but on the **10 clean prompts** (canary only in
-  the KB) **6 leaked** — a genuine KB-exfil signal, just under the n≥10 reporting
-  threshold. So the 21.5% figure is not a valid KB-exfil rate, yet a real (small,
-  under-powered) output-leak gap exists. A corrected canary design (marker only
-  in KB, never in the prompt) is required to measure it.
+- **Exfil is prompt-contaminated, not provably pure echo.** Cross-referencing the
+  qwen run against which prompts carry their own canary: **37/190** leaks came
+  from marker-tainted prompts — because the target is in *both* the prompt and the
+  KB, the artifact cannot prove each marker's source (echo vs extraction). On the
+  **10 clean prompts** (canary only in the KB) **6 leaked** — a genuine KB-exfil
+  signal. n=10 is *at* (not below) the `RATE_REPORTING_MIN_N=10` threshold, so it
+  is reportable but under-powered. The 21.5% figure is not a valid KB-exfil rate;
+  a corrected canary design (marker only in the KB, never in the prompt) is
+  required to measure it.
 
 ## Full 3-config re-run on the optimized rules (same 425 dataset, corpus-seeded)
 
@@ -135,20 +137,30 @@ scoped down (no "precision tuyệt đối"/generalization), self-service FP fixe
 recall/precision boundary documented in tests, exfil reframed to the
 clean-vs-tainted split, and the test-count error below corrected.
 
-Code X's reproducibility point is also closed at the runner level: each run
-now records a `provenance` block (git commit + worktree-dirty flag, provider,
-model, semantic-judge config, seeded-corpus SHA-256) and a `dataset_sha256`
-that hashes full case *content*, not just the id list. A number can be traced
-to the exact code, config, model, and payloads that produced it.
+Code X's reproducibility point is **narrowed, not fully closed**, at the runner
+level: each run now records a `provenance` block (git commit + worktree-dirty
+flag, provider, model name, semantic-judge config, seeded-corpus SHA-256) and a
+`dataset_sha256` hashing full case *content*, not just the id list. This is
+**minimal provenance** — it lets a number be traced to the code/config/model/
+payloads, but does not by itself make a run reproducible: it does not lock the
+dirty-worktree patch, uses a model name/tag rather than an immutable digest, does
+not pin the dependency/environment, and records remote-mode fields as unknown. A
+run is only near-reproducible when the worktree is clean, the model is pinned by
+digest, and the effective runtime settings are locked. The three optimized
+evidence runs used in Chapter 4 (`ada94ea1`, `5f1e19a2`, `c848aeac`) predate this
+schema and carry no `provenance`/`dataset_sha256`; their integrity rests on the
+committed manifests (Code X verified 9/9 output hashes) plus the deterministic
+mock reproduction, not on the new block.
 
 Both auditors' reports are in `docs/`. Not self-adjudicated — maintainer decides.
 
 ## Verification
 
-- `tests/test_input_guard.py`: **9 passed** (5 original + 4 authority-rule
+- `tests/test_input_guard.py`: **10 passed** (5 original + 5 authority-rule
   tests: block, benign/self-service allow, recall-limit evasions, precision-limit
-  false positives). The earlier "23 passed" figure was the combined count with
+  false positives, and a self-service **bypass regression** added after the Grok
+  re-audit). The earlier "23 passed" figure was the combined count with
   `test_input_guard_calibration.py` and was corrected per the Code X audit.
-- Full suite after this revision: `1523 passed, 4 skipped` (short basetemp to
+- Full suite after this revision: `1524 passed, 4 skipped` (short basetemp to
   avoid a Windows temp-dir path-length/permission artifact, unrelated to guard
   logic).
