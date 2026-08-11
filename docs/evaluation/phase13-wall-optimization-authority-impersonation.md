@@ -133,8 +133,15 @@ Grok (technical/security) verdict: optimization **REVISE**, Chapter 4
 exfil **MAJOR REVISION**. This revision addresses their findings: claims
 scoped down (no "precision tuyệt đối"/generalization), self-service FP fixed,
 recall/precision boundary documented in tests, exfil reframed to the
-clean-vs-tainted split, and the test-count error below corrected. Both
-auditors' reports are in `docs/`. Not self-adjudicated — maintainer decides.
+clean-vs-tainted split, and the test-count error below corrected.
+
+Code X's reproducibility point is also closed at the runner level: each run
+now records a `provenance` block (git commit + worktree-dirty flag, provider,
+model, semantic-judge config, seeded-corpus SHA-256) and a `dataset_sha256`
+that hashes full case *content*, not just the id list. A number can be traced
+to the exact code, config, model, and payloads that produced it.
+
+Both auditors' reports are in `docs/`. Not self-adjudicated — maintainer decides.
 
 ## Verification
 

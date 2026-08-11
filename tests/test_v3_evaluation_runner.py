@@ -282,12 +282,26 @@ def test_artifacts_are_content_free(runner, tmp_path):
     metrics = runner.compute_metrics(outcomes, ("FLAG{SECRET-SHOULD-NOT-APPEAR}",))
     # force reportable paths with small n -> null rates ok
     report = runner.render_report(metrics)
+    provenance = {
+        "schema": "phase13-v3-provenance-v1",
+        "git_commit": "deadbeef",
+        "git_worktree_dirty": False,
+        "mode": "in_process",
+        "llm_provider": "mock",
+        "llm_model_name": "mock-rag-guard-v1",
+        "semantic_guard_use_llm": "0",
+        "semantic_guard_model": "mock-rag-guard-v1",
+        "corpus_path": None,
+        "corpus_sha256": None,
+    }
     run_dir = runner.write_artifacts(
         tmp_path,
         outcomes,
         metrics,
         v2,
         cases_sha256="abc",
+        dataset_sha256="def",
+        provenance=provenance,
         report=report,
     )
     result_text = (run_dir / "result.jsonl").read_text(encoding="utf-8")
@@ -298,3 +312,8 @@ def test_artifacts_are_content_free(runner, tmp_path):
     assert "Ignore" not in blob
     assert "case-001" in result_text
     assert (run_dir / "manifest.json").is_file()
+    # Provenance is recorded and content-free (no payload/canary text).
+    metrics_obj = json.loads(metrics_text)
+    assert metrics_obj["dataset_sha256"] == "def"
+    assert metrics_obj["provenance"]["git_commit"] == "deadbeef"
+    assert metrics_obj["provenance"]["llm_provider"] == "mock"

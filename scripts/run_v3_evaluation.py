@@ -663,12 +663,79 @@ def render_report(metrics: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+# --- provenance ------------------------------------------------------------
+
+
+def _git_provenance() -> dict[str, Any]:
+    """Best-effort git identity of the code that produced this run.
+
+    A run from a dirty worktree is not fully reproducible, so the dirty flag
+    is recorded rather than hidden. Never raises: if git is unavailable the
+    fields degrade to "unknown"/None.
+    """
+    import subprocess  # noqa: PLC0415 - only needed when writing artifacts
+
+    def _run(cmd: list[str]) -> str:
+        try:
+            out = subprocess.run(
+                cmd, cwd=REPO_ROOT, capture_output=True, text=True, timeout=10
+            )
+            return out.stdout.strip() if out.returncode == 0 else ""
+        except Exception:  # pragma: no cover - defensive
+            return ""
+
+    commit = _run(["git", "rev-parse", "HEAD"])
+    status = _run(["git", "status", "--porcelain"])
+    return {
+        "git_commit": commit or "unknown",
+        "git_worktree_dirty": bool(status) if commit else None,
+    }
+
+
+def build_provenance(args: argparse.Namespace, corpus_path: Path | None, v2) -> dict[str, Any]:
+    """Lock the run's code + config + model + corpus identity.
+
+    This closes the reproducibility gap raised in the Code X audit: the
+    published metric numbers now carry the commit, the provider/model, the
+    semantic-judge configuration, and a hash of the seeded corpus, so a number
+    can be traced to the exact conditions that produced it. In remote mode the
+    provider/model live on the far server, so they are recorded as unknown
+    rather than guessed from this process's environment.
+    """
+    prov: dict[str, Any] = {"schema": "phase13-v3-provenance-v1"}
+    prov.update(_git_provenance())
+
+    if args.base_url:
+        prov["mode"] = "remote"
+        prov["base_url"] = args.base_url
+        prov["llm_provider"] = "remote-unknown"
+        prov["llm_model_name"] = "remote-unknown"
+        prov["semantic_guard_use_llm"] = "remote-unknown"
+        prov["semantic_guard_model"] = "remote-unknown"
+    else:
+        prov["mode"] = "in_process"
+        provider = os.getenv("LLM_PROVIDER", "mock")
+        model = os.getenv("LLM_MODEL_NAME", "mock-rag-guard-v1")
+        prov["llm_provider"] = provider
+        prov["llm_model_name"] = model
+        prov["semantic_guard_use_llm"] = os.getenv("SEMANTIC_GUARD_USE_LLM", "1")
+        prov["semantic_guard_model"] = os.getenv("SEMANTIC_GUARD_MODEL", "") or model
+
+    if corpus_path is not None and corpus_path.is_file():
+        prov["corpus_path"] = corpus_path.name
+        prov["corpus_sha256"] = v2._sha256_file(corpus_path)
+    else:
+        prov["corpus_path"] = None
+        prov["corpus_sha256"] = None
+    return prov
+
+
 # --- artifacts -------------------------------------------------------------
 
 
 def write_artifacts(
     output_root: Path, outcomes: Iterable[CaseOutcome], metrics: dict[str, Any], v2, *,
-    cases_sha256: str, report: str,
+    cases_sha256: str, dataset_sha256: str, provenance: dict[str, Any], report: str,
 ) -> Path:
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8]
     run_dir = output_root / run_id
@@ -703,7 +770,12 @@ def write_artifacts(
         **metrics,
         "run_id": run_id,
         "result_schema": RESULT_SCHEMA,
+        # cases_sha256 hashes the case-id list (execution identity);
+        # dataset_sha256 hashes the full case records (content identity), so
+        # the numbers are locked to the actual payloads, not just their ids.
         "cases_sha256": cases_sha256,
+        "dataset_sha256": dataset_sha256,
+        "provenance": provenance,
     }
     metrics_path = run_dir / "metrics.json"
     metrics_path.write_bytes(v2._canonical_json_bytes(metrics_payload))
@@ -759,8 +831,29 @@ def main(argv: list[str] | None = None) -> int:
         cases_sha256 = v2._sha256_bytes(
             v2._canonical_json_bytes([case.case_id for case in cases])
         )
+        # Content identity: hash the full case records, not just their ids, so
+        # a metric number is bound to the exact payloads that produced it.
+        dataset_sha256 = v2._sha256_bytes(
+            v2._canonical_json_bytes(
+                [
+                    {
+                        "id": c.case_id,
+                        "content": c.content,
+                        "expected_label": c.expected_label,
+                        "attack_type": c.attack_type,
+                        "exfil_target": c.exfil_target,
+                        "tool_family": c.tool_family,
+                        "technique": c.technique,
+                        "language": c.language,
+                    }
+                    for c in cases
+                ]
+            )
+        )
 
         output_root = (REPO_ROOT / args.output).resolve()
+        corpus_path = (REPO_ROOT / args.corpus).resolve() if args.corpus else None
+        provenance = build_provenance(args, corpus_path, v2)
 
         if args.base_url:
             if args.corpus:
@@ -782,15 +875,15 @@ def main(argv: list[str] | None = None) -> int:
             harness = build_harness(
                 db_path, db_path.parent / "_eval-documents", args.username, args.password
             )
-            canaries = seed_corpus(
-                harness, (REPO_ROOT / args.corpus).resolve() if args.corpus else None
-            )
+            canaries = seed_corpus(harness, corpus_path)
 
         outcomes = [run_case(harness, case) for case in cases]
         metrics = compute_metrics(outcomes, canaries)
         report = render_report(metrics)
         run_dir = write_artifacts(
-            output_root, outcomes, metrics, v2, cases_sha256=cases_sha256, report=report
+            output_root, outcomes, metrics, v2,
+            cases_sha256=cases_sha256, dataset_sha256=dataset_sha256,
+            provenance=provenance, report=report,
         )
     except RunnerError as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
