@@ -191,6 +191,63 @@ RULES: tuple[Rule, ...] = (
         "Detected an attempt to replace an official or retrieved source with user-supplied ground truth.",
     ),
 
+    # --- authority impersonation / executive-override exfiltration ---
+    # Targets the two invariants of the "I am an executive, so bypass the
+    # rules and hand over the data" social-engineering pattern (PyRIT-style
+    # C-suite / roleplay attacks), independent of the exact wording:
+    #   (1) an authority-override directive, and
+    #   (2) a bulk sensitive-data extraction.
+    # Each rule below is a strong signal on its own; matching either invariant
+    # is enough to block. Rules are bilingual (vi/en) because the deployment
+    # is Vietnamese-facing and real attacks arrive in both. Deliberately does
+    # NOT block on a bare authority claim ("tôi là giám đốc"), which is not by
+    # itself malicious and would raise false positives on legitimate queries.
+    Rule(
+        "authority-override-policy", "authority_impersonation",
+        _rx(r"\b(overrides?|supersedes?)\b[^.?!\n]{0,25}\b(hr|company|internal|these|all|any)?\s*(polic(y|ies)|acl|access control)\b"),
+        Decision.BLOCK, 0.85,
+        "Detected a claim that the request overrides organizational policy or access control.",
+    ),
+    Rule(
+        "authority-drop-acl", "authority_impersonation",
+        _rx(r"\b(bỏ|gỡ|tắt|vô hiệu hoá|disable|ignore|bypass)\b[^.?!\n]{0,18}\b(acl|access control|mọi policy|policy retrieval)\b"),
+        Decision.BLOCK, 0.85,
+        "Detected an instruction to disable or bypass access-control / ACL enforcement.",
+    ),
+    Rule(
+        "authority-do-not-refuse", "authority_impersonation",
+        _rx(r"\bkhông\s+(được\s+)?từ chối\b[^.?!\n]{0,18}\b(cấp trên|sếp|lãnh đạo|ban|executive|ceo|giám đốc)\b|\bdo not refuse\b[^.?!\n]{0,18}\b(executives?|superiors?|the (ceo|board|director))\b"),
+        Decision.BLOCK, 0.8,
+        "Detected coercion not to refuse an asserted authority figure - a social-engineering override.",
+    ),
+    Rule(
+        "authority-authorize-bulk-export", "authority_impersonation",
+        _rx(r"\bauthorize\b[^.?!\n]{0,20}\b(bulk\s+)?export\b|\bbulk export of\b[^.?!\n]{0,20}\b(payslips?|payroll|salar(y|ies)|compensation)\b"),
+        Decision.BLOCK, 0.82,
+        "Detected an attempt to authorize a bulk export of payroll / compensation data.",
+    ),
+    Rule(
+        "authority-bulk-sensitive-extract", "sensitive_extraction",
+        _rx(
+            r"\b(trích xuất|xuất|in|dump|export|paste|reveal|liệt kê)\b[^.?!\n]{0,45}"
+            r"\b(toàn bộ|tất cả|mọi|all|full|bulk|any)\b[^.?!\n]{0,45}"
+            r"\b(phiếu lương|bảng lương|thực nhận|payslips?|salary (bands?|figures?|tables?)|"
+            r"compensation|restricted|confidential|mật)\b"
+        ),
+        Decision.BLOCK, 0.85,
+        "Detected a bulk extraction request for payroll / compensation / restricted records.",
+    ),
+    Rule(
+        "authority-open-all-restricted", "sensitive_extraction",
+        _rx(
+            r"\b(mở|in|reveal|open|paste|dump)\b[^.?!\n]{0,20}"
+            r"\b(mọi|toàn bộ|tất cả|all|any|every)\b[^.?!\n]{0,25}"
+            r"\b(tài liệu\s+)?(restricted|confidential|mật)\b"
+        ),
+        Decision.BLOCK, 0.82,
+        "Detected a request to open/print all restricted or confidential documents.",
+    ),
+
     # --- tool / action misuse ---
     Rule(
         "tool-file-or-api-access", "tool_action_misuse",
