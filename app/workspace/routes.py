@@ -222,7 +222,10 @@ def post_message_unguarded(conversation_id: str, body: MessageBody, user: dict =
 
 @router.post("/unguarded/chat")
 def unguarded_lab_chat(body: UnguardedChatBody, user: dict = Depends(actor)) -> dict:
-    chunks, sources = store.retrieve(user, body.content)
+    # Lab path must retrieve from the private unguarded document store, not
+    # the protected workspace KB — otherwise uploaded lab fixtures never
+    # reach the model and A/B demos look empty.
+    chunks, sources = unguarded_store.retrieve(user, body.content)
     started = time.perf_counter()
     result = run_unguarded_chat(
         body.content,
