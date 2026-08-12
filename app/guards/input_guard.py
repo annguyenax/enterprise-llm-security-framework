@@ -10,6 +10,7 @@ docs/dataset/source-mapping.md. See docs/dataset/dataset-methodology.md
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 
 from app.core.decisions import Decision, most_severe
@@ -28,6 +29,29 @@ class Rule:
 
 def _rx(pattern: str) -> re.Pattern[str]:
     return re.compile(pattern, re.IGNORECASE)
+
+
+# --- input normalization (de-obfuscation before rule matching) -------------
+# Attackers hide keyword triggers behind zero-width characters and Cyrillic
+# look-alikes (garak-style "unicode smudging"). Normalizing the text before the
+# rules run — NFKC, strip zero-width, fold common homoglyphs to Latin — makes
+# the rules see the underlying intent. This is a general de-obfuscation step,
+# not tuned to any evaluation case.
+_ZERO_WIDTH = dict.fromkeys(
+    (0x200B, 0x200C, 0x200D, 0x2060, 0xFEFF, 0x00AD), None
+)
+_HOMOGLYPH = str.maketrans(
+    {
+        "а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "у": "y", "х": "x",
+        "ѕ": "s", "і": "i", "ј": "j", "ԁ": "d", "ո": "n",
+        "А": "A", "Е": "E", "О": "O", "Р": "P", "С": "C", "У": "Y", "Х": "X",
+        "В": "B", "Н": "H", "К": "K", "М": "M", "Т": "T",
+    }
+)
+
+
+def _normalize(text: str) -> str:
+    return unicodedata.normalize("NFKC", text).translate(_ZERO_WIDTH).translate(_HOMOGLYPH)
 
 
 # Each rule maps to one of the 7 required categories from the task spec:
@@ -321,10 +345,15 @@ _SELF_SERVICE_EXEMPT = frozenset(
 
 
 def evaluate_input(prompt: str) -> GuardDecisionResponse:
-    """Evaluate a raw user prompt against the rule set and return a decision."""
-    matched = [rule for rule in RULES if rule.pattern.search(prompt)]
+    """Evaluate a raw user prompt against the rule set and return a decision.
 
-    if matched and _SELF_SERVICE.search(prompt) and not _BULK_OTHERS.search(prompt):
+    The prompt is de-obfuscated first (see `_normalize`) so that zero-width and
+    homoglyph "unicode smudging" cannot hide a keyword trigger from the rules.
+    """
+    normalized = _normalize(prompt)
+    matched = [rule for rule in RULES if rule.pattern.search(normalized)]
+
+    if matched and _SELF_SERVICE.search(normalized) and not _BULK_OTHERS.search(normalized):
         matched = [rule for rule in matched if rule.rule_id not in _SELF_SERVICE_EXEMPT]
 
     if not matched:

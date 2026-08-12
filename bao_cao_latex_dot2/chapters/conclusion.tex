@@ -9,8 +9,9 @@
 lớp (đầu vào, ngữ cảnh truy hồi, đầu ra/DLP, Semantic Judge) trên một pipeline
 RAG có kiểm soát truy cập RBAC và cơ chế truy hồi lai được tối ưu; xây dựng bộ
 đánh giá bảo mật tổng hợp 425 case và đo hiệu quả tường trên ba cấu hình guard;
-và tối ưu lớp luật để nâng recall (TPR $48{,}5\% \to 77{,}0\%$) mà giữ FPR $0\%$
-trên bộ tổng hợp.
+và tối ưu lớp luật lũy tiến (luật chống mạo danh rồi chuẩn hoá Unicode đầu vào)
+để nâng recall rule-based từ TPR $48{,}5\%$ lên $81{,}5\%$ mà giữ FPR $0\%$ trên
+bộ tổng hợp; bổ sung Output-DLP canary và thí nghiệm canary-sạch A/B.
 
 \section*{Mức độ hoàn thành mục tiêu}
 
@@ -27,17 +28,19 @@ giải pháp bảo mật doanh nghiệp.
 
 \section*{Hạn chế}
 
-Recall của tường còn giới hạn với các đòn không có dấu hiệu từ vựng; precision
-$0\%$ FPR không khái quát ra ngoài bộ tổng hợp; phép đo rò rỉ đầu ra còn bị nhiễu
-và cỡ mẫu nhỏ; toàn bộ dùng dữ liệu tổng hợp và mô hình cục bộ. Hệ thống ở quy mô
-lab, không production/enterprise-ready; số liệu không suy rộng ra môi trường thật.
+Recall rule-based còn giới hạn với chỉ thị ẩn (injecagent $\approx 47\%$) và đòn
+diễn đạt lại không còn bất biến từ vựng; FPR $0\%$ không khái quát ra ngoài bộ
+tổng hợp; Semantic Judge nhỏ tăng FPR mà không tăng Stop-before-LLM; phép đo
+exfil trên 425 còn nhiễu prompt-canary (đã bổ sung demo canary-sạch và Output-DLP
+nhưng n nhỏ); toàn bộ dùng dữ liệu tổng hợp và mô hình cục bộ. Hệ thống lab,
+không production/enterprise-ready.
 
 \section*{Hướng phát triển và kiến nghị}
 
 \begin{enumerate}
-    \item Giải nhiễu đầu vào (chuẩn hoá Unicode, tách chỉ thị ẩn trong văn xuôi) để nâng recall trên họ tấn công gián tiếp.
-    \item Thiết kế lại canary (chỉ nằm trong kho, không có trong prompt) để đo được rò rỉ kho tri thức một cách tin cậy.
-    \item Giảm tỉ lệ báo động nhầm của lớp Semantic Judge và mở rộng bộ lành tính khó.
+    \item Tách chỉ thị ẩn trong văn xuôi / giải nhiễu sâu hơn để nâng recall injecagent (chuẩn hoá Unicode đã có một phần).
+    \item Mở rộng bộ canary-sạch (chỉ trong kho) với $n$ đủ lớn để báo cáo tỉ lệ rò kho tin cậy.
+    \item Giữ Semantic Judge opt-in; giảm FPR nếu bật, và mở rộng hard benign.
     \item Thí nghiệm trên LLM thật, tách bạch kết luận khỏi Mock Provider.
 \end{enumerate}
 

@@ -35,8 +35,8 @@ Phần đánh giá thực nghiệm (Chương~4) được tổ chức để trả
     cải thiện độ phủ (recall) so với lớp luật không, và đánh đổi precision như
     thế nào?
     \item \textbf{CH3.} Có thể nâng recall của lớp luật bằng cách nhắm
-    \emph{đặc trưng bất biến} của một họ tấn công mà \emph{không} làm tăng FPR
-    hay không?
+    \emph{bất biến từ vựng} / chuẩn hoá đầu vào của một họ tấn công mà
+    \emph{không} làm tăng FPR trên bộ tổng hợp hay không?
 \end{itemize}
 
 Độ trễ (latency) không nằm trong câu hỏi nghiên cứu báo cáo được: theo quyết
@@ -62,8 +62,10 @@ Nhóm kết hợp nghiên cứu tài liệu (OWASP LLM Top 10, LLMSVS và các c
     quy trình đo TPR/FPR/Stop-before-LLM/Exfil trên ba cấu hình guard
     (rule-based, Semantic Judge \texttt{qwen3:4b}, đối chiếu \texttt{hermes3:8b}),
     trung thực về hạn chế và không báo cáo số liệu chưa đo được.
-    \item \textbf{Tối ưu lớp luật nhắm đặc trưng bất biến} của họ tấn công mạo
-    danh thẩm quyền, nâng recall của tường luật ($48{,}5\% \to 77{,}0\%$ TPR) mà
-    giữ FPR $0\%$ trên bộ tổng hợp, kèm phân tích trung thực về giới hạn khái
-    quát của cách tiếp cận dựa trên luật.
+    \item \textbf{Tối ưu lớp luật lũy tiến}: luật nhắm bất biến từ vựng của họ
+    mạo danh thẩm quyền ($48{,}5\% \to 77{,}0\%$ TPR) rồi \textbf{chuẩn hoá đầu
+    vào} (NFKC/zero-width/homoglyph) nâng tiếp lên $81{,}5\%$ TPR, vẫn FPR $0\%$
+    trên bộ tổng hợp; kèm Output-DLP canary, demo A/B canary-sạch, và phân tích
+    trung thực (PyRIT $100\%$ chỉ trên họ template; Stop-before-LLM qwen không
+    tăng so với rule-based).
 \end{itemize}

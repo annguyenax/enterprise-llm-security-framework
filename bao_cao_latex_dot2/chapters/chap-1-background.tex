@@ -48,9 +48,32 @@ Log quyết định guard với mã lý do ổn định; tránh ghi nội dung b
 \subsection{Kiểm thử và xác minh}
 Bộ case red-team tổng hợp và kiểm thử tự động có kiểm soát.
 
-\section{Một số tiêu chuẩn và tài liệu liên quan}
+\section{Tình hình nghiên cứu}
 
-Nhóm tham chiếu OWASP Top 10 for LLM Applications~\cite{owasp_llm_top10} và OWASP LLMSVS~\cite{owasp_llmsvs} như khung phân loại rủi ro và kiểm soát. Các công trình về tấn công/phòng thủ RAG (ví dụ PoisonedRAG~\cite{zou2024poisonedrag}) được ghi nhận ở mức xác minh tồn tại nguồn; báo cáo không trích số liệu chi tiết từ các bài chưa đọc toàn văn (xem phụ lục).
+Hướng nghiên cứu an toàn cho ứng dụng LLM/RAG có thể nhóm thành ba mảng.
+
+\textbf{Tấn công.} Perez và Ribeiro~\cite{perez2022ignore} hệ thống hoá các kỹ
+thuật prompt injection (chiếm quyền mục tiêu, rò rỉ prompt). Greshake và cộng
+sự~\cite{greshake2023indirect} chỉ ra \emph{indirect prompt injection}: chỉ dẫn
+độc hại nằm trong dữ liệu được truy hồi thay vì trong câu hỏi trực tiếp.
+PoisonedRAG~\cite{zou2024poisonedrag} tấn công đầu độc kho tri thức của RAG, còn
+InjecAgent~\cite{zhan2024injecagent} xây bộ chuẩn đánh giá injection gián tiếp cho
+LLM agent tích hợp công cụ. Ở khía cạnh công cụ dò quét, garak~\cite{derczynski2024garak}
+cung cấp khung probe lỗ hổng LLM. Đề tài \emph{lấy cảm hứng} từ các họ kỹ thuật
+này để sinh bộ tấn công tổng hợp (không dùng suite gốc).
+
+\textbf{Phòng thủ.} Llama Guard~\cite{inan2023llamaguard} dùng một LLM tinh chỉnh
+làm bộ bảo vệ đầu vào/đầu ra; NeMo Guardrails~\cite{rebedea2023nemo} cung cấp
+guardrail lập trình được cho ứng dụng hội thoại. Tuy nhiên, Hackett và cộng
+sự~\cite{hackett2025bypass} cho thấy nhiều hệ phòng thủ mạnh vẫn có thể bị vượt
+qua tới $100\%$ bằng biến thể né tránh --- nhấn mạnh rằng không lớp guard đơn lẻ
+nào là đủ, và phòng thủ theo chiều sâu là cần thiết.
+
+\textbf{Chuẩn hoá và đánh giá.} OWASP Top 10 for LLM
+Applications~\cite{owasp_llm_top10} và OWASP LLMSVS~\cite{owasp_llmsvs} cung cấp
+khung phân loại rủi ro và kiểm soát; NIST AI 600-1~\cite{nist2024genai} đưa ra
+hồ sơ quản trị rủi ro cho AI sinh. Đề tài dùng các khung này để định vị phạm vi
+kiểm soát và ánh xạ guard với loại rủi ro (LLM01/02/04).
 
 \begin{figure}[H]
 \centering

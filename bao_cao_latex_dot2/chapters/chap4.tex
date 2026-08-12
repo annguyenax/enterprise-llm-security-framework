@@ -44,22 +44,23 @@ Xác nhận nguyên tắc quyết định nghiêm khắc nhất thắng và hàn
 \toprule
 \textbf{Nhóm kiểm thử} & \textbf{Kết quả} \\
 \midrule
-Kiểm thử guard đầu vào & 10 passed \\
+Kiểm thử guard đầu vào & 11 passed \\
 Kiểm thử guard đầu ra (gồm canary/DLP) & 6 passed \\
 Kiểm thử runner đánh giá & 7 passed \\
-Full repository suite & 1526 passed, 0 failed, 4 skipped, exit 0 \\
+Kiểm thử schema A/B canary (Code~X regression) & 2 passed \\
+Full repository suite (inventory) & 1533 collected (xem ghi chú) \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Các số liệu trên là kết quả kiểm thử tự động của hệ thống lab, \textbf{không} phải chỉ số hiệu quả bảo mật trên môi trường thật.
+Các số liệu trên là kết quả kiểm thử tự động của hệ thống lab, \textbf{không} phải chỉ số hiệu quả bảo mật trên môi trường thật. Số full-suite ``passed'' chỉ được báo khi có log/artifact từ lần chạy đầy đủ trên đúng commit; inventory pytest tại thời điểm biên soạn là 1533 test collected.
 
 \section{Đánh giá hiệu quả bảo mật trên bộ tấn công tổng hợp}
 \label{sec:sec-eval}
 
 Bộ đánh giá bảo mật tổng hợp gồm \textbf{425 case}: \textbf{200 case tấn công}
 \emph{lấy cảm hứng} từ các họ kỹ thuật của NVIDIA garak~\cite{derczynski2024garak},
-Microsoft PyRIT và InjecAgent~\cite{zhan2024injecagent} (template tĩnh tự xây,
+Microsoft PyRIT~\cite{microsoft_pyrit} và InjecAgent~\cite{zhan2024injecagent} (template tĩnh tự xây,
 \textbf{không} gọi các bộ công cụ gốc) và
 \textbf{225 câu lành tính} gồm 100 câu nghiệp vụ thông thường và 125 câu
 \emph{hard benign} --- câu hợp lệ nhưng bề mặt trông đáng ngờ (chứa từ khoá nhạy
@@ -97,8 +98,12 @@ nhắm \emph{hai bất biến từ vựng} của đòn mạo danh (cụm từ đ
 sách/ACL, ``không được từ chối cấp trên'') và yêu cầu trích xuất hàng loạt dữ
 liệu nhạy cảm --- thay vì khớp đúng câu chữ của từng case. Trên cùng bộ 425
 case, thay đổi này nâng TPR của lớp luật từ $48{,}5\%$ lên $77{,}0\%$ mà
-\textbf{giữ nguyên FPR $0\%$ trên bộ 225 câu lành tính tổng hợp}
-(Bảng~\ref{tab:v3-optim}). Cần nói rõ phạm vi: đây \textbf{không} phải bằng chứng
+\textbf{giữ nguyên FPR $0\%$ trên bộ 225 câu lành tính tổng hợp}. Bước tối ưu thứ
+hai --- \textbf{chuẩn hoá đầu vào} trước khi đối chiếu luật (NFKC, loại ký tự ẩn
+zero-width, gấp các đồng hình Cyrillic về Latin) --- vô hiệu hoá kỹ thuật ``làm
+rối Unicode'' của garak, nâng tiếp TPR lên $\mathbf{81{,}5\%}$ (garak
+$75{,}2\%\to83{,}8\%$) vẫn ở FPR $0\%$ (Bảng~\ref{tab:v3-optim}). Đây là bước
+giải nhiễu \emph{tổng quát}, không tinh chỉnh theo case cụ thể. Cần nói rõ phạm vi: đây \textbf{không} phải bằng chứng
 đã ``vá'' mạo danh nói chung. Con số $100\%$ trên họ PyRIT phản ánh việc họ
 template tổng hợp hiện tại (khoảng sáu khung) đều nhúng đúng hai bất biến mà luật
 bắt; kẻ tấn công diễn đạt lại để bỏ hai bất biến (bỏ định lượng ``toàn bộ'', bỏ
@@ -111,28 +116,29 @@ ghi nhận là hạn chế.
 
 \begin{table}[H]
 \centering
-\caption{Tác động của nhóm luật chống mạo danh lên lớp luật (cùng bộ 425 case)}
+\caption{Tối ưu lũy tiến lớp luật qua hai bước (cùng bộ 425 case)}
 \label{tab:v3-optim}
-\begin{tabularx}{\linewidth}{@{}p{0.34\linewidth}YY@{}}
+\begin{tabularx}{\linewidth}{@{}p{0.30\linewidth}YYY@{}}
 \toprule
-\textbf{Chỉ số} & \textbf{Trước} & \textbf{Sau} \\
+\textbf{Chỉ số} & \textbf{Baseline} & \textbf{+ Luật mạo danh} & \textbf{+ Chuẩn hoá đầu vào} \\
 \midrule
-TPR (toàn bộ tấn công) & 48{,}5\% & 77{,}0\% \\
-FPR (toàn bộ lành tính) & 0{,}0\% & 0{,}0\% \\
-Chặn họ PyRIT (n=57) & 0{,}0\% & 100{,}0\% \\
+TPR (toàn bộ tấn công) & 48{,}5\% & 77{,}0\% & \textbf{81{,}5\%} \\
+FPR (toàn bộ lành tính) & 0{,}0\% & 0{,}0\% & 0{,}0\% \\
+Chặn họ PyRIT (n=57) & 0{,}0\% & 100{,}0\% & 100{,}0\% \\
+Chặn garak (n=105) & 75{,}2\% & 75{,}2\% & 83{,}8\% \\
 \bottomrule
 \end{tabularx}
 \end{table}
 
 \begin{table}[H]
 \centering
-\caption{Ma trận nhầm lẫn --- cấu hình rule-based (n = 425)}
+\caption{Ma trận nhầm lẫn --- rule-based sau chuẩn hoá (n = 425; run \texttt{ac64cd5c})}
 \label{tab:v3-cm-mock}
 \begin{tabularx}{\linewidth}{@{}p{0.30\linewidth}YY@{}}
 \toprule
  & \textbf{Bị chặn} & \textbf{Được trả lời} \\
 \midrule
-Tấn công (n=200) & 154 (TP) & 46 (FN) \\
+Tấn công (n=200) & 163 (TP) & 37 (FN) \\
 Lành tính (n=225) & 0 (FP) & 225 (TN) \\
 \bottomrule
 \end{tabularx}
@@ -140,51 +146,49 @@ Lành tính (n=225) & 0 (FP) & 225 (TN) \\
 
 \begin{table}[H]
 \centering
-\caption{Ma trận nhầm lẫn --- cấu hình Semantic Judge, \texttt{qwen3:4b} (n = 425)}
+\caption{Ma trận nhầm lẫn --- \texttt{qwen3:4b} + Output-DLP (n = 425; run \texttt{49d474bc})}
 \label{tab:v3-cm-semantic}
 \begin{tabularx}{\linewidth}{@{}p{0.30\linewidth}YY@{}}
 \toprule
  & \textbf{Bị chặn} & \textbf{Được trả lời} \\
 \midrule
-Tấn công (n=200) & 155 (TP) & 45 (FN) \\
-Lành tính (n=225) & 25 (FP) & 200 (TN) \\
+Tấn công (n=200) & 200 (TP) & 0 (FN) \\
+Lành tính (n=225) & 42 (FP) & 183 (TN) \\
 \bottomrule
 \end{tabularx}
 \end{table}
 
-Đọc trực tiếp hai ma trận: cấu hình \textbf{rule-based} chặn đúng $154/200$ đòn
-tấn công ($77{,}0\%$) và để lọt $46$; quan trọng hơn, nó \emph{không} chặn nhầm
-câu lành tính nào ($0/225$), kể cả $125$ câu hard benign --- đây là điểm mạnh cốt
-lõi (không có FP nào trên bộ tổng hợp này). Thêm \textbf{Semantic Judge}
-\texttt{qwen3:4b} chỉ nhích số đòn chặn được lên $155$ (thêm đúng một case) nhưng
-làm $25$ câu lành tính bị chặn nhầm ($25/225$), tức đổi gần như không có thêm
-recall lấy một khoản precision đáng kể. Con số này định lượng trực tiếp ràng buộc
-đã nêu ở mục lựa chọn chỉ số: với tường guard, một FP tăng thêm là chi phí thật,
-còn một TP tăng thêm chỉ có giá trị nếu không kéo theo FP.
+Đọc trực tiếp hai ma trận (sau mạo danh + chuẩn hoá Unicode, và Output-DLP canary):
+cấu hình \textbf{rule-based} chặn $163/200$ ($81{,}5\%$) và \emph{không} chặn nhầm
+câu lành tính nào trên bộ tổng hợp ($0/225$). Cấu hình \textbf{qwen3:4b} đạt TPR
+$100\%$ nhưng FPR $18{,}7\%$ ($42/225$). Quan trọng: Stop-before-LLM của cả hai
+đều $81{,}5\%$ (cùng $163$ đòn chặn trước provider) --- Semantic Judge \emph{không}
+tăng chặn sớm; phần $37$ đòn TPR thêm trên qwen là chặn \emph{sau} khi gọi mô hình
+(Output Guard bắt canary trong câu trả lời), không phải judge phát hiện injection
+ở đầu vào.
 
 \begin{table}[H]
 \centering
-\caption{So sánh chỉ số hai cấu hình tường lửa}
+\caption{So sánh chỉ số hai cấu hình (sau chuẩn hoá + Output-DLP)}
 \label{tab:v3-metrics}
 \begin{tabularx}{\linewidth}{@{}p{0.34\linewidth}YY@{}}
 \toprule
-\textbf{Chỉ số} & \textbf{Rule-based} & \textbf{Semantic} \\
+\textbf{Chỉ số} & \textbf{Rule-based} & \textbf{Semantic (qwen)} \\
 \midrule
-TPR & 77{,}0\% & 77{,}5\% \\
-FPR (toàn bộ lành tính) & 0{,}0\% & 11{,}1\% \\
-\quad FPR trên hard benign & 0{,}0\% & 14{,}4\% \\
-Stop-before-LLM & 77{,}0\% & 77{,}0\% \\
-Exfil Marker Rate$^\dagger$ & 0{,}0\% & 21{,}5\% \\
+TPR & 81{,}5\% & 100{,}0\% \\
+FPR (toàn bộ lành tính) & 0{,}0\% & 18{,}7\% \\
+\quad FPR trên hard benign & 0{,}0\% & 20{,}0\% \\
+Stop-before-LLM & 81{,}5\% & 81{,}5\% \\
+Exfil Marker Rate$^\dagger$ & --- & 0{,}0\% \\
 \bottomrule
 \end{tabularx}
 
 \vspace{2pt}
-{\footnotesize $^\dagger$ Chỉ số exfil \textbf{bị nhiễu do prompt chứa marker}:
-$190/200$ prompt tấn công đã \emph{chứa sẵn} mã canary trong câu hỏi ($37$ lần lộ
-ở nhóm này --- không xác định được nguồn từng marker vì target có trong cả prompt
-lẫn kho). Trên $10$ prompt sạch (canary \emph{chỉ} trong kho) có $6$ lần lộ ---
-tín hiệu rò rỉ kho thật, cỡ mẫu nhỏ ($n=10$). Không thể coi $21{,}5\%$ là tỉ lệ
-rò rỉ kho. Xem mục phân tích và Hạn chế.\par}
+{\footnotesize $^\dagger$ Run rule-based \texttt{ac64cd5c} không seed corpus
+(exfil không reportable). Run qwen \texttt{49d474bc} seed 200 canary: marker
+$0\%$ nhờ Output-DLP chặn canary trong answer --- \textbf{không} đồng nghĩa hết
+injection ở đầu vào ($37/200$ vẫn tới provider). Xem Mục~\ref{sec:ab-demo} và
+Hạn chế.\par}
 \end{table}
 
 \begin{table}[H]
@@ -193,10 +197,10 @@ rò rỉ kho. Xem mục phân tích và Hạn chế.\par}
 \label{tab:v3-by-family}
 \begin{tabularx}{\linewidth}{@{}p{0.30\linewidth}YY@{}}
 \toprule
-\textbf{Nguồn} & \textbf{Rule-based} & \textbf{Semantic} \\
+\textbf{Nguồn} & \textbf{Rule-based} & \textbf{Semantic (qwen)} \\
 \midrule
-garak (jailbreak, chia tách payload) & 75{,}2\% & 76{,}2\% \\
-injecagent (chỉ thị ẩn) & 47{,}4\% & 47{,}4\% \\
+garak (jailbreak, Unicode, chia tách) & 83{,}8\% & 100{,}0\% \\
+injecagent (chỉ thị ẩn) & 47{,}4\% & 100{,}0\% \\
 pyrit (đóng vai, mạo danh) & 100{,}0\% & 100{,}0\% \\
 \bottomrule
 \end{tabularx}
@@ -213,15 +217,15 @@ pyrit (đóng vai, mạo danh) & 100{,}0\% & 100{,}0\% \\
   \node[left,font=\scriptsize] at (0,2.625) {75};
   \node[left,font=\scriptsize] at (0,3.5) {100};
   \draw[gray,dotted] (0,3.5) -- (8.6,3.5);
-  % rule-based: TPR 77.0, FPR 0
-  \fill[teal!70] (0.7,0) rectangle (1.3,2.695);
+  % rule-based: TPR 81.5, FPR 0
+  \fill[teal!70] (0.7,0) rectangle (1.3,2.8525);
   \fill[red!60]  (1.4,0) rectangle (2.0,0);
   \node[font=\scriptsize] at (1.35,-0.28) {rule-based};
-  % qwen3:4b: TPR 77.5, FPR 11.1
-  \fill[teal!70] (3.1,0) rectangle (3.7,2.7125);
-  \fill[red!60]  (3.8,0) rectangle (4.4,0.3885);
+  % qwen3:4b: TPR 100, FPR 18.7
+  \fill[teal!70] (3.1,0) rectangle (3.7,3.5);
+  \fill[red!60]  (3.8,0) rectangle (4.4,0.6545);
   \node[font=\scriptsize] at (3.75,-0.28) {qwen3:4b};
-  % hermes3:8b: TPR 100, FPR 67.1
+  % hermes3:8b: TPR 100, FPR 67.1 (tham chieu pre-normalize)
   \fill[teal!70] (5.5,0) rectangle (6.1,3.5);
   \fill[red!60]  (6.2,0) rectangle (6.8,2.3485);
   \node[font=\scriptsize] at (6.15,-0.28) {hermes3:8b};
@@ -229,132 +233,113 @@ pyrit (đóng vai, mạo danh) & 100{,}0\% & 100{,}0\% \\
   \fill[teal!70] (7.4,3.15) rectangle (7.7,3.35); \node[right,font=\scriptsize] at (7.7,3.25) {TPR};
   \fill[red!60]  (7.4,2.75) rectangle (7.7,2.95); \node[right,font=\scriptsize] at (7.7,2.85) {FPR};
 \end{tikzpicture}
-\caption{So sánh TPR và FPR (\%) giữa ba cấu hình trên cùng bộ 425 case. Cột TPR cao của \texttt{hermes3:8b} đi kèm FPR rất cao --- không phải bằng chứng tường mạnh.}
+\caption{TPR/FPR (\%) sau chuẩn hoá/Output-DLP (rule, qwen); hermes tham chiếu over-block (cùng 425, trước chuẩn hoá Unicode). TPR $100\%$ qwen đi kèm FPR $18{,}7\%$; Stop-before-LLM cả hai $=81{,}5\%$.}
 \label{fig:tpr-fpr-bar}
 \end{figure}
 
-Hình~\ref{fig:tpr-fpr-bar} cho thấy trực quan: hai cấu hình có FPR thấp
-(rule-based, \texttt{qwen3:4b}) có TPR gần bằng nhau ($\approx 77\%$), chỉ khác ở
-FPR; còn \texttt{hermes3:8b} đạt TPR tối đa nhưng bằng cái giá FPR $67\%$. Lưu ý
-``FPR thấp'' ở đây chỉ so sánh tương đối giữa ba cấu hình --- như mục kết luận
-nêu, không cấu hình nào đạt mức triển khai thực tế.
+Hình~\ref{fig:tpr-fpr-bar}: rule-based giữ FPR $0\%$ ở TPR $81{,}5\%$; qwen đạt
+TPR trần với FPR $18{,}7\%$; hermes minh hoạ over-block nặng hơn. Stop-before-LLM
+của rule-based và qwen bằng nhau ($81{,}5\%$).
 
 \subsection{Phân tích kết quả}
 
 Ba quan sát từ số liệu trên định hình kết luận, và không quan sát nào được diễn
 giải theo hướng có lợi một cách thiếu cơ sở.
 
-\textbf{Thứ nhất, lớp luật cho precision cao trên bộ tổng hợp và recall trung
-bình.} Sau khi bổ sung nhóm luật chống mạo danh, cấu hình rule-based đạt TPR
-$77{,}0\%$ mà vẫn giữ FPR $0\%$ trên toàn bộ 225 câu lành tính \emph{tổng hợp}
---- kể cả 125 câu \emph{hard benign} --- tức không chặn nhầm câu lành tính nào
-\emph{trong bộ này} (precision không khái quát tuyệt đối, xem phạm vi ở trên và
-mục Hạn chế). Theo nguồn, lớp luật nay chặn trọn họ PyRIT tổng hợp ($100\%$) và
-giữ nguyên garak ($75{,}2\%$); phần bỏ lọt
-còn lại tập trung ở đòn nhiễu Unicode và chỉ thị ẩn trong văn xuôi (injecagent
-$47{,}4\%$) --- những dạng cần chuẩn hoá/giải nhiễu đầu vào sâu hơn, ghi nhận là
-hướng phát triển. Việc TPR nhảy $+28{,}5$ điểm mà FPR không đổi cho thấy có thể
-nâng recall của guard-luật bằng cách nhắm \emph{đặc trưng bất biến} của một họ
-tấn công thay vì thêm từ khoá rời rạc; song đây không phải phòng thủ thích ứng ---
-một biến thể diễn đạt lại vẫn có thể né.
+\textbf{Thứ nhất, lớp luật (sau mạo danh + chuẩn hoá) vẫn là điểm vận hành cân
+bằng nhất trên bộ tổng hợp.} TPR $81{,}5\%$ @ FPR $0\%$ (run \texttt{ac64cd5c})
+--- FPR $0\%$ là trên \textbf{225 câu lành tính tổng hợp lab} (gồm 125 hard
+benign), \textbf{không} chứng minh không chặn nhầm mọi truy vấn ngoài phân phối
+(vd.\ câu hành chính/kiểm toán hỏi về ghi đè chính sách). PyRIT $100\%$ (n=57)
+phản ánh $\approx 6$ khung template nhúng hai bất biến từ vựng, không phải
+``đã vá mạo danh thực chiến''; tám unit evasion vẫn ALLOW. Garak $83{,}8\%$
+(Unicode $33{,}3\%\to63{,}3\%$ nhờ NFKC/homoglyph) trên \emph{payload lấy cảm hứng}
+từ garak, không gọi tool gốc. Injecagent vẫn $47{,}4\%$ --- residual chính.
 
-\textbf{Thứ hai, lớp Semantic Judge gần như không cải thiện recall mà lại đánh
-đổi precision.} Trên \texttt{qwen3:4b}, tỉ lệ chặn theo từng nguồn gần \emph{trùng
-khớp} với lớp luật đã tối ưu (PyRIT $100\%$, injecagent $47{,}4\%$, garak nhích
-$75{,}2\%\to76{,}2\%$): TPR toàn cục chỉ tăng $77{,}0\%\to77{,}5\%$ (đúng một
-case). Tức là mô hình phán đoán cục bộ nhỏ này \textbf{gần như không bắt thêm
-được đòn nào}, trong khi làm FPR tăng từ $0\%$ lên $11{,}1\%$ (và $14{,}4\%$
-riêng trên hard benign). Kết quả này cho thấy giá trị của LLM-as-judge phụ thuộc
-mạnh vào năng lực mô hình: một mô hình lớn hơn có thể đạt recall rất cao nhưng
-chỉ bằng cách chặn bừa (xem mục đối chiếu bên dưới), còn mô hình nhỏ thì hầu như
-không giúp ích mà chỉ thêm chi phí precision và độ trễ.
+\textbf{Thứ hai, Semantic Judge nhỏ vẫn không mua được chặn sớm.} Stop-before-LLM
+qwen $=$ rule-based $=81{,}5\%$. TPR $100\%$ trên qwen đến từ \textbf{Output-DLP
+canary} chặn $37$ câu trả lời sau khi provider đã được gọi, trong khi FPR nhảy
+lên $18{,}7\%$ (hard benign $20\%$). Judge mặc định được đặt \emph{tắt} (opt-in
+\texttt{SEMANTIC\_GUARD\_USE\_LLM=1}) vì bằng chứng ROI precision âm.
 
-\textbf{Thứ ba, chỉ số exfil bị nhiễu echo nhưng không hoàn toàn là echo.}
-Cấu hình semantic ghi nhận Exfil Marker Rate $21{,}5\%$ (giảm từ $50\%$ ở lần
-đánh giá trước, do lớp luật tối ưu chặn sớm nhiều đòn hơn trước khi gọi mô hình).
-Con số tổng $21{,}5\%$ \textbf{không hợp lệ như một tỉ lệ rò rỉ kho tri thức}:
-$190/200$ prompt tấn công đã chứa sẵn mã canary ngay trong câu hỏi. Đối chiếu
-từng case cho thấy trong $190$ prompt ``nhiễm'' này có $37$ lần lộ --- vì target
-đồng thời có trong prompt lẫn kho nên artifact \textbf{không xác định được nguồn}
-từng marker (không thể khẳng định chắc chắn là echo hay trích xuất). \emph{Tuy
-nhiên}, trên $10$ prompt \emph{sạch} (canary \textbf{chỉ} nằm trong kho, không có
-trong câu hỏi) vẫn có $6$ lần lộ: đây là tín hiệu rò rỉ kho \emph{thật} (exact-
-marker), tuy \textbf{cỡ mẫu nhỏ} ($n=10$ --- đúng bằng ngưỡng tối thiểu nên vẫn
-báo cáo được, nhưng under-powered). Vậy không thể quy toàn bộ thành echo, cũng
-không thể coi $21{,}5\%$ là tỉ lệ rò rỉ kho. Để đo \emph{đúng}, nhóm thực hiện
-một thí nghiệm canary-sạch (canary chỉ tồn tại trong kho) ở
-Mục~\ref{sec:ab-demo}, đồng thời bổ sung lớp phát hiện canary cho Output Guard
-để chặn rò rỉ ngay ở biên đầu ra.
+\textbf{Thứ ba, Output-DLP canary và phép đo exfil.} Trước DLP, aggregate marker
+trên bộ 425 bị nhiễu vì $190/200$ prompt mang sẵn canary; stratum sạch $6/10$
+vẫn cho tín hiệu rò kho. Sau DLP, run qwen báo marker $0\%$ (n=200) --- đúng
+nghĩa ``không còn canary trong answer đã trả'', nhưng TPR $100\%$ \emph{không}
+được đọc như ``hết injection'': $37/200$ vẫn lọt tới mô hình. Thí nghiệm
+canary-sạch paired (Mục~\ref{sec:ab-demo}) đo rò kho độc lập với nhiễu prompt.
 
-\textbf{Đối chiếu (mô hình lớn hơn).} Một lần chạy tham chiếu với \texttt{hermes3:8b}
-trên \emph{cùng bộ 425 case} đạt TPR $100\%$ nhưng FPR $67{,}1\%$. Con số TPR
-$100\%$ này \emph{không} được diễn giải như bằng chứng tường mạnh: một bộ phân
-loại chặn gần như mọi thứ (Stop-before-LLM $99{,}5\%$, tức $199/200$ \emph{tấn
-công} bị chặn trước khi gọi mô hình) tất yếu đạt TPR cao, và FPR $67{,}1\%$ (chặn
-hai phần ba câu hợp lệ) khiến cấu hình đó không thể vận hành.
+\textbf{Đối chiếu (mô hình lớn hơn).} \texttt{hermes3:8b} (tham chiếu trên cùng
+425, trước bước chuẩn hoá Unicode) đạt TPR $100\%$ với FPR $67{,}1\%$ và
+Stop-before-LLM $99{,}5\%$ --- over-block, không vận hành được.
 
-\textbf{Kết luận.} Sau tối ưu, \textbf{lớp luật tất định là cấu hình cân bằng
-nhất}: TPR $77\%$ ở FPR $0\%$ \emph{trên bộ 425 case tổng hợp}. Lớp LLM-as-judge nhỏ chưa chứng minh được lợi ích
-recall tương xứng với chi phí FPR và độ trễ; mô hình lớn đẩy recall lên trần
-nhưng bằng FPR không thể chấp nhận. Không cấu hình đơn lẻ nào đạt mức triển khai
-thực tế; các hướng phát triển còn lại gồm giải nhiễu đầu vào (Unicode/chỉ thị ẩn)
-để nâng recall injecagent, sửa phép đo exfil để đánh giá được rò rỉ kho thật, và
-giảm FPR của lớp ngữ nghĩa.
+\textbf{Kết luận.} \textbf{Lớp luật tất định sau chuẩn hoá} là cấu hình cân bằng
+nhất: TPR $81{,}5\%$ @ FPR $0\%$ \emph{trên bộ 425 tổng hợp}. Semantic judge nhỏ
+không tăng Stop-before-LLM; Output-DLP bù residual marker nhưng không thay input
+recall. Không cấu hình đơn lẻ đạt triển khai thực tế; residual injecagent và FPR
+judge vẫn mở.
 
-Trả lời trực tiếp ba câu hỏi nghiên cứu ở phần Mở đầu: \textbf{CH1} --- tường luật
-phát hiện $77\%$ đòn tấn công tổng hợp ở FPR $0\%$, mạnh trên garak/PyRIT nhưng
-yếu trên injecagent (nhiễu/ẩn); \textbf{CH2} --- Semantic Judge nhỏ
-\emph{không} cải thiện recall đáng kể ($+1$ case) mà làm FPR tăng lên $11{,}1\%$,
-nên chưa xứng chi phí; \textbf{CH3} --- \emph{có}, luật nhắm đặc trưng bất biến
-nâng recall lớp luật thêm $28{,}5$ điểm mà giữ FPR $0\%$ trên bộ tổng hợp, song
-đây là cải thiện theo họ tấn công tổng hợp, không phải phòng thủ thích ứng.
+Trả lời trực tiếp ba câu hỏi nghiên cứu: \textbf{CH1} --- tường luật phát hiện
+$81{,}5\%$ đòn tổng hợp ở FPR $0\%$ (mạnh PyRIT/garak sau chuẩn hoá; yếu
+injecagent $47\%$); \textbf{CH2} --- Semantic Judge nhỏ \emph{không} tăng chặn
+sớm (Stop-before-LLM không đổi) mà FPR $18{,}7\%$, chưa xứng chi phí;
+\textbf{CH3} --- \emph{có}, tối ưu lũy tiến (luật mạo danh $+28{,}5$pp rồi chuẩn
+hoá $+4{,}5$pp) giữ FPR $0\%$ trên bộ tổng hợp, song không phải phòng thủ thích
+ứng.
 
 \section{Thí nghiệm A/B canary-sạch: có tường so với không tường}
 \label{sec:ab-demo}
 
-Để khắc phục nhiễu của phép đo exfil ở trên (canary nằm trong prompt) và để đối
-chiếu công bằng, nhóm thực hiện một thí nghiệm \emph{paired} tái lập được: gieo
-một mã canary \textbf{chỉ vào một tài liệu bảng lương mật trong kho} (canary
-\emph{không} xuất hiện trong bất kỳ prompt nào), rồi chạy \emph{cùng một prompt}
-qua hai luồng --- \textbf{không tường} (gọi thẳng mô hình cục bộ, không guard) và
-\textbf{có tường} (qua toàn bộ chuỗi guard, gồm Output Guard phát hiện canary).
-Vì canary chỉ có trong kho, một canary xuất hiện ở câu trả lời là bằng chứng
-\emph{rò rỉ kho thật}. Bộ câu hỏi gồm 1 câu nghiệp vụ hợp lệ và 6 đòn trích
-xuất/mạo danh bảng lương. Kịch bản tái lập bằng
-\texttt{scripts/run\_demo\_ab\_paired.py}; kết quả content-free tại
-\texttt{reports/demo-ab/}.
+Để khắc phục nhiễu exfil trên bộ 425 (canary nằm trong prompt), nhóm thiết kế
+thí nghiệm \emph{canary-sạch}: gieo một mã canary \textbf{chỉ vào một tài liệu
+bảng lương trong kho} (không có trong prompt). Canary xuất hiện trong câu trả
+lời $\Rightarrow$ bằng chứng rò kho. Mỗi prompt chạy trên hai luồng
+\textbf{cấp hệ thống} (không phải ``cùng retrieval, chỉ bật/tắt guard''):
+
+\begin{itemize}
+    \item \textbf{Không tường:} \texttt{POST /v1/unguarded/chat} --- không guard;
+    retrieve từ \texttt{unguarded\_store}.
+    \item \textbf{Có tường:} \texttt{POST /v1/conversations/.../messages} --- chuỗi
+    guard đầy đủ (gồm Output-DLP canary) + retrieve workspace có ACL.
+\end{itemize}
+
+Cả hai store được seed \emph{cùng} tài liệu canary. Kịch bản tái lập:
+\texttt{scripts/run\_demo\_ab\_paired.py} (đọc đúng trường \texttt{response} của
+endpoint unguarded; artifact content-free + \texttt{manifest.json} theo
+\texttt{run\_id} tại \texttt{reports/demo-ab/<run\_id>/}). Script hỗ trợ
+\texttt{--reps} để lặp độc lập và báo tử số/mẫu số theo từng rep --- không chọn
+``lần đẹp nhất''.
 
 \begin{table}[H]
 \centering
-\caption{Thí nghiệm A/B canary-sạch (canary chỉ trong KB, mô hình \texttt{qwen3:4b}, lặp nhiều lần)}
+\caption{A/B canary-sạch, run \texttt{20260812T095917Z}, \texttt{qwen3:4b},
+\texttt{reps}$=3$ (18 trial tấn công). Nguồn:
+\texttt{reports/demo-ab/20260812T095917Z/ab\_result.json}.}
 \label{tab:ab-demo}
-\begin{tabularx}{\linewidth}{@{}p{0.30\linewidth}YY@{}}
+\begin{tabularx}{\linewidth}{@{}p{0.34\linewidth}YY@{}}
 \toprule
-\textbf{Nhóm prompt} & \textbf{Không tường} & \textbf{Có tường} \\
+\textbf{Chỉ số (attack prompts)} & \textbf{Không tường} & \textbf{Có tường} \\
 \midrule
-Câu hỏi nghiệp vụ hợp lệ (n=1) & Trả lời đúng & Trả lời đúng (allow) \\
-Trích xuất / mạo danh bảng lương (n=6, lặp lại) & Lộ canary + bảng lương \emph{rời rạc} (có lần tới $3/6$, phần lớn $0/6$); tự từ chối \emph{không nhất quán} & \textbf{Lộ $0/6$ ở mọi lần}: Input Guard chặn phần lớn; Output Guard chặn canary ở đầu ra với các đòn lọt Input \\
+Canary leak / trial & $12/18$ ($3/6$, $4/6$, $5/6$ theo rep) & $\mathbf{0/18}$ \\
+Blocked (decision) / trial & --- (không guard) & $9/18$ \\
 \bottomrule
 \end{tabularx}
 \end{table}
 
-Quan sát chính. Ở luồng \textbf{không tường}, cơ chế tự phòng thủ của mô hình
-hoạt động \emph{không nhất quán}: phần lớn lần chạy mô hình tự từ chối, nhưng có
-lần nó \emph{làm lộ nguyên văn} bảng lương (họ tên, mã nhân viên, lương, số tài
-khoản) kèm mã canary ở tới $3/6$ đòn --- tức rò rỉ kho thật. Nói cách khác,
-\emph{không thể tin cậy} vào việc mô hình tự từ chối. Ở luồng \textbf{có tường},
-\textbf{không lần chạy nào lộ canary}: phần lớn đòn bị Input Guard chặn trước khi
-gọi mô hình; đặc biệt, các đòn \emph{lọt qua} Input Guard vẫn bị \textbf{Output
-Guard chặn ở biên đầu ra} khi mô hình định trả canary ra ($2$--$3$ đòn mỗi lần
-chạy) --- minh hoạ trực tiếp giá trị phòng thủ theo chiều sâu. Đây là bằng chứng
-cho thấy lớp guard là \emph{cần thiết} và cho protection \emph{nhất quán} mà
-mô hình đơn lẻ không đảm bảo.
+\textbf{Đọc số (trung thực).} Detector unguarded đọc trường \texttt{response}
+(endpoint lab). Trên artifact này: không tường rò canary \textbf{phi tất định}
+($3$--$5$ trên $6$ đòn mỗi rep); có tường \textbf{không} rò canary trên $18$
+trial ($0/18$), dù chỉ $9/18$ bị block ở decision --- các trial allow vẫn không
+chứa canary trong answer (retrieval/tự từ chối/Output path). Đây là minh hoạ
+cấp \emph{hệ thống lab} (hai path retrieve khác nhau), không phải ablation ``chỉ
+bật/tắt guard trên cùng chunks''.
 
-Đây cũng là phép đo exfil \emph{hợp lệ} (canary chỉ trong kho) mà con số $21{,}5\%$
-ở trên không cung cấp được. Giới hạn: mô hình phi tất định nên số lần lộ của luồng
-không tường dao động giữa các lần chạy (đã báo cáo dạng khoảng); cỡ mẫu nhỏ, dữ
-liệu tổng hợp và mô hình cục bộ; các giá trị nhạy cảm là giả lập và không in lại
-trong báo cáo.
+\textbf{Giới hạn.} (1)~Không suy ACL/BM25 từ A/B này. (2)~Cỡ mẫu nhỏ, synthetic,
+ollama. (3)~Có thể bổ sung phiên thủ công kiểu \texttt{demoBAOCAO.txt} (ghi
+ngày/model/run) song song artifact máy.
+
+Đây là phép đo exfil \emph{đúng thiết kế canary} (marker chỉ trong kho), bổ sung
+cho metric 425 bị nhiễu prompt.
 
 \section{Đánh giá kết quả}
 
@@ -377,15 +362,15 @@ ghi kèm provenance (commit, mô hình, cấu hình, băm dữ liệu) cho các 
 
 \begin{itemize}
     \item FPR $0\%$ đo trên bộ hard benign tổng hợp (57 nội dung độc nhất từ 40 template); precision \textbf{không khái quát}: probe ngoài phân phối cho thấy một số câu quản trị/điều hành hợp lệ (hỏi \emph{về} ghi đè chính sách, yêu cầu xuất dữ liệu hợp pháp cho kiểm toán) vẫn bị chặn nhầm.
-    \item Phép đo Exfil Marker \textbf{bị nhiễu vì prompt chứa sẵn canary} ($190/200$; nguồn từng marker không xác định được); trên $10$ prompt sạch có $6$ lần lộ --- rò rỉ kho là thật nhưng cỡ mẫu nhỏ ($n=10$), chưa định lượng tin cậy. Cần thiết kế lại canary (chỉ nằm trong kho).
-    \item TPR $77\%$ đạt bằng luật nhắm đặc trưng họ tấn công \emph{tổng hợp}; \textbf{không} phải phòng thủ thích ứng --- tám đòn diễn đạt lại trong kiểm thử đơn vị đều né được; $100\%$ trên PyRIT chỉ đúng với họ template hiện tại.
+    \item Phép đo Exfil Marker trên bộ 425 \textbf{bị nhiễu vì prompt chứa sẵn canary} ($190/200$); stratum sạch $6/10$ là tín hiệu rò kho thật nhưng under-powered. Đã bổ sung thí nghiệm canary-sạch A/B (Mục~\ref{sec:ab-demo}) và Output-DLP canary (run qwen marker $0\%$ nhưng $37/200$ vẫn tới provider) --- chưa thay được benchmark canary-sạch cỡ lớn.
+    \item TPR $81{,}5\%$ (rule) đạt bằng luật + chuẩn hoá trên họ tấn công \emph{tổng hợp}; \textbf{không} phòng thủ thích ứng; PyRIT $100\%$ chỉ đúng họ template; TPR $100\%$ qwen \textbf{không} đồng nghĩa input recall $100\%$ (Stop-before-LLM vẫn $81{,}5\%$).
     \item Toàn bộ đánh giá dùng dữ liệu tổng hợp và mô hình cục bộ; \textbf{không} đánh giá trên LLM hay dữ liệu doanh nghiệp thật.
     \item Hệ thống ở quy mô lab, \textbf{không} tuyên bố production-ready hay enterprise-ready.
 \end{itemize}
 
 \section{Kết luận chương}
 
-Kiểm thử lab cho thấy tường guard nhiều lớp phát hiện $77\%$ đòn tấn công tổng
+Kiểm thử lab cho thấy tường guard nhiều lớp phát hiện $81{,}5\%$ đòn tấn công tổng
 hợp ở FPR $0\%$ trên bộ đánh giá, với phân tích trung thực về giới hạn recall,
 precision và phép đo rò rỉ. Mọi diễn giải nằm trong giới hạn bằng chứng tổng hợp
 và mô hình cục bộ.

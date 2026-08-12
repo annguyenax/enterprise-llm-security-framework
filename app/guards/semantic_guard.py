@@ -332,9 +332,15 @@ def _fast_heuristic_screen(text: str) -> GuardDecisionResponse | None:
 
 
 def _llm_enabled() -> bool:
-    """Whether the Ollama judge may be called."""
-    flag = os.getenv("SEMANTIC_GUARD_USE_LLM", "1").strip().lower()
-    if flag in {"0", "false", "no", "off"}:
+    """Whether the Ollama judge may be called.
+
+    Default is OFF (opt-in): the Phase 13 evaluation showed the small local
+    judge adds almost no recall over the rule layer while raising FPR from 0%
+    to ~11%, so the deterministic rule layer is the primary configuration and
+    the LLM judge must be enabled explicitly via SEMANTIC_GUARD_USE_LLM=1.
+    """
+    flag = os.getenv("SEMANTIC_GUARD_USE_LLM", "0").strip().lower()
+    if flag not in {"1", "true", "yes", "on"}:
         return False
     provider = str(getattr(settings, "llm_provider", "mock") or "mock").strip().lower()
     # Mock deployments must not pay network cost; heuristics alone apply.
