@@ -164,3 +164,17 @@ Both auditors' reports are in `docs/`. Not self-adjudicated — maintainer decid
 - Full suite after this revision: `1524 passed, 4 skipped` (short basetemp to
   avoid a Windows temp-dir path-length/permission artifact, unrelated to guard
   logic).
+
+## Clean-commit reproduction (P2, provenance)
+
+Re-running the deterministic rule-based (mock) config from the committed code at
+`7e259bd` reproduces the reported rule-layer result **exactly**: TPR 81.5%
+(TP 163/200), FPR 0%. This confirms the report's rule-layer numbers come from
+committed code, not a dirty tree.
+
+The `git_worktree_dirty=true` flag recorded in the run provenance reflects
+*untracked working-directory artifacts* (reference zips, eval run outputs written
+into `reports/`, and the admin-locked `.p13/` ACL leftover now gitignored) — it
+does **not** indicate uncommitted code. The qwen/hermes configs are LLM-driven
+and non-deterministic, so they are not re-pinned to exact numbers; their runs are
+provenance-stamped with the same commit.

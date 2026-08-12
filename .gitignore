@@ -94,3 +94,6 @@ scratch/
 /pii_docs.txt
 /rag_leak_output.txt
 /list_db.py
+
+# admin-locked pytest ACL leftover (negative test); needs admin to remove
+.p13/
