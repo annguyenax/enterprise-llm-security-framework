@@ -4,80 +4,62 @@
 \section{Mục tiêu kiểm thử}
 
 \begin{enumerate}
-    \item Xác nhận guard và pipeline RAG lab hoạt động đúng trên dữ liệu tổng hợp.
-    \item Xác nhận công cụ phát hành/verify fail-closed và không rò path/token.
-    \item Đo mức độ tái lập và tính toàn vẹn của gói candidate đã rà soát.
-    \item Làm rõ giới hạn bằng chứng (không holdout; chỉ dùng mô hình cục bộ ollama cho Semantic Judge, \textbf{không} phải LLM doanh nghiệp thật; \texttt{NOT\_CHECKED}).
+    \item Xác nhận chuỗi guard và pipeline RAG lab hoạt động đúng trên dữ liệu tổng hợp.
+    \item Đo hiệu quả bảo mật của tường (TPR/FPR/Stop-before-LLM/Exfil) trên bộ tấn công tổng hợp và trả lời ba câu hỏi nghiên cứu.
+    \item Đo mức độ tái lập của quy trình đánh giá.
+    \item Làm rõ giới hạn bằng chứng: chỉ dùng mô hình cục bộ ollama cho Semantic Judge, \textbf{không} phải LLM doanh nghiệp thật.
 \end{enumerate}
 
 \section{Phương pháp kiểm thử}
 
-Nhóm kết hợp: (i)~kiểm thử đơn vị/tích hợp pytest; (ii)~so sánh baseline vs có guard trên bộ đánh giá bảo mật tổng hợp; (iii)~cổng chính sách repository; (iv)~ReleaseReadiness (frozen artifact); (v)~kiểm tra âm trên path/ZIP/neo policy; (vi)~xác minh độc lập bằng gói review có checksum (trình bày tóm tắt).
+Nhóm kết hợp: (i)~kiểm thử đơn vị/tích hợp bằng pytest cho các guard và pipeline RAG; (ii)~đánh giá hiệu quả bảo mật trên bộ tấn công/lành tính tổng hợp với ba cấu hình guard; (iii)~thí nghiệm tối ưu lớp luật, đo trước/sau trên cùng bộ dữ liệu.
 
 \section{Môi trường kiểm thử}
 
-Python trong \texttt{.venv}; pytest với basetemp ngoài repo khi cần; không mạng cho đường đánh giá chính. Candidate cuối được kiểm tra băm độc lập.
+Python trong \texttt{.venv}; pytest với basetemp ngoài repo khi cần; không gọi mạng cho đường đánh giá chính (Mock Provider tất định), tuỳ chọn mô hình cục bộ ollama cho cấu hình Semantic Judge.
 
 \section{Các nhóm kiểm thử}
 
 \subsection{Kiểm thử chức năng}
-Guard decisions, pipeline RAG, builder/verifier CLI.
-
-\subsection{Kiểm thử chính sách}
-Closed-world allowlist, overlap fail-closed, repository policy gate.
-
-\subsection{Kiểm thử đường dẫn}
-Drive, ADS, UNC, traversal, tên dành riêng, tên lồng nhau.
-
-\subsection{Kiểm thử cấu trúc ZIP}
-Gap-free, EOCD, comment, timestamp local/central.
+Quyết định của từng guard, pipeline RAG và kiểm soát truy cập theo vai trò (RBAC).
 
 \subsection{Kiểm thử lỗi và fail-closed}
-Thiếu neo $\rightarrow$ NOT\_VERIFIABLE; lỗi ghi $\rightarrow$ không PASS file; argparse độc $\rightarrow$ content-free.
-
-\subsection{Kiểm thử tính xác định gói phát hành}
-Cùng commit cho cùng cấu trúc/băm candidate trong quy trình đã khóa.
+Xác nhận nguyên tắc quyết định nghiêm khắc nhất thắng và hành vi fail-closed khi có vi phạm rõ.
 
 \section{Kịch bản kiểm thử chính}
 
 \begin{itemize}
-    \item Baseline (always-allow) vs có guard trên bộ đánh giá bảo mật tổng hợp.
-    \item Verify không policy file.
-    \item ZIP non-canonical / path độc trong CLI.
-    \item File output atomic success và failure.
-    \item Publish no-clobber khi đích đã tồn tại (kỳ vọng fail).
+    \item Baseline (always-allow) so với có guard trên bộ đánh giá bảo mật tổng hợp.
+    \item Ba cấu hình guard (rule-based, Semantic Judge \texttt{qwen3:4b}, đối chiếu \texttt{hermes3:8b}) trên cùng bộ 425 case.
+    \item Thí nghiệm tối ưu lớp luật: đo TPR/FPR trước và sau trên cùng dữ liệu.
 \end{itemize}
 
 \section{Kết quả kiểm thử tự động}
 
 \begin{table}[H]
 \centering
-\caption{Tổng hợp kết quả kiểm thử kỹ thuật (lab)}
+\caption{Tổng hợp kết quả kiểm thử tự động (lab)}
 \label{tab:test-summary}
-\begin{tabular}{@{}p{0.48\linewidth}p{0.42\linewidth}@{}}
+\begin{tabular}{@{}p{0.5\linewidth}p{0.4\linewidth}@{}}
 \toprule
 \textbf{Nhóm kiểm thử} & \textbf{Kết quả} \\
 \midrule
-Focused release tests & 207 passed, 1 skipped, exit 0 \\
-CI tests & 45 passed, exit 0 \\
-Repository-policy gate & PASS, 12 checks, 0 failures \\
-ReleaseReadiness & PASS, exit 0 \\
-\quad Readiness focused & 59 passed, 2 skipped \\
-\quad Frozen artifacts & 9/9 byte-identical \\
-\quad Auxiliary fixture & 1/1 byte-identical \\
-Full repository suite & 1524 passed, 0 failed, 4 skipped, 1 warning, exit 0 \\
+Kiểm thử guard đầu vào & 10 passed \\
+Kiểm thử runner đánh giá & 7 passed \\
+Full repository suite & 1524 passed, 0 failed, 4 skipped, exit 0 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Các số liệu trên là kết quả kiểm thử kỹ thuật/tự động của hệ thống lab, \textbf{không} phải chỉ số hiệu quả bảo mật trên môi trường thật.
+Các số liệu trên là kết quả kiểm thử tự động của hệ thống lab, \textbf{không} phải chỉ số hiệu quả bảo mật trên môi trường thật.
 
 \section{Đánh giá hiệu quả bảo mật trên bộ tấn công tổng hợp}
 \label{sec:sec-eval}
 
 Bộ đánh giá bảo mật tổng hợp gồm \textbf{425 case}: \textbf{200 case tấn công}
-\emph{lấy cảm hứng} từ các họ kỹ thuật của NVIDIA garak, Microsoft PyRIT và
-InjecAgent (template tĩnh tự xây, \textbf{không} gọi các bộ công cụ gốc) và
+\emph{lấy cảm hứng} từ các họ kỹ thuật của NVIDIA garak~\cite{derczynski2024garak},
+Microsoft PyRIT và InjecAgent~\cite{zhan2024injecagent} (template tĩnh tự xây,
+\textbf{không} gọi các bộ công cụ gốc) và
 \textbf{225 câu lành tính} gồm 100 câu nghiệp vụ thông thường và 125 câu
 \emph{hard benign} --- câu hợp lệ nhưng bề mặt trông đáng ngờ (chứa từ khoá nhạy
 cảm hợp pháp, hỏi bảo mật chính đáng, tự phục vụ, diễn đạt lại), dùng để đo
@@ -92,6 +74,21 @@ Các chỉ số được định nghĩa: \textbf{TPR} = tấn công bị chặn 
 = tỉ lệ tấn công bị chặn trước khi gọi mô hình; \textbf{Exfil Marker Rate} =
 tỉ lệ câu trả lời để lộ mã canary bí mật. Theo quyết định phương pháp L2,
 \emph{latency không được báo cáo}.
+
+\textbf{Lựa chọn và ý nghĩa chỉ số.} Với một tường guard, hai chỉ số TPR và FPR
+không cùng vai trò. \textbf{FPR được xem là ràng buộc cứng}: một tường chặn nhầm
+câu nghiệp vụ hợp lệ sẽ không thể triển khai, dù có TPR cao đến đâu --- người
+dùng sẽ tắt nó. Do đó bộ lành tính được thiết kế \emph{khó} (125 câu
+\emph{hard benign} chứa từ khoá nhạy cảm hợp pháp, hỏi bảo mật chính đáng, tự
+phục vụ) để đo precision thật, và mục tiêu là \emph{tối đa hoá TPR trong khi giữ
+FPR ở mức thấp nhất có thể}. \textbf{TPR/recall} phản ánh rủi ro bỏ lọt: trong an
+ninh, bỏ sót một đòn tấn công thật thường nguy hiểm hơn một cảnh báo nhầm, nên
+recall là đại lượng cần cải thiện. \textbf{Stop-before-LLM} đo phần tấn công bị
+chặn \emph{trước} khi gọi mô hình --- vừa tiết kiệm chi phí token, vừa là phòng
+thủ sớm không phụ thuộc hành vi mô hình. \textbf{Exfil Marker Rate} đo rò rỉ ở
+tầng đầu ra; như phân tích bên dưới, phép đo này hiện bị nhiễu và chỉ dùng như
+chỉ báo định tính. Tất cả tỉ lệ có cỡ mẫu dưới ngưỡng $n=10$ được báo là ``không
+đủ mẫu'' thay vì một con số dễ gây hiểu lầm.
 
 \textbf{Tối ưu lớp luật.} Lần đánh giá đầu cho thấy lớp luật bỏ lọt hoàn toàn họ
 PyRIT (đóng vai/mạo danh thẩm quyền, $0\%$). Chúng tôi bổ sung một nhóm luật
@@ -153,6 +150,16 @@ Lành tính (n=225) & 25 (FP) & 200 (TN) \\
 \bottomrule
 \end{tabularx}
 \end{table}
+
+Đọc trực tiếp hai ma trận: cấu hình \textbf{rule-based} chặn đúng $154/200$ đòn
+tấn công ($77{,}0\%$) và để lọt $46$; quan trọng hơn, nó \emph{không} chặn nhầm
+câu lành tính nào ($0/225$), kể cả $125$ câu hard benign --- đây là điểm mạnh cốt
+lõi (precision hoàn hảo trên bộ tổng hợp). Thêm \textbf{Semantic Judge}
+\texttt{qwen3:4b} chỉ nhích số đòn chặn được lên $155$ (thêm đúng một case) nhưng
+làm $25$ câu lành tính bị chặn nhầm ($25/225$), tức đổi gần như không có thêm
+recall lấy một khoản precision đáng kể. Con số này định lượng trực tiếp ràng buộc
+đã nêu ở mục lựa chọn chỉ số: với tường guard, một FP tăng thêm là chi phí thật,
+còn một TP tăng thêm chỉ có giá trị nếu không kéo theo FP.
 
 \begin{table}[H]
 \centering
@@ -292,54 +299,84 @@ thực tế; các hướng phát triển còn lại gồm giải nhiễu đầu 
 để nâng recall injecagent, sửa phép đo exfil để đánh giá được rò rỉ kho thật, và
 giảm FPR của lớp ngữ nghĩa.
 
-\section{Kết quả kiểm tra gói phát hành}
+Trả lời trực tiếp ba câu hỏi nghiên cứu ở phần Mở đầu: \textbf{CH1} --- tường luật
+phát hiện $77\%$ đòn tấn công tổng hợp ở FPR $0\%$, mạnh trên garak/PyRIT nhưng
+yếu trên injecagent (nhiễu/ẩn); \textbf{CH2} --- Semantic Judge nhỏ
+\emph{không} cải thiện recall đáng kể ($+1$ case) mà làm FPR tăng lên $11{,}1\%$,
+nên chưa xứng chi phí; \textbf{CH3} --- \emph{có}, luật nhắm đặc trưng bất biến
+nâng recall lớp luật thêm $28{,}5$ điểm mà giữ FPR $0\%$ trên bộ tổng hợp, song
+đây là cải thiện theo họ tấn công tổng hợp, không phải phòng thủ thích ứng.
 
-Candidate đã rà soát:
+\section{Demo A/B thời gian thực: có tường so với không tường}
+\label{sec:ab-demo}
 
-\begin{itemize}
-    \item Định danh mã: commit \texttt{adf4ab5f86a0e19e1d61cfb778c525ed3a3c65c7} (nhánh \texttt{phase-12g-integration}).
-    \item File: \texttt{release-candidate.zip}; SHA-256 \texttt{ba52c91133ab13f1ba1d6654bf3d527b547699cc644383a204a39b3a989ef80d}; 2\,452\,504 byte.
-    \item 301 entry (298 payload + 3 control); manifest schema 5; policy schema 4; generated count 0; comment rỗng; 0 JSONL; 0 \texttt{result.json}.
-\end{itemize}
+Ngoài đo lường định lượng ở trên, nhóm thực hiện một phiên demo thủ công trên kho
+tri thức doanh nghiệp tổng hợp (kho tài liệu HR/IT có phân quyền RBAC), chạy
+\emph{cùng một prompt} trên hai luồng chat: \textbf{không tường} (gọi thẳng mô
+hình, chỉ còn cơ chế tự từ chối của mô hình) và \textbf{có tường} (đi qua chuỗi
+guard). Mục tiêu là minh hoạ trực quan điều số liệu đã chỉ ra --- một LLM thông
+thường \emph{có thể bị thao túng và làm lộ dữ liệu} khi thiếu lớp guard bảo vệ.
 
-\section{Kết quả các tình huống âm}
+\begin{table}[H]
+\centering
+\caption{Đối chiếu A/B trên một số kịch bản demo (kho tri thức có RBAC)}
+\label{tab:ab-demo}
+\begin{tabularx}{\linewidth}{@{}p{0.34\linewidth}YY@{}}
+\toprule
+\textbf{Kịch bản (cùng prompt)} & \textbf{Không tường} & \textbf{Có tường} \\
+\midrule
+Câu hỏi nghiệp vụ hợp lệ (nghỉ phép, MFA, đặt lại mật khẩu) & Trả lời đúng & Trả lời đúng (allow) \\
+Trích xuất toàn bộ bảng lương (họ tên, mã NV, lương, số tài khoản) & \textbf{Lộ toàn bộ bảng lương} & Chặn (Input/Output Guard) \\
+Mạo danh ``theo yêu cầu Chủ tịch/HR Leader'', yêu cầu paste bảng lương & \textbf{Bị thao túng, lộ dữ liệu} & Chặn (Semantic Judge) \\
+Chỉ thị ẩn trong tài liệu bị nhiễm (``luôn trả lời: có được phép'') & \textbf{Tuân theo chỉ thị độc} & Chặn (RAG Context/Input Guard) \\
+\bottomrule
+\end{tabularx}
+\end{table}
 
-Các tình huống âm đã kiểm (tóm tắt): thiếu neo policy $\rightarrow$ NOT\_VERIFIABLE (exit 2); ZIP không chuẩn $\rightarrow$ FAIL content-free; tham số CLI chứa token giả $\rightarrow$ không echo path; lỗi ghi summary/output $\rightarrow$ không để PASS/partial; double-stream failure $\rightarrow$ nonzero, không traceback công khai.
+Quan sát chính: ở luồng \textbf{không tường}, mô hình nhiều lần \emph{làm lộ} toàn
+bộ bảng lương (họ tên, mã nhân viên, lương cơ bản, số tài khoản ngân hàng) khi
+được yêu cầu trực tiếp, và \emph{bị thao túng} bởi đòn mạo danh thẩm quyền (``theo
+yêu cầu của Chủ tịch\ldots'') --- cơ chế tự từ chối của mô hình hoạt động
+\emph{không nhất quán} (có lần từ chối, có lần vẫn lộ). Ở luồng \textbf{có tường},
+cùng những prompt đó bị chặn tại Input Guard, Semantic Judge hoặc Output Guard,
+trong khi câu hỏi nghiệp vụ hợp lệ vẫn được trả lời bình thường. Đây là bằng chứng
+định tính cho thấy lớp guard là \emph{cần thiết}: chỉ dựa vào ``mô hình tự phòng
+thủ'' là không đủ.
+
+Cần nêu rõ giới hạn: đây là demo \emph{thủ công, định tính}, trên dữ liệu tổng
+hợp và mô hình cục bộ (không phải LLM doanh nghiệp thật); các giá trị nhạy cảm chỉ
+là dữ liệu giả lập và không được in lại trong báo cáo. Kết quả demo bổ trợ trực
+quan cho số liệu định lượng, không thay thế.
 
 \section{Đánh giá kết quả}
 
 \subsection{Mức độ đáp ứng yêu cầu}
-Các nhóm FR chính (guard, RAG lab, release verify, log content-free) đã có hiện thực và kiểm thử tương ứng trong lab.
+Các nhóm yêu cầu chức năng chính --- chuỗi guard đầu vào/ngữ cảnh/đầu ra,
+pipeline RAG có kiểm soát truy cập, và ghi nhật ký content-free --- đều đã có
+hiện thực và bộ kiểm thử tương ứng trong môi trường lab.
 
-\subsection{Tính toàn vẹn của gói phát hành}
-Băm, kích thước, tập control/payload và cấu trúc ZIP gap-free đã được đối chiếu độc lập.
-
-\subsection{Khả năng phát hiện dữ liệu/cấu trúc không hợp lệ}
-Verifier và test âm cho thấy fail-closed trên nhiều lớp (path, ZIP, neo).
-
-\subsection{Tính an toàn của đầu ra công khai}
-Emitter content-free; không lộ raw argparse message theo thiết kế hiện tại.
+\subsection{Tính an toàn của đầu ra}
+Đầu ra guard được ghi ở dạng content-free (mã lý do ổn định, không lộ nội dung
+nhạy cảm thô); quyết định tuân nguyên tắc fail-closed khi có vi phạm rõ.
 
 \subsection{Khả năng tái lập}
-Mock Provider, artifact đóng băng, full suite/releease tests lặp được trong môi trường đã mô tả.
-
-\subsection{Đánh giá và xác minh độc lập}
-Ngoài pytest, chuỗi review kỹ thuật/phương pháp cục bộ ghi nhận: review kỹ thuật ràng buộc PASS (19/20; 0 Critical, 0 Major); các review bổ trợ operator/docs và history/process PASS; audit cục bộ cuối PASS. Đây là xác minh quy trình/kỹ thuật lab, \textbf{không} chứng minh an toàn tuyệt đối. Bằng chứng kênh web không có package local (Gemini) \textbf{không} được dùng làm cổng.
+Mock Provider tất định, bộ dữ liệu và artifact đánh giá được băm SHA-256, và bộ
+kiểm thử tự động lặp lại được trong môi trường đã mô tả; mỗi lần chạy đánh giá
+ghi kèm provenance (commit, mô hình, cấu hình, băm dữ liệu) để truy vết số liệu.
 
 \section{Hạn chế của kết quả đánh giá}
 
 \begin{itemize}
-    \item Holdout benchmark v2 \textbf{chưa} chạy; 12E.4 mang tính exploratory/diagnostic only nếu có evidence ngoài submission.
     \item FPR $0\%$ đo trên bộ hard benign tổng hợp (57 nội dung độc nhất từ 40 template); precision \textbf{không khái quát}: probe ngoài phân phối cho thấy một số câu quản trị/điều hành hợp lệ (hỏi \emph{về} ghi đè chính sách, yêu cầu xuất dữ liệu hợp pháp cho kiểm toán) vẫn bị chặn nhầm.
     \item Phép đo Exfil Marker \textbf{bị nhiễu vì prompt chứa sẵn canary} ($190/200$; nguồn từng marker không xác định được); trên $10$ prompt sạch có $6$ lần lộ --- rò rỉ kho là thật nhưng cỡ mẫu nhỏ ($n=10$), chưa định lượng tin cậy. Cần thiết kế lại canary (chỉ nằm trong kho).
     \item TPR $77\%$ đạt bằng luật nhắm đặc trưng họ tấn công \emph{tổng hợp}; \textbf{không} phải phòng thủ thích ứng --- tám đòn diễn đạt lại trong kiểm thử đơn vị đều né được; $100\%$ trên PyRIT chỉ đúng với họ template hiện tại.
-    \item Không đánh giá hiệu quả bảo mật trên LLM/dữ liệu doanh nghiệp thật.
-    \item Vulnerability status: \texttt{NOT\_CHECKED}.
-    \item Public CI $\neq$ full suite private.
-    \item Không production-ready / enterprise-ready / real-LLM parity claim.
-    \item Không tag, không public release; báo cáo \textbf{không} tự xướng ``Phase PASS'' dự án.
+    \item Toàn bộ đánh giá dùng dữ liệu tổng hợp và mô hình cục bộ; \textbf{không} đánh giá trên LLM hay dữ liệu doanh nghiệp thật.
+    \item Hệ thống ở quy mô lab, \textbf{không} tuyên bố production-ready hay enterprise-ready.
 \end{itemize}
 
 \section{Kết luận chương}
 
-Kiểm thử lab cho thấy hệ thống đáp ứng các kịch bản đã thiết kế với độ bao phủ test cao và gói phát hành có định danh cố định. Mọi diễn giải phải nằm trong giới hạn bằng chứng tổng hợp và mock.
+Kiểm thử lab cho thấy tường guard nhiều lớp phát hiện $77\%$ đòn tấn công tổng
+hợp ở FPR $0\%$ trên bộ đánh giá, với phân tích trung thực về giới hạn recall,
+precision và phép đo rò rỉ. Mọi diễn giải nằm trong giới hạn bằng chứng tổng hợp
+và mô hình cục bộ.

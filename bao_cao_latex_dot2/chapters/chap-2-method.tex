@@ -10,30 +10,30 @@ Bài toán đặt ra là xây dựng khung kiểm soát an toàn cho ứng dụn
 \begin{enumerate}
     \item Cung cấp cổng (gateway) trung gian xử lý yêu cầu RAG/chat với các lớp guard.
     \item Cho phép so sánh baseline (không guard) và có guard trên cùng bộ test tổng hợp.
-    \item Cung cấp công cụ đóng gói candidate và công cụ verify theo chính sách ngoài.
-    \item Sinh kết quả máy-đọc được (PASS/FAIL/NOT\_VERIFIABLE) mà không rò rỉ path/token thô.
+    \item Đo và so sánh hiệu quả của tường trên bộ đánh giá bảo mật tổng hợp.
+    \item Ghi nhật ký quyết định guard dạng content-free, không rò rỉ nội dung nhạy cảm thô.
 \end{enumerate}
 
 \section{Phạm vi chức năng}
 
-\textbf{Trong phạm vi:} guard rule-based; RAG demo với BM25; Mock LLM; benchmark tổng hợp; release tooling. \textbf{Ngoài phạm vi:} fine-tune mô hình, SIEM, Kubernetes, multi-turn adversary thực chiến, holdout one-shot chưa uỷ quyền, quét CVE tự động (trạng thái vulnerability: \texttt{NOT\_CHECKED}).
+\textbf{Trong phạm vi:} guard rule-based và Semantic Judge; RAG demo với BM25 kết hợp embedding; Mock Provider và mô hình cục bộ ollama; bộ benchmark tấn công/lành tính tổng hợp. \textbf{Ngoài phạm vi:} fine-tune mô hình, SIEM, Kubernetes, multi-turn adversary thực chiến, và đánh giá trên LLM hay dữ liệu doanh nghiệp thật.
 
 \section{Yêu cầu chức năng}
-
-\subsection{Quản lý chính sách kiểm soát}
-Hệ thống phải nạp chính sách allowlist/denylist dạng máy-đọc (schema cố định), phân loại đường dẫn theo quy tắc không chồng lấn mơ hồ, và từ chối khi không phân loại được.
 
 \subsection{Kiểm tra dữ liệu đầu vào}
 Phát hiện injection/jailbreak/pattern rủi ro; trả về Allow/Block/Sanitize/Log theo thiết kế hành vi.
 
+\subsection{Kiểm tra ngữ cảnh truy hồi}
+Phát hiện chỉ thị ẩn, tài liệu mạo danh thẩm quyền và mẫu poisoning trong ngữ cảnh RAG; hỗ trợ làm sạch từng đoạn.
+
 \subsection{Kiểm tra dữ liệu đầu ra}
 Rà DLP/pattern nhạy cảm trên phản hồi; fail-closed khi vi phạm rõ.
 
-\subsection{Kiểm tra gói phát hành}
-Kiểm tra manifest, checksum, kích thước, cấu trúc ZIP, path đa nền tảng, archive lồng nhau (metadata/tên, không extract nội dung tùy ý).
+\subsection{Kiểm soát truy cập nguồn tài liệu}
+Áp kiểm soát truy cập theo vai trò/phòng ban (RBAC) trước bước truy hồi; người dùng chỉ truy hồi được tài liệu trong phạm vi quyền.
 
 \subsection{Ghi nhận và tổng hợp kết quả}
-Ghi quyết định guard và kết quả verify dưới dạng JSON content-free; hỗ trợ file kết quả atomic.
+Ghi quyết định guard dưới dạng JSON content-free với mã lý do ổn định, không lộ nội dung nhạy cảm thô.
 
 \begin{table}[H]
 \centering
@@ -43,11 +43,10 @@ Ghi quyết định guard và kết quả verify dưới dạng JSON content-fre
 \toprule
 \textbf{Mã nhóm} & \textbf{Mô tả} \\
 \midrule
-FR-POL & Nạp và áp dụng chính sách allowlist/closed-world \\
 FR-IN  & Guard đầu vào và quyết định hành vi \\
+FR-CTX & Guard ngữ cảnh truy hồi (chỉ thị ẩn, poisoning) \\
 FR-OUT & Guard đầu ra / DLP \\
-FR-RAG & Pipeline truy hồi + ngữ cảnh có kiểm soát nguồn \\
-FR-REL & Đóng gói, verify, publish candidate có kiểm soát \\
+FR-RAG & Pipeline truy hồi + kiểm soát truy cập RBAC theo nguồn \\
 FR-LOG & Nhật ký/mã lý do ổn định, content-free \\
 \bottomrule
 \end{tabular}
@@ -65,14 +64,14 @@ Hạt giống/fixture cố định; Mock Provider tất định; băm SHA-256 ch
 Cùng đầu vào cho cùng cấu hình cho kết quả ổn định trong môi trường lab đã mô tả.
 
 \subsection{Khả năng kiểm tra}
-Bộ pytest và script verify phase; cổng chính sách repository.
+Bộ pytest cho các guard và pipeline RAG; bộ chạy đánh giá bảo mật tái lập được, có ghi provenance.
 
 \subsection{Khả năng bảo trì}
-Tách module guard, release scripts, tài liệu chính sách; tránh hard-code secret.
+Tách module theo từng guard và thành phần truy hồi; tránh hard-code secret.
 
 \section{Mô hình kiến trúc tổng thể}
 
-Kiến trúc logic gồm: (1)~lớp ứng dụng/gateway FastAPI; (2)~chuỗi guard; (3)~retrieval + Mock LLM; (4)~lớp công cụ release (builder/verifier) độc lập với runtime chat. Luồng runtime và luồng phát hành tách biệt nhưng chia sẻ nguyên tắc fail-closed và content-free.
+Kiến trúc logic gồm ba lớp: (1)~lớp ứng dụng/gateway FastAPI; (2)~chuỗi guard phòng thủ nhiều lớp; (3)~cơ chế truy hồi lai kết hợp kiểm soát truy cập RBAC và mô hình ngôn ngữ (Mock hoặc cục bộ). Mọi lớp chia sẻ nguyên tắc fail-closed và ghi nhật ký content-free.
 
 \begin{figure}[H]
 \centering
@@ -155,23 +154,6 @@ hai luồng dùng chung: luồng ``có tường'' đi qua chuỗi guard, luồng
 bỏ qua guard; cả hai cùng gọi một mô hình. Đây là điều kiện then chốt để so sánh
 công bằng.
 
-\section{Thiết kế các thành phần}
-
-\subsection{Thành phần quản lý chính sách}
-File allowlist schema cố định; mỗi path được đếm số rule khớp; 0 hoặc $>1$ khớp fail-closed.
-
-\subsection{Thành phần kiểm tra gói phát hành}
-Verifier đọc ZIP, đối chiếu manifest/checksum/size, kiểm EOCD/gap-free, path an toàn.
-
-\subsection{Thành phần kiểm soát đường dẫn và cấu trúc tệp}
-Validator POSIX/Windows: từ chối drive, ADS, UNC, \texttt{..}, tên thiết bị, khoảng trắng mơ hồ.
-
-\subsection{Thành phần ghi kết quả an toàn}
-Emitter dùng chung: serialize JSON trước; file atomic (temp + fsync + replace); terminal fallback content-free.
-
-\subsection{Thành phần kiểm thử và xác minh}
-Pytest cho release/CI; ma trận case âm (path độc, ZIP hỏng, thiếu neo policy).
-
 \section{Luồng hoạt động của hệ thống}
 
 \begin{figure}[H]
@@ -187,14 +169,15 @@ lời; quyết định \emph{Allow} hoặc \emph{Sanitize} cho phép đi tiếp 
 Nguyên tắc fail-closed bảo đảm quyết định nghiêm khắc nhất trong toàn chuỗi được
 áp dụng.
 
-\section{Mô hình dữ liệu và cấu trúc tệp}
-
-Gói phát hành gồm payload \texttt{repo/*} và ba control: \texttt{release-manifest.json}, \texttt{FILE\_SIZES.json}, \texttt{SHA256SUMS.txt}. Manifest schema phiên bản cố định; \texttt{generated.count} $= 0$ trong cấu hình chuẩn không có artifact sinh.
-
 \section{Thiết kế cơ chế xử lý lỗi}
 
-Mọi lỗi phân tích ứng viên ánh xạ sang mã ổn định (FAIL hoặc NOT\_VERIFIABLE). Thiếu file policy ngoài $\Rightarrow$ NOT\_VERIFIABLE (không bao giờ PASS). Lỗi ghi đầu ra $\Rightarrow$ exit khác 0, không giữ PASS/partial. Lỗi hệ thống bất ngờ được bọc biên public, không in traceback ra kênh công khai.
+Mọi lỗi trong đường xử lý được ánh xạ về quyết định an toàn: khi không chắc chắn
+hoặc gặp lỗi phân tích, hệ thống fail-closed (giữ lại câu trả lời) thay vì mặc
+định cho qua. Lỗi hệ thống bất ngờ được bọc ở biên công khai, không in nội dung
+nhạy cảm hay traceback ra kênh công khai.
 
 \section{Kết luận chương}
 
-Yêu cầu và thiết kế nhấn mạnh fail-closed, tái lập và tách runtime guard khỏi release tooling. Chương~3 trình bày cách các thành phần được hiện thực.
+Yêu cầu và thiết kế nhấn mạnh phòng thủ nhiều lớp, fail-closed, kiểm soát truy
+cập theo nguồn và tính tái lập. Chương~3 trình bày cách các thành phần được hiện
+thực.

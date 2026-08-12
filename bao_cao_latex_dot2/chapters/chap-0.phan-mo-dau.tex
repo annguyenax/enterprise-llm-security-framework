@@ -8,20 +8,39 @@ Trong những năm gần đây, mô hình ngôn ngữ lớn (Large Language Mode
 
 \section*{Bối cảnh và vấn đề}
 
-Hệ thống RAG kết hợp kho tài liệu với LLM, tạo ra bề mặt tấn công mới: nội dung tài liệu có thể chứa chỉ dẫn độc hại (indirect injection); đầu vào người dùng có thể cố ghi đè chỉ dẫn hệ thống; đầu ra có thể vô tình phát tán chuỗi nhạy cảm. Đồng thời, khi đóng gói và bàn giao mã nguồn/đồ án, cần đảm bảo gói phát hành không lẫn dữ liệu thô, đường dẫn không an toàn hay cấu trúc lưu trữ không chuẩn. Bài toán của đề tài là xây dựng và kiểm thử một \textbf{khung kiểm soát an toàn} (guardrail / release-assurance) ở quy mô lab, dùng dữ liệu tổng hợp và mô hình giả lập, phục vụ nghiên cứu và đánh giá có kiểm soát --- không thay thế hệ thống bảo mật production.
+Hệ thống RAG kết hợp kho tài liệu với LLM, tạo ra bề mặt tấn công mới: nội dung tài liệu có thể chứa chỉ dẫn độc hại (indirect injection); đầu vào người dùng có thể cố ghi đè chỉ dẫn hệ thống; đầu ra có thể vô tình phát tán chuỗi nhạy cảm. Bài toán của đề tài là xây dựng và kiểm thử một \textbf{khung kiểm soát an toàn} (guardrail) nhiều lớp ở quy mô lab, dùng dữ liệu tổng hợp và mô hình giả lập, phục vụ nghiên cứu và đánh giá có kiểm soát --- không thay thế hệ thống bảo mật production.
 
 \section*{Mục tiêu}
 
 \begin{enumerate}
-    \item Khảo sát rủi ro an toàn liên quan LLM/RAG và các nguyên tắc kiểm soát đầu vào, đầu ra, chính sách và ghi nhận.
-    \item Phân tích yêu cầu, thiết kế kiến trúc khung kiểm soát và luồng xử lý.
-    \item Xây dựng các thành phần: gateway/guard, pipeline RAG demo, công cụ đóng gói và kiểm tra gói phát hành.
-    \item Tổ chức kiểm thử tự động, đánh giá kết quả trên dữ liệu tổng hợp, và nêu rõ hạn chế bằng chứng.
+    \item Khảo sát rủi ro an toàn liên quan LLM/RAG và các nguyên tắc kiểm soát đầu vào, ngữ cảnh, đầu ra và ghi nhận.
+    \item Phân tích yêu cầu, thiết kế kiến trúc khung kiểm soát nhiều lớp và luồng xử lý.
+    \item Xây dựng các thành phần: gateway, chuỗi guard, pipeline RAG demo với kiểm soát truy cập RBAC.
+    \item Tổ chức kiểm thử tự động, đánh giá hiệu quả tường trên dữ liệu tổng hợp, và nêu rõ hạn chế bằng chứng.
 \end{enumerate}
 
 \section*{Đối tượng và phạm vi}
 
-\textbf{Đối tượng:} cơ chế guardrail cho ứng dụng RAG/LLM lab-scale; công cụ kiểm tra gói phát hành và chính sách include/exclude. \textbf{Phạm vi:} dữ liệu tổng hợp 100\%; Mock LLM Provider ngoại tuyến; không gọi API trả phí; không holdout benchmark như thí nghiệm cuối trong báo cáo này; không tuyên bố production-ready hay enterprise-ready.
+\textbf{Đối tượng:} cơ chế guardrail nhiều lớp cho ứng dụng RAG/LLM lab-scale. \textbf{Phạm vi:} dữ liệu tổng hợp 100\%; Mock Provider và mô hình cục bộ ollama; không gọi API trả phí; không đánh giá trên LLM hay dữ liệu doanh nghiệp thật; không tuyên bố production-ready hay enterprise-ready.
+
+\section*{Câu hỏi nghiên cứu}
+
+Phần đánh giá thực nghiệm (Chương~4) được tổ chức để trả lời ba câu hỏi:
+
+\begin{itemize}
+    \item \textbf{CH1.} Tường guard dựa trên luật phát hiện được các họ tấn công
+    tổng hợp (garak, PyRIT, InjecAgent) ở mức nào, và với tỉ lệ báo động nhầm
+    (FPR) trên câu lành tính ra sao?
+    \item \textbf{CH2.} Bổ sung một Semantic Judge (mô hình ngôn ngữ cục bộ) có
+    cải thiện độ phủ (recall) so với lớp luật không, và đánh đổi precision như
+    thế nào?
+    \item \textbf{CH3.} Có thể nâng recall của lớp luật bằng cách nhắm
+    \emph{đặc trưng bất biến} của một họ tấn công mà \emph{không} làm tăng FPR
+    hay không?
+\end{itemize}
+
+Độ trễ (latency) không nằm trong câu hỏi nghiên cứu báo cáo được: theo quyết
+định phương pháp, độ trễ chỉ được mô tả định tính và không công bố số p50/p95.
 
 \section*{Phương pháp}
 
@@ -38,10 +57,13 @@ Nhóm kết hợp nghiên cứu tài liệu (OWASP LLM Top 10, LLMSVS và các c
     \textbf{kiểm soát truy cập theo vai trò} (RBAC) áp dụng trước truy hồi.
     \item \textbf{Khung so sánh A/B có tường vs.\ không tường} trên cùng một cơ
     chế RAG, cho phép đo tách bạch tác dụng của tường lửa.
-    \item \textbf{Bộ đánh giá bảo mật tổng hợp} (300 case tấn công/lành tính) và
-    quy trình đo các chỉ số TPR/FPR/Stop-before-LLM/Exfil trên hai cấu hình
-    guard, trung thực về hạn chế và không báo cáo số liệu chưa đo được.
-    \item \textbf{Công cụ đóng gói và kiểm tra gói phát hành} bảo đảm tính toàn
-    vẹn (allowlist, kiểm tra ZIP/đường dẫn, đầu ra content-free, verify trước
-    khi phát hành).
+    \item \textbf{Bộ đánh giá bảo mật tổng hợp} (425 case: 200 tấn công lấy cảm
+    hứng từ garak/PyRIT/InjecAgent + 225 câu lành tính, gồm cả hard benign) và
+    quy trình đo TPR/FPR/Stop-before-LLM/Exfil trên ba cấu hình guard
+    (rule-based, Semantic Judge \texttt{qwen3:4b}, đối chiếu \texttt{hermes3:8b}),
+    trung thực về hạn chế và không báo cáo số liệu chưa đo được.
+    \item \textbf{Tối ưu lớp luật nhắm đặc trưng bất biến} của họ tấn công mạo
+    danh thẩm quyền, nâng recall của tường luật ($48{,}5\% \to 77{,}0\%$ TPR) mà
+    giữ FPR $0\%$ trên bộ tổng hợp, kèm phân tích trung thực về giới hạn khái
+    quát của cách tiếp cận dựa trên luật.
 \end{itemize}

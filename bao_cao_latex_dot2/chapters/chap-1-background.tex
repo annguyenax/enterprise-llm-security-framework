@@ -13,7 +13,7 @@ Một kiến trúc phổ biến là RAG: (1)~người dùng gửi câu hỏi; (2
 
 \subsection{Prompt injection}
 
-Prompt injection là kỹ thuật khiến mô hình ưu tiên chỉ dẫn của kẻ tấn công hơn chỉ dẫn hệ thống, ví dụ yêu cầu ``bỏ qua mọi chính sách trước đó''. Dạng gián tiếp xảy ra khi chỉ dẫn độc hại nằm trong tài liệu/email được nạp vào ngữ cảnh RAG~\cite{owasp_llm_top10}.
+Prompt injection là kỹ thuật khiến mô hình ưu tiên chỉ dẫn của kẻ tấn công hơn chỉ dẫn hệ thống, ví dụ yêu cầu ``bỏ qua mọi chính sách trước đó''~\cite{perez2022ignore}. Dạng gián tiếp (indirect prompt injection) xảy ra khi chỉ dẫn độc hại nằm trong tài liệu/email được nạp vào ngữ cảnh RAG~\cite{owasp_llm_top10,greshake2023indirect}.
 
 \subsection{Rò rỉ dữ liệu và thông tin nhạy cảm}
 
@@ -27,9 +27,9 @@ Ngoài rò rỉ, đầu ra có thể chứa hướng dẫn lạm dụng, nội d
 
 Mô hình có thể ``ảo giác'' hoặc bị thao túng bởi ngữ cảnh độc. Cơ chế provenance/trust và giới hạn nguồn tài liệu phía máy chủ giảm phụ thuộc mù quáng vào nội dung truy hồi.
 
-\subsection{Rủi ro từ dữ liệu, công cụ và thành phần tích hợp}
+\subsection{Rủi ro từ dữ liệu và thành phần tích hợp}
 
-Archive lồng nhau, đường dẫn Windows/Unix không an toàn, ZIP không chuẩn, và phụ thuộc phần mềm chưa quét lỗ hổng đều tạo rủi ro vận hành. Đề tài coi kiểm tra gói phát hành là một lớp kiểm soát ngang hàng với guard runtime.
+Khi LLM được tích hợp nguồn dữ liệu ngoài hoặc được cấp công cụ, chỉ dẫn độc hại có thể lan truyền qua tài liệu được truy hồi hoặc qua công cụ tích hợp (indirect prompt injection)~\cite{zhan2024injecagent}, và phụ thuộc phần mềm chưa được quét lỗ hổng cũng tạo rủi ro vận hành.
 
 \section{Nguyên tắc kiểm soát an toàn}
 
@@ -46,7 +46,7 @@ Allowlist/denylist đóng thế giới; nguồn tài liệu được máy chủ 
 Log quyết định guard với mã lý do ổn định; tránh ghi nội dung bí mật thô ra kênh công khai.
 
 \subsection{Kiểm thử và xác minh}
-Bộ case red-team tổng hợp, kiểm thử tự động, và (ở lớp phát hành) verify trước khi publish.
+Bộ case red-team tổng hợp và kiểm thử tự động có kiểm soát.
 
 \section{Một số tiêu chuẩn và tài liệu liên quan}
 
@@ -67,4 +67,4 @@ hình (rò rỉ khoá, PII --- LLM02) do Output/DLP Guard xử lý.
 
 \section{Kết luận chương}
 
-Chương này xác lập nền tảng: LLM/RAG mang lại năng lực mới nhưng mở rộng bề mặt tấn công; kiểm soát cần đa lớp (đầu vào, ngữ cảnh, đầu ra, gói phát hành) và phải đo được bằng kiểm thử có kiểm soát. Chương tiếp theo chuyển sang phân tích yêu cầu và thiết kế hệ thống của đề tài.
+Chương này xác lập nền tảng: LLM/RAG mang lại năng lực mới nhưng mở rộng bề mặt tấn công; kiểm soát cần đa lớp (đầu vào, ngữ cảnh, đầu ra) và phải đo được bằng kiểm thử có kiểm soát. Chương tiếp theo chuyển sang phân tích yêu cầu và thiết kế hệ thống của đề tài.
