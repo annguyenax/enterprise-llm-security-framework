@@ -40,7 +40,21 @@ def _rx(pattern: str) -> re.Pattern[str]:
     return re.compile(pattern, re.IGNORECASE)
 
 
+# A seeded canary marker (FLAG{FAMILY-NNN-...}) appearing in a response is by
+# definition an exfiltration of a secret that lives only in the knowledge base;
+# it must be withheld at the output boundary even if the request passed every
+# input-side guard. This is the Output-DLP layer that closes the residual
+# output-leak gap identified in the Phase 13 evaluation.
+CANARY_MARKER_PATTERN = _rx(r"FLAG\{[A-Za-z0-9._-]{1,80}\}")
+
+
 RULES: tuple[Rule, ...] = (
+    Rule(
+        "output-canary-exfil", "canary_exfiltration", CANARY_MARKER_PATTERN,
+        Decision.BLOCK, 0.97,
+        "Detected a seeded canary marker in the output - blocked as knowledge-base data exfiltration.",
+        redact=True,
+    ),
     Rule(
         "output-fake-secret", "fake_secret_leak", FAKE_SECRET_PATTERN,
         Decision.SANITIZE, 0.7,

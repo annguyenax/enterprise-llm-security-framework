@@ -45,8 +45,9 @@ nghiêm khắc nhất thắng).
     \item \textbf{RAG Context Guard:} đối chiếu luật trên \emph{ngữ cảnh truy
     hồi}, phát hiện chỉ thị ẩn trong bình luận HTML, tài liệu mạo danh thẩm
     quyền và mẫu poisoning; hỗ trợ làm sạch (sanitize) từng đoạn.
-    \item \textbf{Output Guard / DLP:} rà mẫu bí mật (khoá API, token) và thông
-    tin nhạy cảm trên phản hồi trước khi trả về; fail-closed khi vi phạm rõ.
+    \item \textbf{Output Guard / DLP:} rà mẫu bí mật (khoá API, token), thông
+    tin nhạy cảm và \textbf{mã canary seed từ kho} trên phản hồi trước khi trả
+    về; một canary xuất hiện ở đầu ra bị chặn như hành vi rò rỉ dữ liệu (fail-closed).
     \item \textbf{Semantic Judge:} tuỳ chọn, gọi một mô hình ngôn ngữ cục bộ
     phán đoán ý đồ với các đòn tấn công ngữ nghĩa mà luật bỏ lọt --- theo hướng
     dùng LLM làm bộ bảo vệ đầu vào/đầu ra (LLM-as-judge)~\cite{inan2023llamaguard}.
@@ -81,9 +82,9 @@ nhất bằng Reciprocal Rank Fusion để chọn ra tài liệu liên quan nh�
 \section{Tích hợp kiểm thử tự động}
 
 Bộ kiểm thử tự động (pytest) bao phủ quyết định của từng guard, pipeline RAG và
-kiểm soát truy cập RBAC, cùng bộ chạy đánh giá bảo mật trên dữ liệu tổng hợp. Mỗi
-lần chạy đánh giá ghi kèm provenance (commit, mô hình, cấu hình, băm dữ liệu) để
-truy vết. Chi tiết kết quả trình bày ở Chương~4.
+kiểm soát truy cập RBAC, cùng bộ chạy đánh giá bảo mật trên dữ liệu tổng hợp. Bộ
+chạy đánh giá ghi kèm provenance tối thiểu (commit, mô hình, cấu hình, băm dữ
+liệu) cho các lần chạy mới để truy vết. Chi tiết kết quả trình bày ở Chương~4.
 
 \section{Kết luận chương}
 

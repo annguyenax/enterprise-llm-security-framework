@@ -45,8 +45,9 @@ Xác nhận nguyên tắc quyết định nghiêm khắc nhất thắng và hàn
 \textbf{Nhóm kiểm thử} & \textbf{Kết quả} \\
 \midrule
 Kiểm thử guard đầu vào & 10 passed \\
+Kiểm thử guard đầu ra (gồm canary/DLP) & 6 passed \\
 Kiểm thử runner đánh giá & 7 passed \\
-Full repository suite & 1524 passed, 0 failed, 4 skipped, exit 0 \\
+Full repository suite & 1526 passed, 0 failed, 4 skipped, exit 0 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -92,7 +93,7 @@ chỉ báo định tính. Tất cả tỉ lệ có cỡ mẫu dưới ngưỡng 
 
 \textbf{Tối ưu lớp luật.} Lần đánh giá đầu cho thấy lớp luật bỏ lọt hoàn toàn họ
 PyRIT (đóng vai/mạo danh thẩm quyền, $0\%$). Chúng tôi bổ sung một nhóm luật
-nhắm \emph{hai bất biến} của đòn mạo danh --- chỉ thị vượt quyền (ghi đè chính
+nhắm \emph{hai bất biến từ vựng} của đòn mạo danh (cụm từ đặc trưng, không phải đặc trưng ngữ nghĩa) --- chỉ thị vượt quyền (ghi đè chính
 sách/ACL, ``không được từ chối cấp trên'') và yêu cầu trích xuất hàng loạt dữ
 liệu nhạy cảm --- thay vì khớp đúng câu chữ của từng case. Trên cùng bộ 425
 case, thay đổi này nâng TPR của lớp luật từ $48{,}5\%$ lên $77{,}0\%$ mà
@@ -154,7 +155,7 @@ Lành tính (n=225) & 25 (FP) & 200 (TN) \\
 Đọc trực tiếp hai ma trận: cấu hình \textbf{rule-based} chặn đúng $154/200$ đòn
 tấn công ($77{,}0\%$) và để lọt $46$; quan trọng hơn, nó \emph{không} chặn nhầm
 câu lành tính nào ($0/225$), kể cả $125$ câu hard benign --- đây là điểm mạnh cốt
-lõi (precision hoàn hảo trên bộ tổng hợp). Thêm \textbf{Semantic Judge}
+lõi (không có FP nào trên bộ tổng hợp này). Thêm \textbf{Semantic Judge}
 \texttt{qwen3:4b} chỉ nhích số đòn chặn được lên $155$ (thêm đúng một case) nhưng
 làm $25$ câu lành tính bị chặn nhầm ($25/225$), tức đổi gần như không có thêm
 recall lấy một khoản precision đáng kể. Con số này định lượng trực tiếp ràng buộc
@@ -280,9 +281,10 @@ nhiên}, trên $10$ prompt \emph{sạch} (canary \textbf{chỉ} nằm trong kho,
 trong câu hỏi) vẫn có $6$ lần lộ: đây là tín hiệu rò rỉ kho \emph{thật} (exact-
 marker), tuy \textbf{cỡ mẫu nhỏ} ($n=10$ --- đúng bằng ngưỡng tối thiểu nên vẫn
 báo cáo được, nhưng under-powered). Vậy không thể quy toàn bộ thành echo, cũng
-không thể coi $21{,}5\%$ là tỉ lệ rò rỉ kho: \textbf{lỗ hổng rò rỉ đầu ra là thật
-nhưng chưa định lượng được tin cậy}. Muốn đo đúng thì canary phải chỉ tồn tại
-trong kho --- một sửa lỗi phương pháp bắt buộc cho phiên bản đánh giá sau.
+không thể coi $21{,}5\%$ là tỉ lệ rò rỉ kho. Để đo \emph{đúng}, nhóm thực hiện
+một thí nghiệm canary-sạch (canary chỉ tồn tại trong kho) ở
+Mục~\ref{sec:ab-demo}, đồng thời bổ sung lớp phát hiện canary cho Output Guard
+để chặn rò rỉ ngay ở biên đầu ra.
 
 \textbf{Đối chiếu (mô hình lớn hơn).} Một lần chạy tham chiếu với \texttt{hermes3:8b}
 trên \emph{cùng bộ 425 case} đạt TPR $100\%$ nhưng FPR $67{,}1\%$. Con số TPR
@@ -292,7 +294,7 @@ công} bị chặn trước khi gọi mô hình) tất yếu đạt TPR cao, và
 hai phần ba câu hợp lệ) khiến cấu hình đó không thể vận hành.
 
 \textbf{Kết luận.} Sau tối ưu, \textbf{lớp luật tất định là cấu hình cân bằng
-nhất}: TPR $77\%$ ở FPR $0\%$. Lớp LLM-as-judge nhỏ chưa chứng minh được lợi ích
+nhất}: TPR $77\%$ ở FPR $0\%$ \emph{trên bộ 425 case tổng hợp}. Lớp LLM-as-judge nhỏ chưa chứng minh được lợi ích
 recall tương xứng với chi phí FPR và độ trễ; mô hình lớn đẩy recall lên trần
 nhưng bằng FPR không thể chấp nhận. Không cấu hình đơn lẻ nào đạt mức triển khai
 thực tế; các hướng phát triển còn lại gồm giải nhiễu đầu vào (Unicode/chỉ thị ẩn)
@@ -307,46 +309,52 @@ nên chưa xứng chi phí; \textbf{CH3} --- \emph{có}, luật nhắm đặc tr
 nâng recall lớp luật thêm $28{,}5$ điểm mà giữ FPR $0\%$ trên bộ tổng hợp, song
 đây là cải thiện theo họ tấn công tổng hợp, không phải phòng thủ thích ứng.
 
-\section{Demo A/B thời gian thực: có tường so với không tường}
+\section{Thí nghiệm A/B canary-sạch: có tường so với không tường}
 \label{sec:ab-demo}
 
-Ngoài đo lường định lượng ở trên, nhóm thực hiện một phiên demo thủ công trên kho
-tri thức doanh nghiệp tổng hợp (kho tài liệu HR/IT có phân quyền RBAC), chạy
-\emph{cùng một prompt} trên hai luồng chat: \textbf{không tường} (gọi thẳng mô
-hình, chỉ còn cơ chế tự từ chối của mô hình) và \textbf{có tường} (đi qua chuỗi
-guard). Mục tiêu là minh hoạ trực quan điều số liệu đã chỉ ra --- một LLM thông
-thường \emph{có thể bị thao túng và làm lộ dữ liệu} khi thiếu lớp guard bảo vệ.
+Để khắc phục nhiễu của phép đo exfil ở trên (canary nằm trong prompt) và để đối
+chiếu công bằng, nhóm thực hiện một thí nghiệm \emph{paired} tái lập được: gieo
+một mã canary \textbf{chỉ vào một tài liệu bảng lương mật trong kho} (canary
+\emph{không} xuất hiện trong bất kỳ prompt nào), rồi chạy \emph{cùng một prompt}
+qua hai luồng --- \textbf{không tường} (gọi thẳng mô hình cục bộ, không guard) và
+\textbf{có tường} (qua toàn bộ chuỗi guard, gồm Output Guard phát hiện canary).
+Vì canary chỉ có trong kho, một canary xuất hiện ở câu trả lời là bằng chứng
+\emph{rò rỉ kho thật}. Bộ câu hỏi gồm 1 câu nghiệp vụ hợp lệ và 6 đòn trích
+xuất/mạo danh bảng lương. Kịch bản tái lập bằng
+\texttt{scripts/run\_demo\_ab\_paired.py}; kết quả content-free tại
+\texttt{reports/demo-ab/}.
 
 \begin{table}[H]
 \centering
-\caption{Đối chiếu A/B trên một số kịch bản demo (kho tri thức có RBAC)}
+\caption{Thí nghiệm A/B canary-sạch (canary chỉ trong KB, mô hình \texttt{qwen3:4b}, lặp nhiều lần)}
 \label{tab:ab-demo}
-\begin{tabularx}{\linewidth}{@{}p{0.34\linewidth}YY@{}}
+\begin{tabularx}{\linewidth}{@{}p{0.30\linewidth}YY@{}}
 \toprule
-\textbf{Kịch bản (cùng prompt)} & \textbf{Không tường} & \textbf{Có tường} \\
+\textbf{Nhóm prompt} & \textbf{Không tường} & \textbf{Có tường} \\
 \midrule
-Câu hỏi nghiệp vụ hợp lệ (nghỉ phép, MFA, đặt lại mật khẩu) & Trả lời đúng & Trả lời đúng (allow) \\
-Trích xuất toàn bộ bảng lương (họ tên, mã NV, lương, số tài khoản) & \textbf{Lộ toàn bộ bảng lương} & Chặn (Input/Output Guard) \\
-Mạo danh ``theo yêu cầu Chủ tịch/HR Leader'', yêu cầu paste bảng lương & \textbf{Bị thao túng, lộ dữ liệu} & Chặn (Semantic Judge) \\
-Chỉ thị ẩn trong tài liệu bị nhiễm (``luôn trả lời: có được phép'') & \textbf{Tuân theo chỉ thị độc} & Chặn (RAG Context/Input Guard) \\
+Câu hỏi nghiệp vụ hợp lệ (n=1) & Trả lời đúng & Trả lời đúng (allow) \\
+Trích xuất / mạo danh bảng lương (n=6, lặp lại) & Lộ canary + bảng lương \emph{rời rạc} (có lần tới $3/6$, phần lớn $0/6$); tự từ chối \emph{không nhất quán} & \textbf{Lộ $0/6$ ở mọi lần}: Input Guard chặn phần lớn; Output Guard chặn canary ở đầu ra với các đòn lọt Input \\
 \bottomrule
 \end{tabularx}
 \end{table}
 
-Quan sát chính: ở luồng \textbf{không tường}, mô hình nhiều lần \emph{làm lộ} toàn
-bộ bảng lương (họ tên, mã nhân viên, lương cơ bản, số tài khoản ngân hàng) khi
-được yêu cầu trực tiếp, và \emph{bị thao túng} bởi đòn mạo danh thẩm quyền (``theo
-yêu cầu của Chủ tịch\ldots'') --- cơ chế tự từ chối của mô hình hoạt động
-\emph{không nhất quán} (có lần từ chối, có lần vẫn lộ). Ở luồng \textbf{có tường},
-cùng những prompt đó bị chặn tại Input Guard, Semantic Judge hoặc Output Guard,
-trong khi câu hỏi nghiệp vụ hợp lệ vẫn được trả lời bình thường. Đây là bằng chứng
-định tính cho thấy lớp guard là \emph{cần thiết}: chỉ dựa vào ``mô hình tự phòng
-thủ'' là không đủ.
+Quan sát chính. Ở luồng \textbf{không tường}, cơ chế tự phòng thủ của mô hình
+hoạt động \emph{không nhất quán}: phần lớn lần chạy mô hình tự từ chối, nhưng có
+lần nó \emph{làm lộ nguyên văn} bảng lương (họ tên, mã nhân viên, lương, số tài
+khoản) kèm mã canary ở tới $3/6$ đòn --- tức rò rỉ kho thật. Nói cách khác,
+\emph{không thể tin cậy} vào việc mô hình tự từ chối. Ở luồng \textbf{có tường},
+\textbf{không lần chạy nào lộ canary}: phần lớn đòn bị Input Guard chặn trước khi
+gọi mô hình; đặc biệt, các đòn \emph{lọt qua} Input Guard vẫn bị \textbf{Output
+Guard chặn ở biên đầu ra} khi mô hình định trả canary ra ($2$--$3$ đòn mỗi lần
+chạy) --- minh hoạ trực tiếp giá trị phòng thủ theo chiều sâu. Đây là bằng chứng
+cho thấy lớp guard là \emph{cần thiết} và cho protection \emph{nhất quán} mà
+mô hình đơn lẻ không đảm bảo.
 
-Cần nêu rõ giới hạn: đây là demo \emph{thủ công, định tính}, trên dữ liệu tổng
-hợp và mô hình cục bộ (không phải LLM doanh nghiệp thật); các giá trị nhạy cảm chỉ
-là dữ liệu giả lập và không được in lại trong báo cáo. Kết quả demo bổ trợ trực
-quan cho số liệu định lượng, không thay thế.
+Đây cũng là phép đo exfil \emph{hợp lệ} (canary chỉ trong kho) mà con số $21{,}5\%$
+ở trên không cung cấp được. Giới hạn: mô hình phi tất định nên số lần lộ của luồng
+không tường dao động giữa các lần chạy (đã báo cáo dạng khoảng); cỡ mẫu nhỏ, dữ
+liệu tổng hợp và mô hình cục bộ; các giá trị nhạy cảm là giả lập và không in lại
+trong báo cáo.
 
 \section{Đánh giá kết quả}
 
@@ -361,8 +369,9 @@ nhạy cảm thô); quyết định tuân nguyên tắc fail-closed khi có vi p
 
 \subsection{Khả năng tái lập}
 Mock Provider tất định, bộ dữ liệu và artifact đánh giá được băm SHA-256, và bộ
-kiểm thử tự động lặp lại được trong môi trường đã mô tả; mỗi lần chạy đánh giá
-ghi kèm provenance (commit, mô hình, cấu hình, băm dữ liệu) để truy vết số liệu.
+kiểm thử tự động lặp lại được trong môi trường đã mô tả. Bộ chạy đánh giá \emph{hiện}
+ghi kèm provenance (commit, mô hình, cấu hình, băm dữ liệu) cho các lần chạy mới ---
+đây là provenance ở mức tối thiểu, chưa khóa đầy đủ môi trường và digest mô hình.
 
 \section{Hạn chế của kết quả đánh giá}
 

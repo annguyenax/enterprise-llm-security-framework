@@ -103,7 +103,7 @@ thất bại vẫn còn các lớp sau. Bốn lớp guard được hiện thực
 \midrule
 Input Guard & Luật regex/mẫu & Prompt injection trực tiếp, jailbreak, ghi đè chỉ thị hệ thống \\
 RAG Context Guard & Luật trên ngữ cảnh truy hồi & Data poisoning, chỉ thị ẩn trong tài liệu, ngữ cảnh mạo danh thẩm quyền \\
-Output Guard / DLP & Mẫu bí mật + DLP & Rò rỉ khoá API, thông tin nhạy cảm và PII trong phản hồi \\
+Output Guard / DLP & Mẫu bí mật + DLP + canary & Rò rỉ khoá API, thông tin nhạy cảm, PII và mã canary seed từ kho trong phản hồi \\
 Semantic Judge & LLM cục bộ phán đoán & Tấn công ngữ nghĩa (đóng vai, mạo danh cấp trên) mà luật không bắt được \\
 \bottomrule
 \end{tabularx}
