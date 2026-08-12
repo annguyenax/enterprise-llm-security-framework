@@ -1,8 +1,10 @@
 # Phase 13 P2 — Input normalization + Output-DLP canary (continuation)
 
-Status: implemented + measured (self-measured; not self-adjudicated).  
-Continues after holistic audit (Grok 7.4/10): **(a)** unicode normalize, **(b)/(c)**
-clean canary demo + Output-DLP (landed in `d65f1e3`), **(d)** semantic judge default OFF.
+Status: implemented + measured + **committed** at `e7a945c` (self-measured;
+not self-adjudicated as project PASS). Continues after holistic audit
+(Grok 7.4/10): **(a)** unicode normalize, **(b)/(c)** clean canary demo +
+Output-DLP (earlier `d65f1e3` + A/B fix in this commit), **(d)** semantic judge
+default OFF.
 
 Disk note: a qwen re-run was interrupted when **C: had ~0.7 GB free**. After the
 operator freed space (~14 GB free observed), the qwen P2 run **completed** as
