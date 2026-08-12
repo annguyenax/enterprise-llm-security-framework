@@ -94,6 +94,27 @@ RULES: tuple[Rule, ...] = (
         "Detected an imperative to forget all instructions given before the current message.",
     ),
 
+    Rule(
+        "direct-ignore-previous-policy", "direct_prompt_injection",
+        _rx(
+            r"\b(ignore|disregard|forget|override)\b[^.?!\n]{0,30}"
+            r"\b(previous|prior|existing|current|all|the)\b[^.?!\n]{0,25}"
+            r"\b(polic(y|ies)|rules?|guidelines?)\b"
+        ),
+        Decision.BLOCK, 0.9,
+        "Detected an instruction to ignore/override existing policy or rules - a poisoned-context injection pattern.",
+    ),
+    Rule(
+        "direct-ignore-vi", "direct_prompt_injection",
+        _rx(
+            r"\b(bỏ\s*qua|phớt\s*lờ|đừng\s*tuân|không\s*tuân\s*theo|quên\s*(hết|đi|toàn bộ))\b"
+            r"[^.?!\n]{0,30}"
+            r"\b(hướng\s*dẫn|chỉ\s*dẫn|chỉ\s*thị|quy\s*định|chính\s*sách|policy|ràng\s*buộc)\b"
+        ),
+        Decision.BLOCK, 0.88,
+        "Detected a Vietnamese 'ignore the instructions/policy' style prompt injection.",
+    ),
+
     # --- role override ---
     Rule(
         "role-you-are-now", "role_override",
@@ -270,6 +291,19 @@ RULES: tuple[Rule, ...] = (
         ),
         Decision.BLOCK, 0.82,
         "Detected a request to open/print all restricted or confidential documents.",
+    ),
+
+    Rule(
+        "ragctx-injection-marker", "rag_context_manipulation",
+        _rx(
+            r"\[system\s+for\b[^\]]*\bonly\]"
+            r"|\(\(\s*begin[^)]{0,40}polic(y|ies)"
+            r"|\binvisible\s+polic(y|ies)\b"
+            r"|\binternal\s+policy\s+update\b"
+            r"|—?\s*authoritative\s*\]"
+        ),
+        Decision.BLOCK, 0.85,
+        "Detected a poisoned-context / role-spoof injection marker (fake system directive or authoritative policy update).",
     ),
 
     # --- tool / action misuse ---

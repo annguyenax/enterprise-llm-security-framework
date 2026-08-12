@@ -62,10 +62,11 @@ Nhóm kết hợp nghiên cứu tài liệu (OWASP LLM Top 10, LLMSVS và các c
     quy trình đo TPR/FPR/Stop-before-LLM/Exfil trên ba cấu hình guard
     (rule-based, Semantic Judge \texttt{qwen3:4b}, đối chiếu \texttt{hermes3:8b}),
     trung thực về hạn chế và không báo cáo số liệu chưa đo được.
-    \item \textbf{Tối ưu lớp luật lũy tiến}: luật nhắm bất biến từ vựng của họ
-    mạo danh thẩm quyền ($48{,}5\% \to 77{,}0\%$ TPR) rồi \textbf{chuẩn hoá đầu
-    vào} (NFKC/zero-width/homoglyph) nâng tiếp lên $81{,}5\%$ TPR, vẫn FPR $0\%$
-    trên bộ tổng hợp; kèm Output-DLP canary, demo A/B canary-sạch, và phân tích
-    trung thực (PyRIT $100\%$ chỉ trên họ template; Stop-before-LLM qwen không
-    tăng so với rule-based).
+    \item \textbf{Tối ưu lớp luật lũy tiến qua ba bước} (luật chống mạo danh,
+    chuẩn hoá đầu vào chống làm rối Unicode, và luật chống tiêm nhiễm gián
+    tiếp/đầu độc ngữ cảnh) nâng recall rule-based từ TPR $48{,}5\%$ lên
+    $\mathbf{97{,}0\%}$ mà \textbf{giữ FPR $0\%$} trên bộ tổng hợp; kèm
+    Output-DLP canary, demo A/B canary-sạch, và phân tích trung thực (PyRIT
+    $100\%$ chỉ trên họ template; Stop-before-LLM qwen không tăng so với
+    rule-based).
 \end{itemize}

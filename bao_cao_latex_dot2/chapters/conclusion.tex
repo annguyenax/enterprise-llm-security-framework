@@ -9,9 +9,10 @@
 lớp (đầu vào, ngữ cảnh truy hồi, đầu ra/DLP, Semantic Judge) trên một pipeline
 RAG có kiểm soát truy cập RBAC và cơ chế truy hồi lai được tối ưu; xây dựng bộ
 đánh giá bảo mật tổng hợp 425 case và đo hiệu quả tường trên ba cấu hình guard;
-và tối ưu lớp luật lũy tiến (luật chống mạo danh rồi chuẩn hoá Unicode đầu vào)
-để nâng recall rule-based từ TPR $48{,}5\%$ lên $81{,}5\%$ mà giữ FPR $0\%$ trên
-bộ tổng hợp; bổ sung Output-DLP canary và thí nghiệm canary-sạch A/B.
+và tối ưu lớp luật lũy tiến qua ba bước (chống mạo danh, chuẩn hoá Unicode đầu
+vào, chống tiêm nhiễm gián tiếp) để nâng recall rule-based từ TPR $48{,}5\%$ lên
+$97{,}0\%$ mà giữ FPR $0\%$ trên bộ tổng hợp; bổ sung Output-DLP canary và thí
+nghiệm canary-sạch A/B.
 
 \section*{Mức độ hoàn thành mục tiêu}
 

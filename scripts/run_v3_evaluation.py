@@ -890,7 +890,14 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     print(report)
-    print(f"\nArtifact: {run_dir.relative_to(REPO_ROOT).as_posix()}")
+    # `run_dir` can legitimately live outside the repository (e.g. --output on
+    # another drive to keep the worktree clean); don't fail after a successful
+    # write just because a repo-relative display path can't be formed.
+    try:
+        shown = run_dir.relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        shown = run_dir.as_posix()
+    print(f"\nArtifact: {shown}")
     return 0
 
 
