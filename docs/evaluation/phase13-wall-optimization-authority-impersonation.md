@@ -156,12 +156,12 @@ Both auditors' reports are in `docs/`. Not self-adjudicated — maintainer decid
 
 ## Verification
 
-- `tests/test_input_guard.py`: **10 passed** (5 original + 5 authority-rule
-  tests: block, benign/self-service allow, recall-limit evasions, precision-limit
-  false positives, and a self-service **bypass regression** added after the Grok
-  re-audit). The earlier "23 passed" figure was the combined count with
+- `tests/test_input_guard.py`: **11 passed** (5 original + 6 guard-rule tests:
+  block, benign/self-service allow, recall-limit evasions, precision-limit
+  false positives, a self-service **bypass regression**, and a unicode
+  **normalization** probe). The earlier "23 passed" figure was the combined count with
   `test_input_guard_calibration.py` and was corrected per the Code X audit.
-- Full suite after this revision: `1524 passed, 4 skipped` (short basetemp to
+- Full suite after this revision: `1529 passed, 4 skipped` (short basetemp to
   avoid a Windows temp-dir path-length/permission artifact, unrelated to guard
   logic).
 

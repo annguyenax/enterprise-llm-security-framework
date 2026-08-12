@@ -72,8 +72,31 @@ nào là đủ, và phòng thủ theo chiều sâu là cần thiết.
 \textbf{Chuẩn hoá và đánh giá.} OWASP Top 10 for LLM
 Applications~\cite{owasp_llm_top10} và OWASP LLMSVS~\cite{owasp_llmsvs} cung cấp
 khung phân loại rủi ro và kiểm soát; NIST AI 600-1~\cite{nist2024genai} đưa ra
-hồ sơ quản trị rủi ro cho AI sinh. Đề tài dùng các khung này để định vị phạm vi
-kiểm soát và ánh xạ guard với loại rủi ro (LLM01/02/04).
+hồ sơ quản trị rủi ro cho AI sinh. Liu và cộng sự~\cite{liu2024formalizing} hình
+thức hoá và chuẩn hoá việc đánh giá tấn công/phòng thủ prompt injection. Đề tài
+dùng các khung này để định vị phạm vi kiểm soát và ánh xạ guard với loại rủi ro
+(LLM01/02/04).
+
+Bảng~\ref{tab:related-compare} định vị đề tài so với một số giải pháp guardrail
+tiêu biểu. Điểm khác biệt của đề tài không nằm ở độ mạnh của một bộ phân loại đơn
+lẻ, mà ở việc kết hợp \emph{nhiều lớp tất định} với \emph{kiểm soát truy cập
+RBAC} trước truy hồi --- một hướng ít được nhấn mạnh trong các công cụ guardrail
+tổng quát.
+
+\begin{table}[H]
+\centering
+\caption{Định vị đề tài so với một số giải pháp guardrail}
+\label{tab:related-compare}
+\begin{tabularx}{\linewidth}{@{}p{0.24\linewidth}p{0.22\linewidth}YY@{}}
+\toprule
+\textbf{Giải pháp} & \textbf{Cơ chế chính} & \textbf{Tích hợp RBAC nguồn} & \textbf{Nhiều lớp / tất định} \\
+\midrule
+Llama Guard~\cite{inan2023llamaguard} & LLM phân loại (học máy) & Không & Đơn lớp, không tất định \\
+NeMo Guardrails~\cite{rebedea2023nemo} & Rail lập trình + LLM & Không (mặc định) & Đa lớp, một phần tất định \\
+Đề tài (Shield AI) & Luật + tuỳ chọn LLM-judge & \textbf{Có} (ACL trước truy hồi) & \textbf{Đa lớp, lõi tất định} \\
+\bottomrule
+\end{tabularx}
+\end{table}
 
 \begin{figure}[H]
 \centering

@@ -14,7 +14,9 @@ Design (honest framing — Code X audit):
 Schema fix (Code X P0): unguarded endpoint returns ``response`` (not
 ``answer``/``content``). We read that field first.
 
-Artifacts (content-free by default; optional transcript for manual demo notes):
+Artifacts: ab_result.json + manifest.json are content-free (ids/decisions/counts).
+  transcript.txt (optional, --write-transcript) holds the synthetic PROMPTS for
+  manual demo notes -- NOT content-free, no secrets/answers, kept as a demo aid.
   reports/demo-ab/<run_id>/ab_result.json
   reports/demo-ab/<run_id>/manifest.json
   reports/demo-ab/latest -> copy of ab_result.json for convenience
@@ -338,12 +340,12 @@ def main() -> int:
         ],
     }
     if args.write_transcript:
-        tpath = run_dir / "transcript_content_free.txt"
+        tpath = run_dir / "transcript.txt"
         ttext = "\n".join(transcript_lines).encode("utf-8")
         tpath.write_bytes(ttext)
         manifest["files"].append(
             {
-                "path": "transcript_content_free.txt",
+                "path": "transcript.txt",
                 "sha256": _sha256_bytes(ttext),
                 "bytes": len(ttext),
             }
