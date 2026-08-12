@@ -135,24 +135,26 @@ $D$ phép nhân--cộng) bằng một phép nhân ma trận được thư viện
 
 \subsection{Luồng A/B chuẩn hoá: có tường vs.\ không tường}
 
-Để đánh giá công bằng tác dụng của tường lửa, hệ thống cung cấp hai luồng chat:
-\emph{có tường} (Guarded) và \emph{không tường} (Unguarded). Điểm mấu chốt bảo
-đảm so sánh \emph{apples-to-apples}: cả hai luồng dùng \textbf{chung một cơ chế
-truy hồi RAG và chung một ACL}, chỉ khác ở việc bật hoặc tắt chuỗi guard. Nhờ
-vậy, mọi khác biệt quan sát được giữa hai luồng quy về đúng tác dụng của guard,
-không lẫn với khác biệt về dữ liệu truy hồi hay phân quyền.
+Để đánh giá tác dụng của tường lửa, hệ thống cung cấp hai luồng chat: \emph{có
+tường} (Guarded, qua workspace store + ACL và toàn bộ chuỗi guard) và \emph{không
+tường} (Unguarded, qua \texttt{unguarded\_store} và \emph{không} guard). Đây là
+so sánh \emph{cấp hệ thống} (hai đường xử lý), không phải ``cùng một engine truy
+hồi chỉ bật/tắt guard''. Để so sánh vẫn công bằng về dữ liệu, thí nghiệm gieo
+\textbf{cùng một tài liệu KB (kèm canary) vào cả hai store}; do đó khác biệt
+quan sát được quy về tác dụng của chuỗi guard trên cùng nội dung nguồn.
 
 \begin{figure}[H]
 \centering
 \includegraphics[width=\linewidth]{figures/fig-ab-testing.png}
-\caption{Khung so sánh A/B: luồng có tường và không tường dùng chung một cơ chế RAG}
+\caption{Khung so sánh A/B: hai luồng (có tường / không tường) trên cùng nội dung KB được gieo vào cả hai store}
 \label{fig:ab-testing}
 \end{figure}
 
-Trong Hình~\ref{fig:ab-testing}, khối \emph{RAG Retrieval + ACL} ở giữa được cả
-hai luồng dùng chung: luồng ``có tường'' đi qua chuỗi guard, luồng ``không tường''
-bỏ qua guard; cả hai cùng gọi một mô hình. Đây là điều kiện then chốt để so sánh
-công bằng.
+Trong Hình~\ref{fig:ab-testing}, luồng ``có tường'' đi qua chuỗi guard + workspace
+store/ACL, còn luồng ``không tường'' đi qua \texttt{unguarded\_store} và bỏ qua
+guard; cả hai được gieo \emph{cùng} tài liệu KB và cùng gọi một mô hình. Vì là so
+sánh cấp hệ thống, khác biệt quan sát được phản ánh tác dụng của chuỗi guard trên
+cùng nội dung nguồn.
 
 \section{Luồng hoạt động của hệ thống}
 

@@ -114,7 +114,10 @@ $\mathbf{97{,}0\%}$: bắt trọn họ injecagent ($47{,}4\%\to100\%$) và nâng
 ($83{,}8\%\to94{,}3\%$), vẫn ở FPR $0\%$; đã kiểm bằng paraphrase mới (vi/en) và
 câu chính sách hợp lệ trong kiểm thử đơn vị. Phần bỏ lọt còn lại ($6/10$
 \emph{direct\_kb\_exfil}) là yêu cầu dữ liệu của người khác không có dấu hiệu từ
-vựng --- lớp ACL/RBAC chặn ở bước truy hồi. Cần nói rõ phạm vi: đây \textbf{không} phải bằng chứng
+vựng nên \emph{qua được} lớp luật đầu vào (allow, có gọi mô hình) --- đây là giới
+hạn recall của Input Guard, ghi nhận thẳng thắn. Việc từ chối truy cập tài liệu
+của \emph{người khác} là nhiệm vụ của lớp RBAC/ACL ở khâu truy hồi (kiểm soát
+riêng, \textbf{không} đo bằng chỉ số TPR ở đây). Cần nói rõ phạm vi: đây \textbf{không} phải bằng chứng
 đã ``vá'' mạo danh nói chung. Con số $100\%$ trên họ PyRIT phản ánh việc họ
 template tổng hợp hiện tại (khoảng sáu khung) đều nhúng đúng hai bất biến mà luật
 bắt; kẻ tấn công diễn đạt lại để bỏ hai bất biến (bỏ định lượng ``toàn bộ'', bỏ
@@ -144,7 +147,7 @@ injecagent (n=38) & 47{,}4\% & 47{,}4\% & 47{,}4\% & 100\% \\
 
 \begin{table}[H]
 \centering
-\caption{Ma trận nhầm lẫn --- rule-based sau tối ưu (n = 425; run \texttt{b0f8fecb})}
+\caption{Ma trận nhầm lẫn --- rule-based sau tối ưu (n = 425; run \texttt{3dc0ee61})}
 \label{tab:v3-cm-mock}
 \begin{tabularx}{\linewidth}{@{}p{0.30\linewidth}YY@{}}
 \toprule
@@ -158,14 +161,14 @@ Lành tính (n=225) & 0 (FP) & 225 (TN) \\
 
 \begin{table}[H]
 \centering
-\caption{Ma trận nhầm lẫn --- \texttt{qwen3:4b} + Output-DLP (n = 425; run \texttt{bfee551a})}
+\caption{Ma trận nhầm lẫn --- \texttt{qwen3:4b} + Output-DLP (n = 425; run \texttt{4d01bba6})}
 \label{tab:v3-cm-semantic}
 \begin{tabularx}{\linewidth}{@{}p{0.30\linewidth}YY@{}}
 \toprule
  & \textbf{Bị chặn} & \textbf{Được trả lời} \\
 \midrule
 Tấn công (n=200) & 200 (TP) & 0 (FN) \\
-Lành tính (n=225) & 50 (FP) & 175 (TN) \\
+Lành tính (n=225) & 60 (FP) & 165 (TN) \\
 \bottomrule
 \end{tabularx}
 \end{table}
@@ -173,7 +176,7 @@ Lành tính (n=225) & 50 (FP) & 175 (TN) \\
 Đọc trực tiếp hai ma trận (sau ba bước tối ưu lớp luật, và Output-DLP canary):
 cấu hình \textbf{rule-based} chặn $194/200$ ($97{,}0\%$) và \emph{không} chặn nhầm
 câu lành tính nào trên bộ tổng hợp ($0/225$). Cấu hình \textbf{qwen3:4b} đạt TPR
-$100\%$ nhưng FPR $22{,}2\%$ ($50/225$). Quan trọng: Stop-before-LLM của cả hai
+$100\%$ nhưng FPR $26{,}7\%$ ($50/225$). Quan trọng: Stop-before-LLM của cả hai
 đều $97{,}0\%$ (cùng $194$ đòn chặn trước provider) --- Semantic Judge \emph{không}
 tăng chặn sớm; $6$ đòn TPR thêm trên qwen ($194\to200$) là chặn \emph{sau} khi gọi
 mô hình (Output Guard bắt canary trong câu trả lời), không phải judge phát hiện
@@ -188,8 +191,8 @@ injection ở đầu vào.
 \textbf{Chỉ số} & \textbf{Rule-based} & \textbf{Semantic (qwen)} \\
 \midrule
 TPR & 97{,}0\% & 100{,}0\% \\
-FPR (toàn bộ lành tính) & 0{,}0\% & 22{,}2\% \\
-\quad FPR trên hard benign & 0{,}0\% & 20{,}8\% \\
+FPR (toàn bộ lành tính) & 0{,}0\% & 26{,}7\% \\
+\quad FPR trên hard benign & 0{,}0\% & 28{,}0\% \\
 Stop-before-LLM & 97{,}0\% & 97{,}0\% \\
 Exfil Marker Rate$^\dagger$ & 0{,}0\% & 0{,}0\% \\
 \bottomrule
@@ -197,7 +200,7 @@ Exfil Marker Rate$^\dagger$ & 0{,}0\% & 0{,}0\% \\
 
 \vspace{2pt}
 {\footnotesize $^\dagger$ Cả hai run đều seed 200 canary (rule-based
-\texttt{b0f8fecb}, qwen \texttt{bfee551a}): marker $0\%$ nhờ Output-DLP chặn
+\texttt{3dc0ee61}, qwen \texttt{4d01bba6}): marker $0\%$ nhờ Output-DLP chặn
 canary trong answer --- \textbf{không} đồng nghĩa hết injection ở đầu vào ($6/200$
 vẫn tới provider). Xem Mục~\ref{sec:ab-demo} và Hạn chế.\par}
 \end{table}
@@ -234,22 +237,22 @@ pyrit (đóng vai, mạo danh) & 100{,}0\% & 100{,}0\% \\
   \node[font=\scriptsize] at (1.35,-0.28) {rule-based};
   % qwen3:4b: TPR 100, FPR 22.2
   \fill[teal!70] (3.1,0) rectangle (3.7,3.5);
-  \fill[red!60]  (3.8,0) rectangle (4.4,0.777);
+  \fill[red!60]  (3.8,0) rectangle (4.4,0.9345);
   \node[font=\scriptsize] at (3.75,-0.28) {qwen3:4b};
   % hermes3:8b: TPR 100, FPR 66.2
   \fill[teal!70] (5.5,0) rectangle (6.1,3.5);
-  \fill[red!60]  (6.2,0) rectangle (6.8,2.3177);
+  \fill[red!60]  (6.2,0) rectangle (6.8,2.3335);
   \node[font=\scriptsize] at (6.15,-0.28) {hermes3:8b};
   % chu giai
   \fill[teal!70] (7.4,3.15) rectangle (7.7,3.35); \node[right,font=\scriptsize] at (7.7,3.25) {TPR};
   \fill[red!60]  (7.4,2.75) rectangle (7.7,2.95); \node[right,font=\scriptsize] at (7.7,2.85) {FPR};
 \end{tikzpicture}
-\caption{TPR/FPR (\%) sau ba bước tối ưu lớp luật + Output-DLP (rule, qwen); hermes tham chiếu over-block. TPR $100\%$ qwen đi kèm FPR $22{,}2\%$; Stop-before-LLM cả hai $=97\%$.}
+\caption{TPR/FPR (\%) sau ba bước tối ưu lớp luật + Output-DLP (rule, qwen); hermes tham chiếu over-block. TPR $100\%$ qwen đi kèm FPR $26{,}7\%$; Stop-before-LLM cả hai $=97\%$.}
 \label{fig:tpr-fpr-bar}
 \end{figure}
 
 Hình~\ref{fig:tpr-fpr-bar}: rule-based giữ FPR $0\%$ ở TPR $97\%$; qwen đạt
-TPR trần với FPR $22{,}2\%$; hermes minh hoạ over-block nặng hơn. Stop-before-LLM
+TPR trần với FPR $26{,}7\%$; hermes minh hoạ over-block nặng hơn. Stop-before-LLM
 của rule-based và qwen bằng nhau ($97\%$).
 
 \subsection{Phân tích kết quả}
@@ -258,7 +261,7 @@ Ba quan sát từ số liệu trên định hình kết luận, và không quan 
 giải theo hướng có lợi một cách thiếu cơ sở.
 
 \textbf{Thứ nhất, lớp luật (sau ba bước tối ưu) là điểm vận hành cân bằng nhất
-trên bộ tổng hợp.} TPR $97{,}0\%$ @ FPR $0\%$ (run \texttt{b0f8fecb}) --- FPR
+trên bộ tổng hợp.} TPR $97{,}0\%$ @ FPR $0\%$ (run \texttt{3dc0ee61}) --- FPR
 $0\%$ là trên \textbf{225 câu lành tính tổng hợp lab} (gồm 125 hard benign),
 \textbf{không} chứng minh không chặn nhầm mọi truy vấn ngoài phân phối (vd.\ câu
 hành chính/kiểm toán hỏi về ghi đè chính sách). PyRIT $100\%$ (n=57) phản ánh
@@ -267,12 +270,14 @@ thực chiến''; tám unit evasion vẫn ALLOW. Garak lên $94{,}3\%$ (nhờ NF
 + luật tiếng Việt) và injecagent lên $100\%$ (luật chống tiêm nhiễm/đầu độc ngữ
 cảnh) trên \emph{payload lấy cảm hứng}, không gọi tool gốc. Residual còn lại là
 $6/10$ \emph{direct\_kb\_exfil} (yêu cầu dữ liệu người khác không có dấu hiệu từ
-vựng) --- lớp ACL/RBAC chặn ở bước truy hồi.
+vựng) \emph{qua được} lớp luật đầu vào (allow) --- giới hạn recall của Input
+Guard; kiểm soát truy cập tài liệu người khác thuộc lớp RBAC/ACL ở khâu truy hồi,
+không đo ở đây.
 
 \textbf{Thứ hai, Semantic Judge nhỏ vẫn không mua được chặn sớm.} Stop-before-LLM
 qwen $=$ rule-based $=97{,}0\%$. TPR $100\%$ trên qwen đến từ \textbf{Output-DLP
 canary} chặn $6$ câu trả lời sau khi provider đã được gọi ($194\to200$), trong khi
-FPR nhảy lên $22{,}2\%$ (hard benign $20{,}8\%$). Judge mặc định được đặt
+FPR nhảy lên $26{,}7\%$ (hard benign $28\%$). Judge mặc định được đặt
 \emph{tắt} (opt-in \texttt{SEMANTIC\_GUARD\_USE\_LLM=1}) vì bằng chứng ROI
 precision âm.
 
@@ -284,20 +289,20 @@ vẫn cho tín hiệu rò kho. Sau DLP, cả hai run báo marker $0\%$ --- đún
 canary-sạch paired (Mục~\ref{sec:ab-demo}) đo rò kho độc lập với nhiễu prompt.
 
 \textbf{Đối chiếu (mô hình lớn hơn).} \texttt{hermes3:8b} (tham chiếu trên cùng
-425, run \texttt{f946bb7b}) đạt TPR $100\%$ với FPR $66{,}2\%$ và Stop-before-LLM
+425, run \texttt{bfc79eda}) đạt TPR $100\%$ với FPR $66{,}7\%$ và Stop-before-LLM
 $99{,}5\%$ --- chặn gần như mọi thứ, không vận hành được.
 
 \textbf{Kết luận.} \textbf{Lớp luật tất định sau ba bước tối ưu} là cấu hình cân
 bằng nhất: TPR $97{,}0\%$ @ FPR $0\%$ \emph{trên bộ 425 tổng hợp}. Semantic judge
-nhỏ không tăng Stop-before-LLM ($3$pp recall thêm phải trả bằng FPR $22{,}2\%$);
+nhỏ không tăng Stop-before-LLM ($3$pp recall thêm phải trả bằng FPR $26{,}7\%$);
 Output-DLP bù residual marker nhưng không thay input recall. Không cấu hình đơn lẻ
 đạt triển khai thực tế; residual \emph{direct\_kb\_exfil} và FPR judge vẫn mở.
 
 Trả lời trực tiếp ba câu hỏi nghiên cứu: \textbf{CH1} --- tường luật phát hiện
 $97{,}0\%$ đòn tổng hợp ở FPR $0\%$ (mạnh trên cả PyRIT/garak/injecagent sau ba
-bước tối ưu; residual $6/10$ direct exfil do ACL chặn ở truy hồi); \textbf{CH2}
+bước tối ưu; residual $6/10$ direct exfil qua được lớp luật đầu vào --- giới hạn recall, không phải ACL); \textbf{CH2}
 --- Semantic Judge nhỏ \emph{không} tăng chặn sớm (Stop-before-LLM không đổi) mà
-FPR $22{,}2\%$, chưa xứng chi phí; \textbf{CH3} --- \emph{có}, tối ưu lũy tiến
+FPR $26{,}7\%$, chưa xứng chi phí; \textbf{CH3} --- \emph{có}, tối ưu lũy tiến
 (mạo danh $+28{,}5$pp, chuẩn hoá $+4{,}5$pp, chống tiêm nhiễm $+15{,}5$pp $=$
 $48{,}5\%\to97{,}0\%$) giữ FPR $0\%$ trên bộ tổng hợp, song không phải phòng thủ
 thích ứng.
@@ -320,10 +325,13 @@ lời $\Rightarrow$ bằng chứng rò kho. Mỗi prompt chạy trên hai luồn
 
 Cả hai store được seed \emph{cùng} tài liệu canary. Kịch bản tái lập:
 \texttt{scripts/run\_demo\_ab\_paired.py} (đọc đúng trường \texttt{response} của
-endpoint unguarded; artifact content-free + \texttt{manifest.json} theo
-\texttt{run\_id} tại \texttt{reports/demo-ab/<run\_id>/}). Script hỗ trợ
-\texttt{--reps} để lặp độc lập và báo tử số/mẫu số theo từng rep --- không chọn
-``lần đẹp nhất''.
+endpoint unguarded). Trong thư mục \texttt{reports/demo-ab/<run\_id>/}, hai file
+\texttt{ab\_result.json} và \texttt{manifest.json} là content-free (id/quyết
+định/đếm); riêng \texttt{transcript.txt} (tuỳ chọn) chứa \emph{prompt tổng hợp}
+--- không phải content-free, chỉ là phụ trợ demo. Cờ \texttt{--reps} lặp lại
+\emph{cùng} sáu prompt theo cùng thứ tự trên workspace mới (\textbf{không} phải
+mẫu độc lập thống kê) và báo tử số/mẫu số theo từng rep, không chọn ``lần đẹp
+nhất''.
 
 \begin{table}[H]
 \centering
