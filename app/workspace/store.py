@@ -443,17 +443,32 @@ def accessible_documents(actor: dict[str, Any]) -> list[dict[str, Any]]:
 def sharing_options(actor: dict[str, Any]) -> dict[str, list[str]]:
     """Return stable identifiers accepted by upload sharing parameters."""
     with connect() as db:
+        user_filter = "" if actor["role"] == "superadmin" else " AND department=?"
+        user_params: tuple[Any, ...] = (
+            (actor["id"],) if actor["role"] == "superadmin"
+            else (actor["id"], actor["department"])
+        )
         usernames = [
             str(row[0]) for row in db.execute(
-                "SELECT username FROM users WHERE id<>? ORDER BY username", (actor["id"],)
+                f"SELECT username FROM users WHERE id<>?{user_filter} ORDER BY username",
+                user_params,
             )
         ]
-        departments = [
-            str(row[0]) for row in db.execute(
-                "SELECT code FROM departments WHERE code<>'WORKSPACE' ORDER BY code"
-            )
-        ]
-    groups = [f"{department}:{role}" for department in departments for role in ("member", "leader")]
+        if actor["role"] == "superadmin":
+            departments = [
+                str(row[0]) for row in db.execute(
+                    "SELECT code FROM departments WHERE code<>'WORKSPACE' ORDER BY code"
+                )
+            ]
+        elif actor["role"] == "leader":
+            departments = [str(actor["department"])]
+        else:
+            departments = []
+    groups = [
+        f"{department}:{role}"
+        for department in departments
+        for role in ("member", "leader")
+    ]
     return {"users": usernames, "groups": groups}
 
 
@@ -783,7 +798,7 @@ def add_document(actor: dict[str, Any], filename: str, content: bytes, scope: st
         raise ValueError("Mỗi tài liệu chỉ được chia sẻ thêm tối đa 20 user và 20 nhóm")
     with connect() as db:
         user_rows = list(db.execute(
-            f"SELECT id,username FROM users WHERE username IN ({','.join('?' for _ in allowed_users)}) COLLATE NOCASE"
+            f"SELECT id,username,department FROM users WHERE username IN ({','.join('?' for _ in allowed_users)}) COLLATE NOCASE"
             if allowed_users else "SELECT id,username FROM users WHERE 0",
             allowed_users,
         ))
@@ -792,12 +807,32 @@ def add_document(actor: dict[str, Any], filename: str, content: bytes, scope: st
     missing_users = [name for name in allowed_users if name.casefold() not in found_users]
     if missing_users:
         raise ValueError("Không tìm thấy user được chia sẻ: " + ", ".join(missing_users))
+    if actor["role"] != "superadmin":
+        cross_department_users = [
+            str(row["username"])
+            for row in user_rows
+            if str(row["department"]).casefold() != str(actor["department"]).casefold()
+        ]
+        if cross_department_users:
+            raise PermissionError(
+                "Chỉ superadmin được chia sẻ tài liệu cho user thuộc phòng ban khác"
+            )
+    if actor["role"] == "member" and allowed_groups:
+        raise PermissionError("Member không được chia sẻ tài liệu cho cả nhóm hoặc phòng ban")
     parsed_groups: list[tuple[str, str]] = []
     for value in allowed_groups:
         parts = value.split(":", 1)
         if len(parts) != 2 or parts[0].casefold() not in departments or parts[1] not in ROLE_RANK:
             raise ValueError(f"Nhóm chia sẻ không hợp lệ: {value}; dùng định dạng PHONGBAN:role")
-        parsed_groups.append((departments[parts[0].casefold()], parts[1]))
+        group_department = departments[parts[0].casefold()]
+        if (
+            actor["role"] != "superadmin"
+            and group_department.casefold() != str(actor["department"]).casefold()
+        ):
+            raise PermissionError(
+                "Chỉ superadmin được chia sẻ tài liệu cho nhóm thuộc phòng ban khác"
+            )
+        parsed_groups.append((group_department, parts[1]))
     did=str(uuid.uuid4()); DOC_ROOT.mkdir(parents=True,exist_ok=True); path=DOC_ROOT/f"{did}.txt"; path.write_bytes(content)
     row={"id":did,"owner_user_id":actor["id"],"department":department,"scope":scope,"audience_role":audience,"filename":filename,"mime_type":mime_type,"size_bytes":len(content),"guard_decision":guard_decision,"storage_path":str(path),"created_at":now()}
     with connect() as db:

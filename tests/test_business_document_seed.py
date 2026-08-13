@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from app.retrieval.enterprise_acl_bm25 import (
     EnterpriseAclBm25Config,
     EnterpriseAclBm25Retriever,
@@ -90,7 +92,7 @@ def test_explicit_user_and_group_grants_are_authoritative(monkeypatch, tmp_path:
     users = {user["username"]: user for user in store.users()}
 
     row = store.add_document(
-        users["it.user1"],
+        users["superadmin"],
         "hop-dong-chia-se-co-kiem-soat.md",
         b"Synthetic employment contract shared with HR leader.",
         "user",
@@ -121,3 +123,47 @@ def test_explicit_user_and_group_grants_are_authoritative(monkeypatch, tmp_path:
     )
     assert all(chunk.doc_id != row["id"] for chunk in denied_chunks)
     assert all(source["id"] != row["id"] for source in denied_sources)
+
+
+def test_non_admin_cannot_share_documents_across_departments(monkeypatch, tmp_path: Path):
+    retriever = EnterpriseAclBm25Retriever(
+        EnterpriseAclBm25Config(db_path=str(tmp_path / "enterprise-kb.db"))
+    )
+    retriever.initialize()
+    monkeypatch.setattr(store, "DB_PATH", tmp_path / "workspace.db")
+    monkeypatch.setattr(store, "DOC_ROOT", tmp_path / "documents")
+    monkeypatch.setattr(store, "_RETRIEVER", retriever)
+    store.initialize()
+    users = {user["username"]: user for user in store.users()}
+
+    with pytest.raises(PermissionError):
+        store.add_document(
+            users["it.user1"], "member-to-hr.txt", b"test", "user", "member", "IT",
+            guard_decision="allow", allowed_users=["hr.user1"],
+        )
+
+    with pytest.raises(PermissionError):
+        store.add_document(
+            users["it.leader"], "leader-to-hr.txt", b"test", "department", "member", "IT",
+            guard_decision="allow", allowed_groups=["HR:leader"],
+        )
+
+    with pytest.raises(PermissionError):
+        store.add_document(
+            users["it.user1"], "member-to-group.txt", b"test", "user", "member", "IT",
+            guard_decision="allow", allowed_groups=["IT:member"],
+        )
+
+    row = store.add_document(
+        users["it.user1"], "member-to-colleague.txt", b"test", "user", "member", "IT",
+        guard_decision="allow", allowed_users=["it.user2"],
+    )
+    assert row["allowed_users"] == ["it.user2"]
+
+    member_options = store.sharing_options(users["it.user1"])
+    assert "it.user2" in member_options["users"]
+    assert "hr.user1" not in member_options["users"]
+    assert member_options["groups"] == []
+
+    leader_options = store.sharing_options(users["it.leader"])
+    assert set(leader_options["groups"]) == {"IT:member", "IT:leader"}
