@@ -8,6 +8,7 @@ semantic classifier and do not provide complete prompt-injection protection.
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 
 from app.core.decisions import Decision, most_severe
@@ -16,6 +17,8 @@ from app.schemas.responses import RAGGuardResponse
 
 REDACTED = "[REDACTED]"
 ZERO_WIDTH_PATTERN = re.compile(r"[\u200b-\u200d\u2060\ufeff]")
+INTRA_WORD_DOT_PATTERN = re.compile(r"(?<=\w)[.\u00b7\u2022](?=\w)")
+SPACED_LETTER_RUN_PATTERN = re.compile(r"(?<!\w)(?:[a-z]\s+){2,}[a-z](?!\w)")
 FAKE_SECRET_PATTERN = re.compile(r"FAKE-SECRET-0000-EXAMPLE(-[A-Z-]+)?", re.IGNORECASE)
 HIDDEN_BLOCK_PATTERN = re.compile(
     r"<!--.*?--\s*>|<!(?:--)?\s*.*?--\s*>|/\*.*?\*/",
@@ -44,12 +47,26 @@ def _rx(pattern: str) -> re.Pattern[str]:
 
 def _normalize_for_detection(text: str) -> str:
     """Normalize only the copy used by detectors, never returned content."""
-    normalized = ZERO_WIDTH_PATTERN.sub("", text).lower()
+    normalized = unicodedata.normalize("NFKC", text)
+    normalized = ZERO_WIDTH_PATTERN.sub("", normalized).lower()
+    # Strip Vietnamese diacritics on the detector copy so one rule covers
+    # both accented and deliberately accent-smudged attack text.  Preserve
+    # the original chunk for citations and sanitization.
+    normalized = unicodedata.normalize("NFKD", normalized)
+    normalized = "".join(char for char in normalized if not unicodedata.combining(char))
+    normalized = normalized.replace("đ", "d")
     normalized = normalized.translate(str.maketrans({
         "0": "o", "3": "e", "4": "a", "@": "a",
         "5": "s", "$": "s", "1": "i",
     }))
-    return re.sub(r"\s+", " ", normalized).strip()
+    # Defeat punctuation inserted inside words (c.h.i) and runs of isolated
+    # letters (b o q u a).  Requiring at least three isolated letters avoids
+    # joining common two-letter initials and keeps false positives bounded.
+    normalized = INTRA_WORD_DOT_PATTERN.sub("", normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return SPACED_LETTER_RUN_PATTERN.sub(
+        lambda match: re.sub(r"\s+", "", match.group(0)), normalized
+    )
 
 
 RULES: tuple[Rule, ...] = (
@@ -96,6 +113,15 @@ RULES: tuple[Rule, ...] = (
         _rx(r"\b(ignore|disregard|forget) (all )?(prior|previous|existing|earlier) (system |developer )?instructions?\b"),
         Decision.SANITIZE, 0.75,
         "Detected language instructing the model to ignore prior instructions.",
+    ),
+    Rule(
+        "rag-obfuscated-ignore-vi", "instruction_override",
+        _rx(
+            r"\bbo\s*qua\b[^.!?\n]{0,80}"
+            r"\b(?:moi\s+)?(?:quy\s*dinh|chi\s*thi|huong\s*dan|lenh)\b"
+        ),
+        Decision.BLOCK, 0.92,
+        "Detected Vietnamese instruction-override language, including spaced or punctuated obfuscation.",
     ),
     Rule(
         "rag-ambiguous-authority-claim", "authority_claim",
