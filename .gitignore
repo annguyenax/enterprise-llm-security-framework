@@ -83,6 +83,7 @@ logs/
 # Dong ".pytest-tmp*" cu bi lan byte UTF-16 nen khong khop gi.
 .pytest-tmp/
 .pytest-tmp*/
+.test-tmp/
 .pytest_cache/
 scratch/
 

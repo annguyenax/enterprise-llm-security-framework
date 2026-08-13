@@ -1,5 +1,5 @@
 ---
-document_id: DOC-2026-0009
+document_id: DOC-2026-0013
 title: Runbook khôi phục hệ thống kho
 department: it
 owner: it.leader
@@ -10,6 +10,7 @@ status: APPROVED
 effective_date: 2026-07-01
 retention_until: 2031-07-01
 related_employee_id: null
+allowed_users: null
 approved_by: it.leader
 version: 1.0
 ---

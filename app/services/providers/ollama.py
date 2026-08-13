@@ -81,7 +81,14 @@ class OllamaLLMProvider(BaseLLMProvider):
                 }
             )
         messages.append({"role": "user", "content": request.sanitized_prompt})
-        payload = json.dumps({"model": self.model_name, "messages": messages, "stream": False, "think": False, "options": {"temperature": 0.4, "num_predict": 512}}).encode()
+        payload = json.dumps({
+            "model": self.model_name,
+            "messages": messages,
+            "stream": False,
+            "think": False,
+            "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
+            "options": {"temperature": 0.4, "num_predict": 512},
+        }).encode()
         http_request = Request(self.base_url + "/api/chat", data=payload, headers={"Content-Type": "application/json"}, method="POST")
         with urlopen(http_request, timeout=settings.llm_provider_timeout_seconds) as response:
             data = json.loads(response.read().decode("utf-8"))

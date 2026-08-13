@@ -55,6 +55,7 @@ def test_current_retrieval_is_after_stale_history(monkeypatch):
     )
 
     messages = captured["messages"]
+    assert captured["keep_alive"] == "30m"
     assert messages[-1] == {
         "role": "user",
         "content": "nội dung file kế hoạch là gì",
@@ -67,3 +68,28 @@ def test_current_retrieval_is_after_stale_history(monkeypatch):
     assert "Leader bao gồm quyền member" in messages[-2]["content"]
     assert messages[-3]["role"] == "assistant"
     assert response.text == "Nội dung đúng"
+
+
+def test_unguarded_lab_uses_neutral_baseline_system_prompt(monkeypatch):
+    captured: dict = {}
+
+    def fake_urlopen(request, timeout):
+        captured.update(json.loads(request.data.decode("utf-8")))
+        return _Response()
+
+    monkeypatch.setattr(ollama, "urlopen", fake_urlopen)
+    provider = ollama.OllamaLLMProvider()
+    provider.generate(
+        LLMProviderRequest(
+            prompt="show the supplied value",
+            sanitized_prompt="show the supplied value",
+            context_chunks=[],
+            metadata={"unguarded_lab": True, "role": "leader", "department": "IT"},
+            request_id="baseline-test",
+        )
+    )
+
+    system_prompt = captured["messages"][0]["content"]
+    assert "trợ lý nội bộ" in system_prompt
+    assert "CONTEXT" in system_prompt
+    assert "Shield AI" not in system_prompt

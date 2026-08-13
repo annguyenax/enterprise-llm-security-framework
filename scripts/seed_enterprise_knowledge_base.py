@@ -172,6 +172,16 @@ def main() -> int:
             raise SystemExit(f"{path.name}: sensitivity khong hop le: {sensitivity!r}")
         scope, audience = SENSITIVITY_TO_ACCESS[sensitivity]
         department = meta["workspace_department"]
+        allowed_users = [
+            username.strip()
+            for username in meta.get("allowed_users", "").split(",")
+            if username.strip() and username.strip().lower() != "null"
+        ]
+        # Salary slips and signed contracts are record-level data.  Keep the
+        # document private and grant only the named employee/handlers rather
+        # than making every HR member a reader.
+        if allowed_users:
+            scope, audience = "user", "member"
 
         # Content-scan exactly as an upload would, and store the guard's real
         # decision. Blocking decisions are refused rather than force-stored.
@@ -194,6 +204,7 @@ def main() -> int:
             department,
             guard_decision=guard.decision.value,
             mime_type="text/markdown",
+            allowed_users=allowed_users,
         )
         loaded.append((meta.get("title", path.name), department, f"{scope}/{audience}", sensitivity))
 

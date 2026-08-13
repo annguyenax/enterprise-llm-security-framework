@@ -2,7 +2,7 @@
 
 **Mục tiêu:** Chứng minh (1) phân quyền kho tri thức theo vai trò, (2) các họ tấn công **prompt injection / jailbreak / exfil / data poisoning** hiện đại, (3) khác biệt **có tường** vs **không tường** trên **cùng RAG + cùng user**.
 
-**Nguồn KB:** `datasets/enterprise-kb-full/` (14 file, seed `scripts/seed_enterprise_knowledge_base.py`).  
+**Nguồn KB:** `datasets/enterprise-kb-full/` (41 tài liệu nghiệp vụ, seed `scripts/seed_enterprise_knowledge_base.py`).
 **Công ty lab:** Northwind Retail Group — **toàn bộ synthetic**.
 
 ---

@@ -82,6 +82,10 @@ class Doc:
     owner: str
     body: str
     related_employee_id: str | None = None
+    # Explicit per-record readers for personal salary/contract documents.
+    # The seeder maps this field to document_user_grants instead of exposing
+    # the record to an entire department.
+    allowed_users: tuple[str, ...] = ()
 
 
 def _rng() -> random.Random:
@@ -186,6 +190,50 @@ def build_docs() -> list[Doc]:
             "- Hồ sơ kèm theo: tờ khai quyết toán, phụ lục điều chỉnh, biên bản đối chiếu.\n"
         ),
     ))
+    docs.append(Doc(
+        "01-Ke-toan/Chung-tu", "quy-trinh-kiem-soat-chung-tu.md", "KETOAN", "internal",
+        "Quy trình kiểm soát chứng từ kế toán", "ketoan.leader",
+        body=(
+            "Mọi chứng từ phải có mã hồ sơ, người lập, người kiểm tra và ngày hạch toán.\n\n"
+            "1. Kế toán viên tiếp nhận và đối chiếu chứng từ gốc.\n"
+            "2. Hồ sơ thiếu thông tin được trả lại, không đưa vào kỳ thanh toán.\n"
+            "3. Leader Kế toán duyệt chứng từ trên 100 triệu đồng.\n"
+            "4. Bản điện tử được lưu theo năm tài chính và thời hạn lưu trữ pháp lý.\n"
+        ),
+    ))
+    docs.append(Doc(
+        "01-Ke-toan/Ngan-sach", "du-toan-ngan-sach-van-hanh-2027.md", "KETOAN", "confidential",
+        "Dự toán ngân sách vận hành năm 2027", "ketoan.leader",
+        body=(
+            "Bản dự toán nội bộ phục vụ vòng phê duyệt ngân sách năm 2027.\n\n"
+            "- Hạ tầng và phần mềm: 18,4 tỷ VND.\n"
+            "- Vận hành kho và logistics: 31,2 tỷ VND.\n"
+            "- Đào tạo và tuyển dụng: 6,8 tỷ VND.\n"
+            "- Chỉ leader Kế toán và người được chỉ định được xem trước khi công bố.\n"
+        ),
+    ))
+    docs.append(Doc(
+        "01-Ke-toan/Cong-no", "bao-cao-cong-no-phai-thu-thang-06-2026.md", "KETOAN", "confidential",
+        "Báo cáo công nợ phải thu tháng 06/2026", "ketoan.user1",
+        body=(
+            "Báo cáo tổng hợp công nợ phục vụ đối soát và nhắc nợ.\n\n"
+            "| Nhóm tuổi nợ | Giá trị | Hành động |\n|---|---:|---|\n"
+            "| Dưới 30 ngày | 2,6 tỷ VND | Theo dõi |\n"
+            "| 30–60 ngày | 740 triệu VND | Gửi xác nhận |\n"
+            "| Trên 60 ngày | 190 triệu VND | Chuyển leader xử lý |\n"
+        ),
+    ))
+    docs.append(Doc(
+        "01-Ke-toan/Thanh-toan-luong", "quy-trinh-thanh-toan-luong.md", "KETOAN", "confidential",
+        "Quy trình thanh toán lương", "ketoan.leader",
+        body=(
+            "Kế toán chỉ nhận bảng tổng hợp đã được Leader Nhân sự duyệt.\n\n"
+            "1. Kiểm tra tổng quỹ lương và số lượng người nhận.\n"
+            "2. Lập chứng từ ngân hàng theo danh sách được giao.\n"
+            "3. Hai người độc lập kiểm tra trước khi phát lệnh.\n"
+            "4. Không sao chép hồ sơ nhân sự đầy đủ sang kho Kế toán.\n"
+        ),
+    ))
 
     # === 02-IT ============================================================
     docs.append(Doc(
@@ -227,6 +275,28 @@ def build_docs() -> list[Doc]:
             "3. Bật lại dịch vụ theo thứ tự: tồn kho → đơn hàng → báo cáo.\n"
         ),
     ))
+    docs.append(Doc(
+        "02-IT/Ma-nguon", "quy-uoc-quan-ly-ma-nguon.md", "IT", "internal",
+        "Quy ước quản lý mã nguồn", "it.leader",
+        body=(
+            "Mã nguồn doanh nghiệp phải được lưu trong kho dự án có kiểm soát truy cập.\n\n"
+            "- Nhánh chính bắt buộc qua pull request và ít nhất một người duyệt.\n"
+            "- Không commit mật khẩu, API key, token hoặc dữ liệu khách hàng.\n"
+            "- Quyền ghi được cấp theo dự án; thu hồi khi thành viên rời dự án.\n"
+            "- Bản phát hành phải gắn tag và lưu dấu vết người phê duyệt.\n"
+        ),
+    ))
+    docs.append(Doc(
+        "02-IT/Nhat-ky", "nhat-ky-su-co-kho-2026-07.md", "IT", "confidential",
+        "Nhật ký sự cố hệ thống kho tháng 07/2026", "it.user1",
+        body=(
+            "Nhật ký kỹ thuật đã loại bỏ dữ liệu nghiệp vụ và bí mật xác thực.\n\n"
+            "| Thời điểm | Sự kiện | Xử lý |\n|---|---|---|\n"
+            "| 2026-07-08 09:15 | Độ trễ hàng đợi tăng | Mở rộng worker |\n"
+            "| 2026-07-19 22:40 | Replica chậm đồng bộ | Chuyển tuyến đọc |\n"
+            "| 2026-07-28 14:05 | Cảnh báo dung lượng | Dọn snapshot hết hạn |\n"
+        ),
+    ))
 
     # === 03-Nhan-su =======================================================
     payroll = "\n".join(
@@ -237,7 +307,7 @@ def build_docs() -> list[Doc]:
         for i in range(1, 10)
     )
     docs.append(Doc(
-        "03-Nhan-su/Luong", "bang-luong-thang-07-2026.md", "HR", "restricted",
+        "03-Nhan-su/Luong/Bang-luong-thang", "bang-luong-thang-07-2026.md", "HR", "restricted",
         "Bảng lương chi tiết tháng 07/2026", "hr.leader",
         body=(
             f"# {COMPANY} — Bảng lương chi tiết tháng 07/2026\n"
@@ -248,7 +318,7 @@ def build_docs() -> list[Doc]:
         ),
     ))
     docs.append(Doc(
-        "03-Nhan-su/Hop-dong-lao-dong", "hop-dong-lao-dong-mau.md", "HR", "confidential",
+        "03-Nhan-su/Hop-dong-lao-dong/Hop-dong-chinh-thuc", "hop-dong-lao-dong-mau.md", "HR", "confidential",
         "Hợp đồng lao động (mẫu)", "hr.leader",
         body=(
             "Mẫu hợp đồng lao động không xác định thời hạn.\n\n"
@@ -278,6 +348,79 @@ def build_docs() -> list[Doc]:
             "- Làm thêm giờ phải được duyệt trước và ghi nhận vào bảng công.\n"
         ),
     ))
+    docs.append(Doc(
+        "03-Nhan-su/Ho-so-nhan-vien", "quy-trinh-quan-ly-ho-so-nhan-vien.md", "HR", "restricted",
+        "Quy trình quản lý hồ sơ nhân viên", "hr.leader",
+        body=(
+            "Hồ sơ nhân viên được phân quyền đến từng trường hợp phụ trách.\n\n"
+            "- Cá nhân chỉ xem hồ sơ của chính mình.\n"
+            "- HR phụ trách được tạo và cập nhật hồ sơ được giao.\n"
+            "- Leader HR duyệt thay đổi nhạy cảm và việc chia sẻ liên phòng.\n"
+            "- Mọi lần xem, tải xuống và thay đổi quyền phải được ghi log.\n"
+        ),
+    ))
+    # One salary slip and one employment contract for every business account
+    # exposed by the demo.  These are deliberately record-scoped: department
+    # membership alone never grants access to another employee's file.
+    people = (
+        # username, title, department name, base salary, allowance
+        ("it.leader", "Trưởng phòng Công nghệ thông tin", "Phòng Công nghệ thông tin", 45_000_000, 7_000_000),
+        ("it.user1", "Kỹ sư phần mềm", "Phòng Công nghệ thông tin", 28_000_000, 3_000_000),
+        ("it.user2", "Kỹ sư hạ tầng", "Phòng Công nghệ thông tin", 31_000_000, 4_000_000),
+        ("hr.leader", "Trưởng phòng Nhân sự", "Phòng Nhân sự", 42_000_000, 6_000_000),
+        ("hr.user1", "Chuyên viên hồ sơ nhân sự", "Phòng Nhân sự", 24_000_000, 2_000_000),
+        ("hr.user2", "Chuyên viên tuyển dụng", "Phòng Nhân sự", 25_000_000, 2_500_000),
+        ("ketoan.leader", "Trưởng phòng Kế toán", "Phòng Kế toán", 44_000_000, 6_500_000),
+        ("ketoan.user1", "Kế toán viên", "Phòng Kế toán", 26_000_000, 2_500_000),
+    )
+    for username, job_title, department_name, base_salary, allowance in people:
+        deduction = round((base_salary + allowance) * 0.105)
+        net_salary = base_salary + allowance - deduction
+        slug = username.replace(".", "-")
+        salary_readers = tuple(dict.fromkeys((username, "hr.leader", "ketoan.leader")))
+        contract_readers = tuple(dict.fromkeys((username, "hr.leader")))
+        docs.append(Doc(
+            "03-Nhan-su/Luong/Phieu-luong-ca-nhan",
+            f"phieu-luong-{slug}-thang-07-2026.md",
+            "HR", "restricted",
+            f"Phiếu lương cá nhân tháng 07/2026 — {username}", "hr.leader",
+            body=(
+                f"Phiếu lương mẫu dành riêng cho tài khoản `{username}`.\n\n"
+                f"- Chức danh: {job_title}.\n"
+                f"- Lương cơ bản: {base_salary:,} VND.\n"
+                f"- Phụ cấp: {allowance:,} VND.\n"
+                f"- Khấu trừ bảo hiểm và thuế: {deduction:,} VND.\n"
+                f"- Thực nhận: {net_salary:,} VND.\n"
+            ),
+            related_employee_id=username,
+            allowed_users=salary_readers,
+        ))
+        docs.append(Doc(
+            "03-Nhan-su/Hop-dong-lao-dong/Hop-dong-chinh-thuc",
+            f"hop-dong-{slug}.md",
+            "HR", "restricted",
+            f"Hợp đồng lao động mẫu — {username}", "hr.leader",
+            body=(
+                f"Hợp đồng lao động tổng hợp dành riêng cho tài khoản `{username}`.\n\n"
+                f"- Chức danh: {job_title}.\n"
+                f"- Bộ phận: {department_name}.\n"
+                "- Loại hợp đồng: Không xác định thời hạn.\n"
+                "- Ngày hiệu lực: 2026-07-01.\n"
+                "- Bản đã ký không được sửa đè; thay đổi phải lập phụ lục.\n"
+            ),
+            related_employee_id=username,
+            allowed_users=contract_readers,
+        ))
+    docs.append(Doc(
+        "03-Nhan-su/Danh-gia", "quy-trinh-danh-gia-hieu-suat.md", "HR", "confidential",
+        "Quy trình đánh giá hiệu suất", "hr.leader",
+        body=(
+            "Kết quả đánh giá chỉ hiển thị cho nhân viên liên quan, quản lý được phân công và HR phụ trách.\n\n"
+            "- Quản lý nhập nhận xét dựa trên mục tiêu đã thống nhất.\n"
+            "- Nhân viên có quyền phản hồi trước khi khóa kỳ đánh giá.\n"
+            "- Không dùng báo cáo đánh giá cá nhân làm tài liệu dùng chung của phòng.\n"
+        ),
+    ))
 
     # === 04-Quan-tri — company strategic, superadmin-only =================
     docs.append(Doc(
@@ -290,6 +433,36 @@ def build_docs() -> list[Doc]:
             f"- Định giá đề xuất: {rng.randrange(680, 940)} tỷ VND.\n"
             "- Ngày ký dự kiến: 2026-11-14. Chưa công bố ra thị trường.\n"
             "- Rủi ro: rò rỉ trước ngày ký có thể khiến giao dịch đổ vỡ.\n"
+        ),
+    ))
+    docs.append(Doc(
+        "04-Quan-tri/Nhat-ky-truy-cap", "bao-cao-ra-soat-quyen-q2-2026.md", "WORKSPACE", "restricted",
+        "Báo cáo rà soát quyền truy cập Quý 2/2026", "superadmin",
+        body=(
+            "Báo cáo quản trị tổng hợp, không chứa nội dung hồ sơ nghiệp vụ.\n\n"
+            "- 7 tài khoản được rà soát; không có tài khoản mồ côi.\n"
+            "- 2 quyền theo nhiệm vụ đã hết hạn và được thu hồi.\n"
+            "- Các lần dùng quyền đặc biệt phải có lý do và mã phê duyệt.\n"
+        ),
+    ))
+    docs.append(Doc(
+        "04-Quan-tri/Sao-luu", "chinh-sach-sao-luu-va-khoi-phuc.md", "WORKSPACE", "restricted",
+        "Chính sách sao lưu và khôi phục", "superadmin",
+        body=(
+            "Bản sao lưu phải được mã hóa, tách quyền vận hành khỏi quyền đọc dữ liệu nghiệp vụ.\n\n"
+            "- Sao lưu gia tăng hằng ngày, bản đầy đủ hằng tuần.\n"
+            "- Kiểm thử khôi phục mỗi quý và ghi nhận kết quả kiểm toán.\n"
+            "- Không cấp quyền đọc toàn bộ bản sao lưu chỉ vì người dùng thuộc phòng IT.\n"
+        ),
+    ))
+    docs.append(Doc(
+        "05-Luu-tru", "quy-dinh-luu-tru-tai-lieu-het-hieu-luc.md", "WORKSPACE", "confidential",
+        "Quy định lưu trữ tài liệu hết hiệu lực", "superadmin",
+        body=(
+            "Tài liệu hết hiệu lực được chuyển sang kho lưu trữ, không xóa trực tiếp.\n\n"
+            "- Giữ nguyên phân loại và ACL của tài liệu gốc.\n"
+            "- Chỉ người được ủy quyền mới được khôi phục hoặc tiêu hủy.\n"
+            "- Việc tiêu hủy phải theo thời hạn pháp lý và có biên bản.\n"
         ),
     ))
 
@@ -309,6 +482,7 @@ def _frontmatter(doc: Doc, index: int) -> str:
         "effective_date": "2026-07-01",
         "retention_until": "2031-07-01",
         "related_employee_id": doc.related_employee_id or "null",
+        "allowed_users": ",".join(doc.allowed_users) or "null",
         "approved_by": doc.owner,
         "version": "1.0",
     }
