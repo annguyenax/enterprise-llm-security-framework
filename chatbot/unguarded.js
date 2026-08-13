@@ -25,7 +25,7 @@ function formatSize(bytes) { return bytes < 1024 ? `${bytes} B` : `${(bytes / 10
 
 function renderDocuments() {
   $('#documentCount').textContent = `${state.documents.length} tài liệu`;
-  $('#documentList').innerHTML = state.documents.length ? state.documents.map(document => `<div class="document-row"><span>▤</span><div><strong title="${escapeHtml(document.filename)}">${escapeHtml(document.filename)}</strong><small>${formatSize(document.size_bytes)} · không kiểm tra</small></div><button type="button" data-delete-document="${escapeHtml(document.id)}" aria-label="Xóa ${escapeHtml(document.filename)}">×</button></div>`).join('') : '<p class="empty">Chưa có file trong kho baseline.</p>';
+  $('#documentList').innerHTML = state.documents.length ? state.documents.map(document => `<div class="document-row"><span>▤</span><div><strong title="${escapeHtml(document.filename)}">${escapeHtml(document.filename)}</strong><small>${formatSize(document.size_bytes)} · kho dùng chung · không kiểm tra upload</small></div><button type="button" data-delete-document="${escapeHtml(document.id)}" aria-label="Xóa ${escapeHtml(document.filename)}">×</button></div>`).join('') : '<p class="empty">Chưa có file trong kho tri thức dùng chung.</p>';
 }
 
 async function loadDocuments() { state.documents = await api('/unguarded/documents'); renderDocuments(); }
@@ -59,7 +59,7 @@ async function uploadDocument() {
   $('#uploadError').textContent = ''; $('#uploadDocumentBtn').disabled = true;
   try {
     await api('/unguarded/documents', { method:'POST', body:file, headers:{ 'Content-Type':'application/octet-stream', 'X-Filename':encodeURIComponent(file.name) } });
-    $('#uploadDialog').close(); $('#documentFile').value = ''; await loadDocuments(); toast('Đã tải vào kho baseline, không qua Guard');
+    $('#uploadDialog').close(); $('#documentFile').value = ''; await loadDocuments(); toast('Đã tải trực tiếp vào kho dùng chung, không qua Guard');
   } catch (error) { $('#uploadError').textContent = error.message; }
   finally { $('#uploadDocumentBtn').disabled = false; }
 }
@@ -81,7 +81,7 @@ $('#messageInput').addEventListener('input', event => { event.target.style.heigh
 document.querySelectorAll('[data-prompt]').forEach(button => button.addEventListener('click', () => sendMessage(button.dataset.prompt)));
 $('#newSessionBtn').addEventListener('click', resetSession); $('#uploadBtn').addEventListener('click', () => $('#uploadDialog').showModal()); $('#attachBtn').addEventListener('click', () => $('#uploadDialog').showModal());
 $('#closeUploadBtn').addEventListener('click', () => $('#uploadDialog').close()); $('#uploadDocumentBtn').addEventListener('click', uploadDocument);
-$('#documentList').addEventListener('click', async event => { const button = event.target.closest('[data-delete-document]'); if (!button) return; await api(`/unguarded/documents/${button.dataset.deleteDocument}`, { method:'DELETE' }); await loadDocuments(); toast('Đã xóa tài liệu baseline'); });
+$('#documentList').addEventListener('click', async event => { const button = event.target.closest('[data-delete-document]'); if (!button) return; await api(`/unguarded/documents/${button.dataset.deleteDocument}`, { method:'DELETE' }); await loadDocuments(); toast('Đã xóa tài liệu khỏi kho dùng chung'); });
 
 // Log out so the demo can switch roles without going back to the guarded
 // page. The token is shared with Shield AI via localStorage, so this

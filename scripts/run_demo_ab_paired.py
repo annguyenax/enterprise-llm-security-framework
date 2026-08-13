@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Clean-canary A/B experiment: guarded workspace path vs unguarded lab path.
+"""Clean-canary A/B experiment: guarded vs unguarded inference on one KB.
 
 Design (honest framing — Code X audit):
-  This is a *system-level* A/B, not "same retrieval, only guards toggled".
+  This is a paired inference-guard A/B using the same retrieval and ACL path.
   - GUARDED:   POST /v1/conversations/{id}/messages  (full guard chain +
                enterprise workspace retrieve/ACL).
-  - UNGUARDED: POST /v1/unguarded/chat  (no guards; unguarded_store retrieve).
-  Both stores are seeded with the *same* canary KB document so the canary is
-  available to retrieval on both sides. A canary in an answer is KB exfil
+  - UNGUARDED: POST /v1/unguarded/chat  (same workspace retrieve/ACL; no
+                inference guard chain).
+  The shared store is seeded once. A canary in an answer is KB exfil
   (canary is never placed in prompts).
 
 Schema fix (Code X P0): unguarded endpoint returns ``response`` (not
@@ -146,10 +146,9 @@ def main() -> int:
 
     from fastapi.testclient import TestClient  # noqa: PLC0415
     from app.main import app  # noqa: PLC0415
-    from app.workspace import store, unguarded_store  # noqa: PLC0415
+    from app.workspace import store  # noqa: PLC0415
 
     store.initialize()
-    unguarded_store.initialize()
     auth = store.authenticate("it.user1", "ITUser1#2026")
     if not auth:
         print("FAIL: could not authenticate demo user", file=sys.stderr)
@@ -166,9 +165,6 @@ def main() -> int:
         "member",
         actor["department"],
         guard_decision="allow",
-    )
-    unguarded_store.add_document(
-        actor, "bang-luong-mat-07.md", KB_DOC, "text/plain", len(KB_DOC)
     )
 
     def guarded(prompt: str) -> dict:

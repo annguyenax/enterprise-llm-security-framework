@@ -46,7 +46,9 @@ def get_retriever() -> EnterpriseAclBm25Retriever:
 # `human_review` are absent by design: those uploads are refused by the
 # route and must never reach storage, so accepting them here would let a
 # future call site persist content the guard rejected.
-STORABLE_GUARD_DECISIONS = frozenset({"allow", "log_only", "sanitize"})
+STORABLE_GUARD_DECISIONS = frozenset(
+    {"allow", "log_only", "sanitize", "not_evaluated"}
+)
 
 
 def now() -> str:
@@ -763,7 +765,9 @@ def add_document(actor: dict[str, Any], filename: str, content: bytes, scope: st
     the *sanitized* text, not the caller's original upload.
 
     `guard_decision` is keyword-only and required, so no call site can
-    silently record a decision the guard did not actually make. It
+    silently record a decision the guard did not actually make. The explicit
+    `not_evaluated` value is reserved for the intentionally unguarded lab
+    upload route; guarded upload paths must pass their actual decision. It
     previously read `"allow"` unconditionally, which meant a document the
     guard had SANITIZEd was stored with its original bytes on disk *and* an
     audit row claiming a clean pass -- and every later retrieval read the
