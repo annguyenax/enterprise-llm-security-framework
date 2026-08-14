@@ -44,6 +44,9 @@ def test_unguarded_ui_uses_shared_workspace_kb(monkeypatch, tmp_path: Path):
     assert [item["id"] for item in unguarded_docs] == [item["id"] for item in guarded_docs]
     assert [item["filename"] for item in guarded_docs] == ["project-alpha.md"]
 
+    guarded_chunks, _guarded_sources = store.retrieve(member, "project-alpha.md")
+    assert guarded_chunks[0].metadata["guard_decision"] == "not_evaluated"
+
     hr_token, _hr_member = _login("hr.user1", "HRUser1#2026")
     hr_docs = client.get(
         "/v1/unguarded/documents",

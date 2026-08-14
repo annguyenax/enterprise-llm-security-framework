@@ -497,7 +497,11 @@ def _direct_document_context(document: dict[str, Any]) -> tuple[list[Any], list[
     except OSError:
         return None
     filename = str(document["filename"])
-    metadata = {"filename": filename, "scope": document["scope"]}
+    metadata = {
+        "filename": filename,
+        "scope": document["scope"],
+        "guard_decision": document.get("guard_decision", ""),
+    }
     return (
         [RAGContextChunk(doc_id=document["id"], text=text, metadata=metadata)],
         [{"id": document["id"], "filename": filename, "scope": document["scope"]}],
@@ -528,6 +532,7 @@ def retrieve(actor: dict[str, Any], query: str, limit: int = 4) -> tuple[list[An
     # small local model.
     normalized_query = query.casefold()
     accessible = accessible_documents(actor)
+    accessible_by_id = {str(document["id"]): document for document in accessible}
     accessible_ids = {str(document["id"]) for document in accessible}
     for document in accessible:
         filename = str(document["filename"])
@@ -634,7 +639,16 @@ def retrieve(actor: dict[str, Any], query: str, limit: int = 4) -> tuple[list[An
             hit = lexical_by_id.get(did)
             if hit is not None:
                 filename=hit.metadata.get("filename", "unknown"); scope=hit.metadata.get("scope", "unknown")
-                chunks.append(RAGContextChunk(doc_id=did,text=hit.text,metadata={"filename":filename,"scope":scope}))
+                authoritative_document = accessible_by_id.get(did, {})
+                chunks.append(RAGContextChunk(
+                    doc_id=did,
+                    text=hit.text,
+                    metadata={
+                        "filename": filename,
+                        "scope": scope,
+                        "guard_decision": authoritative_document.get("guard_decision", ""),
+                    },
+                ))
             else:
                 document=semantic_by_id[did]; direct=_direct_document_context(document)
                 if direct is None: continue
@@ -707,7 +721,11 @@ def _upsert_document_index(row: dict[str, Any], content: bytes) -> None:
     owner_user_id = row["owner_user_id"]
 
     text = content.decode("utf-8", errors="replace")
-    chunk_metadata = {"filename": filename, "scope": scope}
+    chunk_metadata = {
+        "filename": filename,
+        "scope": scope,
+        "guard_decision": str(row.get("guard_decision", "")),
+    }
     chunks = []
     for chunk in chunk_text(text):
         chash = hashlib.sha256(chunk.text.encode()).hexdigest()
