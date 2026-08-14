@@ -98,3 +98,31 @@ scratch/
 
 # admin-locked pytest ACL leftover (negative test); needs admin to remove
 .p13/
+
+# --- Repo hygiene (2026-08-14 cleanup) ---------------------------------------
+# Binary deliverables (báo cáo, slide, archive) are handed in outside git; the
+# repo tracks their LaTeX/markdown sources only.
+*.zip
+*.pptx
+*.doc
+*.docx
+
+# Local agent/editor tooling, not part of the project.
+.mcp.json
+
+# Slide-deck working area: node_modules + unpacked .pptx trees (~11 MB).
+docs/defense/
+
+# Ad-hoc demo transcripts and one-off scratch notes at repo root.
+/demoBAOCAO.txt
+/poison-transcrip-demo.md
+/INVENTORY-CLEANUP.md
+/Shield-AI-CamNang-GiaiThich.md
+
+# Superseded LaTeX trees; the live report is bao_cao_latex_dot2/.
+/report-latex/
+/report-latex-template/
+
+# Phase 13 evaluation runs: only the run_ids cited by docs/ are tracked as
+# evidence (see reports/v3/README.md). Everything else stays local.
+reports/v3/_eval-documents/

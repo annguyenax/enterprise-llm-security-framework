@@ -27,11 +27,15 @@ This is an **academic internship MVP**. It is explicitly **not** production-read
 |-- datasets/               # Frozen synthetic clean/poisoned documents
 |-- tests/                  # pytest unit and integration suite
 |-- scripts/                # Local run, smoke, inspection, and evaluation helpers
+|-- chatbot/                # Minimal demo UI (guarded vs unguarded)
+|-- docker/                 # Local container setup
+|-- release/                # Release policy and archive allowlist
 |-- reports/
 |   |-- evaluation/         # Generated guarded and comparison artifacts
-|   `-- evidence/           # Phase 8 report/demo evidence package
+|   |-- evidence/           # Phase 8 report/demo evidence package
+|   `-- v3/                 # Phase 13 evaluation runs cited by docs/ (see its README)
 |-- docs/                   # Research, diagrams, dataset docs, reports, weekly notes
-|-- report-latex-template/  # School template reference; content not rewritten yet
+|-- bao_cao_latex_dot2/     # LaTeX source of the current report
 |-- PROJECT_PLAN.md
 |-- AGENT_RULES.md
 |-- TASK_BOARD.md
