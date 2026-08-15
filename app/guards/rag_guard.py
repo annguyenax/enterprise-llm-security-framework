@@ -8,6 +8,7 @@ semantic classifier and do not provide complete prompt-injection protection.
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 
 from app.core.decisions import Decision, most_severe
@@ -16,6 +17,8 @@ from app.schemas.responses import RAGGuardResponse
 
 REDACTED = "[REDACTED]"
 ZERO_WIDTH_PATTERN = re.compile(r"[\u200b-\u200d\u2060\ufeff]")
+INTRA_WORD_DOT_PATTERN = re.compile(r"(?<=\w)[.\u00b7\u2022](?=\w)")
+SPACED_LETTER_RUN_PATTERN = re.compile(r"(?<!\w)(?:[a-z]\s+){2,}[a-z](?!\w)")
 FAKE_SECRET_PATTERN = re.compile(r"FAKE-SECRET-0000-EXAMPLE(-[A-Z-]+)?", re.IGNORECASE)
 HIDDEN_BLOCK_PATTERN = re.compile(
     r"<!--.*?--\s*>|<!(?:--)?\s*.*?--\s*>|/\*.*?\*/",
@@ -44,12 +47,26 @@ def _rx(pattern: str) -> re.Pattern[str]:
 
 def _normalize_for_detection(text: str) -> str:
     """Normalize only the copy used by detectors, never returned content."""
-    normalized = ZERO_WIDTH_PATTERN.sub("", text).lower()
+    normalized = unicodedata.normalize("NFKC", text)
+    normalized = ZERO_WIDTH_PATTERN.sub("", normalized).lower()
+    # Strip Vietnamese diacritics on the detector copy so one rule covers
+    # both accented and deliberately accent-smudged attack text.  Preserve
+    # the original chunk for citations and sanitization.
+    normalized = unicodedata.normalize("NFKD", normalized)
+    normalized = "".join(char for char in normalized if not unicodedata.combining(char))
+    normalized = normalized.replace("đ", "d")
     normalized = normalized.translate(str.maketrans({
         "0": "o", "3": "e", "4": "a", "@": "a",
         "5": "s", "$": "s", "1": "i",
     }))
-    return re.sub(r"\s+", " ", normalized).strip()
+    # Defeat punctuation inserted inside words (c.h.i) and runs of isolated
+    # letters (b o q u a).  Requiring at least three isolated letters avoids
+    # joining common two-letter initials and keeps false positives bounded.
+    normalized = INTRA_WORD_DOT_PATTERN.sub("", normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return SPACED_LETTER_RUN_PATTERN.sub(
+        lambda match: re.sub(r"\s+", "", match.group(0)), normalized
+    )
 
 
 RULES: tuple[Rule, ...] = (
@@ -98,6 +115,106 @@ RULES: tuple[Rule, ...] = (
         "Detected language instructing the model to ignore prior instructions.",
     ),
     Rule(
+        "rag-obfuscated-ignore-vi", "instruction_override",
+        _rx(
+            r"\bbo\s*qua\b[^.!?\n]{0,80}"
+            r"\b(?:moi\s+)?(?:quy\s*dinh|chi\s*thi|huong\s*dan|lenh)\b"
+        ),
+        Decision.BLOCK, 0.92,
+        "Detected Vietnamese instruction-override language, including spaced or punctuated obfuscation.",
+    ),
+    Rule(
+        "rag-response-coercion", "response_coercion",
+        _rx(
+            r"\b(?:respond|reply|answer|output|print)\s+(?:only|exactly|verbatim)\b"
+            r"|\b(?:always|for every (?:question|request))\s+(?:respond|reply|answer|output)\b"
+            r"|\bchi\s+(?:duoc\s+)?tra\s+loi(?:\s+chinh\s+xac)?\b"
+            r"|\bluon\s+tra\s+loi\b"
+            r"|\bvoi\s+ moi\s+cau\s+hoi[^.!?\n]{0,40}\btra\s+loi\b"
+        ),
+        Decision.BLOCK, 0.91,
+        "Detected retrieved content attempting to force a fixed model response.",
+    ),
+    Rule(
+        "rag-conditional-trigger", "conditional_trigger",
+        _rx(
+            r"\b(?:if|only if)\b[^.!?\n]{0,100}\b(?:respond|reply|answer|output|print)\b"
+            r"|\bneu\s+(?:cau\s+hoi|yeu\s+cau|nguoi\s+dung)\b[^.!?\n]{0,100}"
+            r"\b(?:tra\s+loi|in\s+ra|xuat)\b"
+        ),
+        Decision.BLOCK, 0.93,
+        "Detected a conditional or sleeper trigger targeting the assistant.",
+    ),
+    Rule(
+        "rag-source-suppression", "source_manipulation",
+        _rx(
+            r"\b(?:do not|never)\s+(?:cite|mention|name|show|display|reveal)\b[^.!?\n]{0,60}"
+            r"\b(?:source|document|file)\b"
+            r"|\bkhong\s+(?:duoc\s+)?(?:dan|hien\s+thi|nhac|neu|noi)\b[^.!?\n]{0,60}"
+            r"\b(?:nguon|tai\s+lieu|ten\s+file|tep)\b"
+            r"|\b(?:cite|attribute)\b[^.!?\n]{0,50}\b(?:instead|as coming from)\b"
+        ),
+        Decision.BLOCK, 0.90,
+        "Detected an attempt to suppress, hide, or forge document provenance.",
+    ),
+    Rule(
+        "rag-cross-document-exfiltration", "data_exfiltration",
+        _rx(
+            r"\b(?:find|search|open|read|copy|extract)\b[^.!?\n]{0,100}"
+            r"\b(?:other|all|another)?\s*(?:documents?|files?|runbooks?)\b[^.!?\n]{0,120}"
+            r"\b(?:api\s*keys?|tokens?|passwords?|secrets?|environment\s+variables?)\b"
+            r"|\b(?:tim|doc|mo|sao\s+chep|trich\s+xuat)\b[^.!?\n]{0,100}"
+            r"\b(?:tai\s+lieu|tep|runbook)\b[^.!?\n]{0,120}"
+            r"\b(?:api\s*key|token|mat\s+khau|bi\s+mat|bien\s+moi\s+truong)\b"
+        ),
+        Decision.BLOCK, 0.97,
+        "Detected retrieved instructions attempting cross-document secret exfiltration.",
+    ),
+    Rule(
+        "rag-bulk-verbatim-disclosure", "data_exfiltration",
+        _rx(
+            r"\b(?:print|return|output|copy|reveal)\b[^.!?\n]{0,60}"
+            r"\b(?:all|entire|full|verbatim)\b[^.!?\n]{0,40}"
+            r"\b(?:information|data|record|content|details)\b"
+            r"|\b(?:in|tra\s+ve|sao\s+chep|tiet\s+lo)\b[^.!?\n]{0,60}"
+            r"\bnguyen\s+van\b[^.!?\n]{0,40}\b(?:toan\s+bo|thong\s+tin|du\s+lieu|noi\s+dung)\b"
+        ),
+        Decision.BLOCK, 0.96,
+        "Detected retrieved instructions demanding bulk verbatim disclosure of sensitive records.",
+    ),
+    Rule(
+        "rag-markdown-exfiltration", "data_exfiltration",
+        _rx(
+            r"!\[[^\]]*\]\(https?://[^)\s]{1,300}[?&]"
+            r"(?:secret|token|api[_-]?key|password|data|content)="
+        ),
+        Decision.BLOCK, 0.97,
+        "Detected a Markdown resource URL attempting to exfiltrate data through a sensitive query parameter.",
+    ),
+    Rule(
+        "rag-numeric-integrity-override", "data_integrity",
+        _rx(
+            r"\b(?:when|whenever)\s+(?:calculating|computing|summing)\b[^.!?\n]{0,100}"
+            r"\b(?:always|must)\s+(?:report|return|use)\b"
+            r"|\bkhi\s+(?:tinh|tong\s+hop)\b[^.!?\n]{0,100}"
+            r"\b(?:luon\s+bao|luon\s+tra|khong\s+su\s+dung\s+phep\s+tinh)\b"
+        ),
+        Decision.BLOCK, 0.94,
+        "Detected an instruction to replace source-derived calculations with a fixed value.",
+    ),
+    Rule(
+        "rag-business-fact-override", "data_integrity",
+        _rx(
+            r"\b(?:ignore|disregard|replace)\b[^.!?\n]{0,80}"
+            r"\b(?:date|time|amount|value|business content|source data)\b"
+            r"|\bbo\s+qua\b[^.!?\n]{0,80}"
+            r"\b(?:thoi\s+gian|ngay|so\s+tien|du\s+lieu|noi\s+dung\s+nghiep\s+vu)\b"
+            r"[^.!?\n]{0,100}\b(?:luon\s+tra\s+loi|thay\s+bang|bao\s+rang)\b"
+        ),
+        Decision.BLOCK, 0.95,
+        "Detected retrieved instructions attempting to overwrite business facts from the source.",
+    ),
+    Rule(
         "rag-ambiguous-authority-claim", "authority_claim",
         _rx(r"\bthis (note|memo) (should|must) be (treated|considered) as (final|authoritative)\b"),
         Decision.HUMAN_REVIEW, 0.55,
@@ -132,6 +249,8 @@ def evaluate_rag_context(chunks: list[RAGContextChunk]) -> RAGGuardResponse:
             if rule.category not in {"transcript_injection", "fake_secret_leak"}
             and rule.pattern.search(normalized)
         ]
+        if str(chunk.metadata.get("guard_decision", "")).casefold() == "not_evaluated":
+            matched.append(_unreviewed_source_rule())
         if FAKE_SECRET_PATTERN.search(chunk.text):
             matched.append(next(rule for rule in RULES if rule.category == "fake_secret_leak"))
         transcript_attack = bool(
@@ -192,6 +311,14 @@ def _hidden_rule() -> Rule:
         "rag-hidden-html-comment", "hidden_instruction", HIDDEN_BLOCK_PATTERN,
         Decision.SANITIZE, 0.78,
         "Detected instruction-like content in a hidden HTML, XML, JS, or CSS comment block.",
+    )
+
+
+def _unreviewed_source_rule() -> Rule:
+    return Rule(
+        "rag-unreviewed-upload", "unreviewed_source", re.compile(r"$^"),
+        Decision.BLOCK, 0.98,
+        "Retrieved document was uploaded through the unguarded lab and has not passed content review.",
     )
 
 

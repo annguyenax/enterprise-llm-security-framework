@@ -212,7 +212,11 @@ def load_cases(cases_dir: Path, v2, *, limit: int | None = None) -> list[Case]:
     cases: list[Case] = []
     seen: set[str] = set()
     for path in files:
-        relative = path.relative_to(REPO_ROOT).as_posix()
+        try:
+            relative = path.resolve().relative_to(REPO_ROOT.resolve()).as_posix()
+        except ValueError:
+            # Temp paths in unit tests are outside the repo root.
+            relative = path.as_posix()
         for index, record in enumerate(v2._load_jsonl(path, relative), start=1):
             case = _validate_case(record, f"{relative}:{index}")
             if case.case_id in seen:
@@ -367,6 +371,7 @@ class CaseOutcome:
     expected_label: str
     attack_type: str
     tool_family: str
+    technique: str
     decision: str
     blocked: bool
     provider_called: bool
@@ -394,6 +399,7 @@ def run_case(harness: Harness, case: Case) -> CaseOutcome:
         return CaseOutcome(
             case_id=case.case_id, expected_label=case.expected_label,
             attack_type=case.attack_type, tool_family=case.tool_family,
+            technique=case.technique,
             decision="error", blocked=False,
             provider_called=False, exfil_leaked=None, exfil_target_seeded=False,
             http_status=created.status_code, error="conversation_create_failed",
@@ -409,6 +415,7 @@ def run_case(harness: Harness, case: Case) -> CaseOutcome:
         return CaseOutcome(
             case_id=case.case_id, expected_label=case.expected_label,
             attack_type=case.attack_type, tool_family=case.tool_family,
+            technique=case.technique,
             decision="error", blocked=False,
             provider_called=False, exfil_leaked=None, exfil_target_seeded=False,
             http_status=response.status_code, error="message_post_failed",
@@ -433,6 +440,7 @@ def run_case(harness: Harness, case: Case) -> CaseOutcome:
         expected_label=case.expected_label,
         attack_type=case.attack_type,
         tool_family=case.tool_family,
+        technique=case.technique,
         decision=decision,
         blocked=decision in BLOCKING_DECISIONS,
         provider_called=provider_called,
@@ -486,16 +494,37 @@ def compute_metrics(outcomes: list[CaseOutcome], seeded_canaries: tuple[str, ...
     exfil_leaks = sum(1 for o in exfil_cases if o.exfil_leaked)
     exfil_reportable = bool(exfil_cases)
 
-    def _breakdown(key: str) -> dict[str, dict[str, int]]:
+    def _breakdown(key: str, subset: list[CaseOutcome]) -> dict[str, dict[str, int]]:
         buckets: dict[str, dict[str, int]] = {}
-        for outcome in malicious:
+        for outcome in subset:
             bucket = buckets.setdefault(getattr(outcome, key), {"total": 0, "blocked": 0})
             bucket["total"] += 1
             bucket["blocked"] += int(outcome.blocked)
         return {name: buckets[name] for name in sorted(buckets)}
 
-    by_attack = _breakdown("attack_type")
-    by_tool = _breakdown("tool_family")
+    by_attack = _breakdown("attack_type", malicious)
+    by_tool = _breakdown("tool_family", malicious)
+    by_technique = _breakdown("technique", malicious)
+    by_benign_technique = _breakdown("technique", benign)
+
+    def _rate_breakdown(buckets: dict[str, dict[str, int]]) -> dict[str, dict[str, Any]]:
+        """Attach reportable blocked/total rates only when n >= MIN_N."""
+        out: dict[str, dict[str, Any]] = {}
+        for name, bucket in buckets.items():
+            total = int(bucket["total"])
+            blocked = int(bucket["blocked"])
+            out[name] = {
+                "total": total,
+                "blocked": blocked,
+                "block_rate": _rate(blocked, total),
+            }
+        return out
+
+    # Hard-benign precision stress: techniques starting with hard_benign_
+    hard_benign = [o for o in benign if str(o.technique).startswith("hard_benign_")]
+    normal_benign = [o for o in benign if o.technique == "normal_business_query"]
+    hard_fp = sum(1 for o in hard_benign if o.blocked)
+    normal_fp = sum(1 for o in normal_benign if o.blocked)
 
     return {
         "schema": METRICS_SCHEMA,
@@ -503,15 +532,22 @@ def compute_metrics(outcomes: list[CaseOutcome], seeded_canaries: tuple[str, ...
             "total": len(outcomes),
             "malicious": len(malicious),
             "benign": len(benign),
+            "benign_normal": len(normal_benign),
+            "benign_hard": len(hard_benign),
             "errors": len(errors),
             "true_positive": true_positive,
             "false_negative": false_negative,
             "false_positive": false_positive,
             "true_negative": true_negative,
+            "stop_before_llm_count": stopped_early,
+            "false_positive_hard_benign": hard_fp,
+            "false_positive_normal_benign": normal_fp,
         },
         "rates": {
             "tpr": _rate(true_positive, len(malicious)),
             "fpr": _rate(false_positive, len(benign)),
+            "fpr_hard_benign": _rate(hard_fp, len(hard_benign)),
+            "fpr_normal_benign": _rate(normal_fp, len(normal_benign)),
             "stop_before_llm": _rate(stopped_early, len(malicious)),
             "exfil_marker": _rate(exfil_leaks, len(exfil_cases)) if exfil_reportable else None,
         },
@@ -525,12 +561,13 @@ def compute_metrics(outcomes: list[CaseOutcome], seeded_canaries: tuple[str, ...
         # experiment.
         "exfil_cases_declared": len(declared),
         "exfil_cases_measurable": len(exfil_cases),
+        "exfil_leaks_count": exfil_leaks if exfil_reportable else 0,
         "seeded_canary_count": len(seeded),
-        # Per-attack-type counts only. Percentages per family are
-        # deliberately absent: the accepted statistical limitation is that
-        # small per-family samples are described qualitatively.
-        "by_attack_type": by_attack,
-        "by_tool_family": by_tool,
+        # Per-group counts + optional block_rate when n >= MIN_N.
+        "by_attack_type": _rate_breakdown(by_attack),
+        "by_tool_family": _rate_breakdown(by_tool),
+        "by_technique": _rate_breakdown(by_technique),
+        "by_benign_technique": _rate_breakdown(by_benign_technique),
     }
 
 
@@ -554,7 +591,11 @@ def render_report(metrics: dict[str, Any]) -> str:
         "| Chỉ số | Giá trị | Ghi chú |",
         "|---|---:|---|",
         f"| TPR | {_format_rate(rates['tpr'])} | chặn đúng / tổng malicious |",
-        f"| FPR | {_format_rate(rates['fpr'])} | chặn nhầm / tổng benign |",
+        f"| FPR (toàn benign) | {_format_rate(rates['fpr'])} | chặn nhầm / tổng benign |",
+        f"| FPR hard_benign | {_format_rate(rates.get('fpr_hard_benign'))} | "
+        f"chặn nhầm / benign hard (n={counts.get('benign_hard', 0)}) |",
+        f"| FPR normal_benign | {_format_rate(rates.get('fpr_normal_benign'))} | "
+        f"chặn nhầm / benign thường (n={counts.get('benign_normal', 0)}) |",
         f"| Stop-before-LLM | {_format_rate(rates['stop_before_llm'])} | malicious bị chặn trước khi gọi provider |",
     ]
 
@@ -588,18 +629,105 @@ def render_report(metrics: dict[str, Any]) -> str:
     # accepted statistical limitation is that small groups are described
     # qualitatively rather than given a rate.
     for title, key in (
-        ("Theo nguồn kỹ thuật", "by_tool_family"),
-        ("Theo loại tấn công", "by_attack_type"),
+        ("Theo nguồn kỹ thuật (tool_family, malicious)", "by_tool_family"),
+        ("Theo technique (malicious)", "by_technique"),
+        ("Theo loại tấn công (attack_type)", "by_attack_type"),
+        ("Theo technique (benign — precision stress)", "by_benign_technique"),
     ):
         breakdown = metrics.get(key) or {}
         if not breakdown:
             continue
-        lines += ["", f"### {title} (đếm, không phải tỉ lệ)", "",
-                  "| Nhóm | Tổng | Bị chặn |", "|---|---:|---:|"]
+        lines += [
+            "",
+            f"### {title}",
+            "",
+            "| Nhóm | Tổng | Bị chặn | Tỉ lệ chặn* |",
+            "|---|---:|---:|---:|",
+        ]
         for name, bucket in breakdown.items():
-            lines.append(f"| {name} | {bucket['total']} | {bucket['blocked']} |")
+            rate = bucket.get("block_rate")
+            rate_s = _format_rate(rate) if rate is not None or bucket["total"] < metrics["rate_reporting_min_n"] else _format_rate(rate)
+            if bucket["total"] < metrics["rate_reporting_min_n"]:
+                rate_s = "không đủ mẫu"
+            elif rate is None:
+                rate_s = "không đủ mẫu"
+            else:
+                rate_s = f"{rate * 100:.1f}%"
+            lines.append(
+                f"| {name} | {bucket['total']} | {bucket['blocked']} | {rate_s} |"
+            )
+        lines.append(
+            f"\n\\* Tỉ lệ chỉ báo khi n ≥ {metrics['rate_reporting_min_n']}."
+        )
 
     return "\n".join(lines)
+
+
+# --- provenance ------------------------------------------------------------
+
+
+def _git_provenance() -> dict[str, Any]:
+    """Best-effort git identity of the code that produced this run.
+
+    A run from a dirty worktree is not fully reproducible, so the dirty flag
+    is recorded rather than hidden. Never raises: if git is unavailable the
+    fields degrade to "unknown"/None.
+    """
+    import subprocess  # noqa: PLC0415 - only needed when writing artifacts
+
+    def _run(cmd: list[str]) -> str:
+        try:
+            out = subprocess.run(
+                cmd, cwd=REPO_ROOT, capture_output=True, text=True, timeout=10
+            )
+            return out.stdout.strip() if out.returncode == 0 else ""
+        except Exception:  # pragma: no cover - defensive
+            return ""
+
+    commit = _run(["git", "rev-parse", "HEAD"])
+    status = _run(["git", "status", "--porcelain"])
+    return {
+        "git_commit": commit or "unknown",
+        "git_worktree_dirty": bool(status) if commit else None,
+    }
+
+
+def build_provenance(args: argparse.Namespace, corpus_path: Path | None, v2) -> dict[str, Any]:
+    """Lock the run's code + config + model + corpus identity.
+
+    This closes the reproducibility gap raised in the Code X audit: the
+    published metric numbers now carry the commit, the provider/model, the
+    semantic-judge configuration, and a hash of the seeded corpus, so a number
+    can be traced to the exact conditions that produced it. In remote mode the
+    provider/model live on the far server, so they are recorded as unknown
+    rather than guessed from this process's environment.
+    """
+    prov: dict[str, Any] = {"schema": "phase13-v3-provenance-v1"}
+    prov.update(_git_provenance())
+
+    if args.base_url:
+        prov["mode"] = "remote"
+        prov["base_url"] = args.base_url
+        prov["llm_provider"] = "remote-unknown"
+        prov["llm_model_name"] = "remote-unknown"
+        prov["semantic_guard_use_llm"] = "remote-unknown"
+        prov["semantic_guard_model"] = "remote-unknown"
+    else:
+        prov["mode"] = "in_process"
+        provider = os.getenv("LLM_PROVIDER", "mock")
+        model = os.getenv("LLM_MODEL_NAME", "mock-rag-guard-v1")
+        prov["llm_provider"] = provider
+        prov["llm_model_name"] = model
+        prov["semantic_guard_use_llm"] = os.getenv("SEMANTIC_GUARD_USE_LLM", "1")
+        prov["semantic_guard_model"] = os.getenv("SEMANTIC_GUARD_MODEL", "") or model
+
+    if corpus_path is not None and corpus_path.is_file():
+        prov["corpus_path"] = corpus_path.name
+        prov["corpus_sha256"] = v2._sha256_file(corpus_path)
+    else:
+        prov["corpus_path"] = None
+        prov["corpus_sha256"] = None
+    return prov
 
 
 # --- artifacts -------------------------------------------------------------
@@ -607,7 +735,7 @@ def render_report(metrics: dict[str, Any]) -> str:
 
 def write_artifacts(
     output_root: Path, outcomes: Iterable[CaseOutcome], metrics: dict[str, Any], v2, *,
-    cases_sha256: str, report: str,
+    cases_sha256: str, dataset_sha256: str, provenance: dict[str, Any], report: str,
 ) -> Path:
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8]
     run_dir = output_root / run_id
@@ -630,6 +758,7 @@ def write_artifacts(
                     "expected_label": outcome.expected_label,
                     "http_status": outcome.http_status,
                     "provider_called": outcome.provider_called,
+                    "technique": outcome.technique,
                     "tool_family": outcome.tool_family,
                 }
             ).decode("utf-8")
@@ -641,7 +770,12 @@ def write_artifacts(
         **metrics,
         "run_id": run_id,
         "result_schema": RESULT_SCHEMA,
+        # cases_sha256 hashes the case-id list (execution identity);
+        # dataset_sha256 hashes the full case records (content identity), so
+        # the numbers are locked to the actual payloads, not just their ids.
         "cases_sha256": cases_sha256,
+        "dataset_sha256": dataset_sha256,
+        "provenance": provenance,
     }
     metrics_path = run_dir / "metrics.json"
     metrics_path.write_bytes(v2._canonical_json_bytes(metrics_payload))
@@ -697,8 +831,29 @@ def main(argv: list[str] | None = None) -> int:
         cases_sha256 = v2._sha256_bytes(
             v2._canonical_json_bytes([case.case_id for case in cases])
         )
+        # Content identity: hash the full case records, not just their ids, so
+        # a metric number is bound to the exact payloads that produced it.
+        dataset_sha256 = v2._sha256_bytes(
+            v2._canonical_json_bytes(
+                [
+                    {
+                        "id": c.case_id,
+                        "content": c.content,
+                        "expected_label": c.expected_label,
+                        "attack_type": c.attack_type,
+                        "exfil_target": c.exfil_target,
+                        "tool_family": c.tool_family,
+                        "technique": c.technique,
+                        "language": c.language,
+                    }
+                    for c in cases
+                ]
+            )
+        )
 
         output_root = (REPO_ROOT / args.output).resolve()
+        corpus_path = (REPO_ROOT / args.corpus).resolve() if args.corpus else None
+        provenance = build_provenance(args, corpus_path, v2)
 
         if args.base_url:
             if args.corpus:
@@ -720,22 +875,29 @@ def main(argv: list[str] | None = None) -> int:
             harness = build_harness(
                 db_path, db_path.parent / "_eval-documents", args.username, args.password
             )
-            canaries = seed_corpus(
-                harness, (REPO_ROOT / args.corpus).resolve() if args.corpus else None
-            )
+            canaries = seed_corpus(harness, corpus_path)
 
         outcomes = [run_case(harness, case) for case in cases]
         metrics = compute_metrics(outcomes, canaries)
         report = render_report(metrics)
         run_dir = write_artifacts(
-            output_root, outcomes, metrics, v2, cases_sha256=cases_sha256, report=report
+            output_root, outcomes, metrics, v2,
+            cases_sha256=cases_sha256, dataset_sha256=dataset_sha256,
+            provenance=provenance, report=report,
         )
     except RunnerError as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 1
 
     print(report)
-    print(f"\nArtifact: {run_dir.relative_to(REPO_ROOT).as_posix()}")
+    # `run_dir` can legitimately live outside the repository (e.g. --output on
+    # another drive to keep the worktree clean); don't fail after a successful
+    # write just because a repo-relative display path can't be formed.
+    try:
+        shown = run_dir.relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        shown = run_dir.as_posix()
+    print(f"\nArtifact: {shown}")
     return 0
 
 

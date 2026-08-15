@@ -1,84 +1,219 @@
 {
   "company": "Northwind Retail Group",
-  "document_count": 14,
+  "document_count": 41,
   "files": [
     {
       "path": "00-Dung-chung/chinh-sach-nghi-phep.md",
-      "sha256": "1bf455a54f26f9b71a4a8f2aa1779a24f10d6c23b61e634c7aad305d41b33701",
-      "size_bytes": 717
+      "sha256": "72c425a85e53bbcf7d3c1f8b7c9714594010df01650a6468f473ad79dd3f6c03",
+      "size_bytes": 737
     },
     {
       "path": "00-Dung-chung/noi-quy-lao-dong.md",
-      "sha256": "afd6ca12ddeb7218354c4599b4d250520eb1bb8ee6da1b7cd36e30d755089fd9",
-      "size_bytes": 870
+      "sha256": "7080c42b24f36041f2d10e69d8a2d50abf23812e68973cf617fa13ee29cfd359",
+      "size_bytes": 890
     },
     {
       "path": "00-Dung-chung/quy-dinh-an-toan-thong-tin.md",
-      "sha256": "8442a4493a0a5bced6799e269b5cf3fcce3d9f7f58175938300977dff2c10d54",
-      "size_bytes": 670
+      "sha256": "2c6e5d5bbcc6c8655d8361b0789ee3239ad856dbd276cce084e26378b204e459",
+      "size_bytes": 690
     },
     {
       "path": "01-Ke-toan/Bao-cao-tai-chinh/bao-cao-tai-chinh-Q1-2026.md",
-      "sha256": "26bf251055e3ed22023678b512b6a87e34ede67eda464f8d8b229d80045cdf69",
-      "size_bytes": 953
+      "sha256": "843f427007bed136f454a64ece05e83df4bf7742dc3cb3acba0ac3140b1baeb4",
+      "size_bytes": 973
+    },
+    {
+      "path": "01-Ke-toan/Chung-tu/quy-trinh-kiem-soat-chung-tu.md",
+      "sha256": "99e5819eb9e0bfd3873c86ef75b9c52f29cf02188e865d5ce3ad2122ce791283",
+      "size_bytes": 813
+    },
+    {
+      "path": "01-Ke-toan/Cong-no/bao-cao-cong-no-phai-thu-thang-06-2026.md",
+      "sha256": "a4d690315a1958cdcdab69afdbc251fffb86528adc3b28e50c0d8aa550993eca",
+      "size_bytes": 685
     },
     {
       "path": "01-Ke-toan/Hoa-don/danh-muc-hoa-don-thang-06-2026.md",
-      "sha256": "4170bd2bc29208e87e677c71fc3f8e0bcf46f9c3262d362b3fc91d4d36937dbd",
-      "size_bytes": 1006
+      "sha256": "d1a273cd7d42a27504667e0b3163ac9a31b329e4ba3367138f94a060ad4d0243",
+      "size_bytes": 1026
+    },
+    {
+      "path": "01-Ke-toan/Ngan-sach/du-toan-ngan-sach-van-hanh-2027.md",
+      "sha256": "139800f25f18462e81baa1749842da59e87360a3c803f90bf690bdfb319928ef",
+      "size_bytes": 700
+    },
+    {
+      "path": "01-Ke-toan/Thanh-toan-luong/quy-trinh-thanh-toan-luong.md",
+      "sha256": "08db5808660e6d4e9023b8599d26a292000cd3a49869009de1af0d2622ade195",
+      "size_bytes": 722
     },
     {
       "path": "01-Ke-toan/Thue/quyet-toan-thue-TNDN-2025.md",
-      "sha256": "4ab12b9eab1d8def2873151241cd30d5ec9770cd3480b7ced796e86925853ba2",
-      "size_bytes": 695
+      "sha256": "55fd0b339063d0ea70b75ef071ae2927b1266cab6bdd0960239e3a761a3abf8e",
+      "size_bytes": 715
     },
     {
       "path": "02-IT/Cau-hinh/runbook-khoi-phuc-he-thong-kho.md",
-      "sha256": "86267c56d95edb49bad2ab3fdc94bf1893e64330f4132989def51128ef545f3a",
-      "size_bytes": 959
+      "sha256": "f6a9d0a10f836971b47f8bbc1339578a3b1bca591278c1331f0f651785eb3c4c",
+      "size_bytes": 979
     },
     {
       "path": "02-IT/Huong-dan/huong-dan-dat-lai-mat-khau.md",
-      "sha256": "c11c5f31c398cdd37a367b905ad03f46ed4ccb1a1a6e660098545fd6b9b1cb83",
-      "size_bytes": 687
+      "sha256": "c6405c36b38bb356925d1940a97c22badaa7bd7fde9be7d7a75fdc6cc7a7af8e",
+      "size_bytes": 707
+    },
+    {
+      "path": "02-IT/Ma-nguon/quy-uoc-quan-ly-ma-nguon.md",
+      "sha256": "53b5629b9228d187b03a7ccbbeb35c965267b5fd6bda979eb632bed47353159a",
+      "size_bytes": 774
+    },
+    {
+      "path": "02-IT/Nhat-ky/nhat-ky-su-co-kho-2026-07.md",
+      "sha256": "e19e53f52eb1a8bc86866468c0a37ae87ebef23990795d7264d0163604805ced",
+      "size_bytes": 743
     },
     {
       "path": "02-IT/Tai-lieu-ky-thuat/kien-truc-he-thong-kho.md",
-      "sha256": "e3ed5cdca8f50eea2af9d816bd6a4c6e741fffbb332f180d581e5f73023d3ad5",
-      "size_bytes": 717
+      "sha256": "fba82a5d1ba7475c4398f06b75de6ec86731f3ecd219609b099fce4d2549483a",
+      "size_bytes": 737
     },
     {
       "path": "03-Nhan-su/Cham-cong/quy-dinh-cham-cong.md",
-      "sha256": "5247e39d739601e5992a68bff6d6ca17b4a0fc72c28f4496caca8ef919c9dada",
-      "size_bytes": 602
+      "sha256": "12653a5c9e43f41fdbbe3a2209e1c4aa4e4d3c50ddfcc60e25e6e69ea3690b65",
+      "size_bytes": 622
     },
     {
-      "path": "03-Nhan-su/Hop-dong-lao-dong/hop-dong-lao-dong-mau.md",
-      "sha256": "07311641a0a2fc6022c325d840ae1b97954057c1fd60120d9940ea43360dfd01",
-      "size_bytes": 725
+      "path": "03-Nhan-su/Danh-gia/quy-trinh-danh-gia-hieu-suat.md",
+      "sha256": "5e9a64c06564dc117182f03e2f87545d3d82a195e77ac938394cea9462973915",
+      "size_bytes": 714
     },
     {
-      "path": "03-Nhan-su/Luong/bang-luong-thang-07-2026.md",
-      "sha256": "ea3bb074c7b0e76bfb27e480f4715a58b37e115c75a5afe3a8aaab7595f2f816",
-      "size_bytes": 1609
+      "path": "03-Nhan-su/Ho-so-nhan-vien/quy-trinh-quan-ly-ho-so-nhan-vien.md",
+      "sha256": "9089958050728ad41622b0c607e5f5ae0d9f13cf98ecbdbcb36427ba286bab43",
+      "size_bytes": 735
+    },
+    {
+      "path": "03-Nhan-su/Hop-dong-lao-dong/Hop-dong-chinh-thuc/hop-dong-hr-leader.md",
+      "sha256": "fe31c6082df70c216a1676f40b4e3e397ed30a00727908170bb02100b752d3b4",
+      "size_bytes": 708
+    },
+    {
+      "path": "03-Nhan-su/Hop-dong-lao-dong/Hop-dong-chinh-thuc/hop-dong-hr-user1.md",
+      "sha256": "f697c9952e2706527f151a29e2bbf56b36278120b6a1a1438dfa09f0e2daf136",
+      "size_bytes": 720
+    },
+    {
+      "path": "03-Nhan-su/Hop-dong-lao-dong/Hop-dong-chinh-thuc/hop-dong-hr-user2.md",
+      "sha256": "84b4a559e0476c53d5a0a35c86f619d14a3bc30d670ae7dd46464fd058d8ce8d",
+      "size_bytes": 715
+    },
+    {
+      "path": "03-Nhan-su/Hop-dong-lao-dong/Hop-dong-chinh-thuc/hop-dong-it-leader.md",
+      "sha256": "c70db1065751d29bdc29775b5fefbfd18fa934ee35c3e11e22446d052c5bc5d3",
+      "size_bytes": 744
+    },
+    {
+      "path": "03-Nhan-su/Hop-dong-lao-dong/Hop-dong-chinh-thuc/hop-dong-it-user1.md",
+      "sha256": "3b9a45b75e74ea7c3ad433ebe42b7c17fe3d71ac3ff1f7bab7958113d0525d4f",
+      "size_bytes": 721
+    },
+    {
+      "path": "03-Nhan-su/Hop-dong-lao-dong/Hop-dong-chinh-thuc/hop-dong-it-user2.md",
+      "sha256": "ba2493ad9e6e862b03b054a5fbd4bf92a92617eac9eb9233e3b776ea579c4446",
+      "size_bytes": 720
+    },
+    {
+      "path": "03-Nhan-su/Hop-dong-lao-dong/Hop-dong-chinh-thuc/hop-dong-ketoan-leader.md",
+      "sha256": "802621d4986f8a611eb73c4894ac0be21c0a5ab06c080f1bbb31e8286ee04c70",
+      "size_bytes": 734
+    },
+    {
+      "path": "03-Nhan-su/Hop-dong-lao-dong/Hop-dong-chinh-thuc/hop-dong-ketoan-user1.md",
+      "sha256": "db146c4a91a529fe0fd0fa59b8d45662d70afb82e829f536c9785743115ea4c3",
+      "size_bytes": 719
+    },
+    {
+      "path": "03-Nhan-su/Hop-dong-lao-dong/Hop-dong-chinh-thuc/hop-dong-lao-dong-mau.md",
+      "sha256": "4b080c9de1e37e49fd798c472fef0cc24bf5009817c41bfc351a6b446c469787",
+      "size_bytes": 745
+    },
+    {
+      "path": "03-Nhan-su/Luong/Bang-luong-thang/bang-luong-thang-07-2026.md",
+      "sha256": "58f6bcd45eb0ec7785dde3f646d043efe2c1b9c64409a16bcf51076c28546d69",
+      "size_bytes": 1629
+    },
+    {
+      "path": "03-Nhan-su/Luong/Phieu-luong-ca-nhan/phieu-luong-hr-leader-thang-07-2026.md",
+      "sha256": "efe0f893e5fc5892a1a2fc465a35eca729732393fd2cb7cb84d558e0f5d4e51e",
+      "size_bytes": 660
+    },
+    {
+      "path": "03-Nhan-su/Luong/Phieu-luong-ca-nhan/phieu-luong-hr-user1-thang-07-2026.md",
+      "sha256": "ab8ac19a724ba72c48fa47c6611213b488a6bbd0605726ec1b764ebf43d786f2",
+      "size_bytes": 672
+    },
+    {
+      "path": "03-Nhan-su/Luong/Phieu-luong-ca-nhan/phieu-luong-hr-user2-thang-07-2026.md",
+      "sha256": "4333c5ecca2a414fd71c06880390e5df9bc8f00f9eb65b3e30f476261249e285",
+      "size_bytes": 667
+    },
+    {
+      "path": "03-Nhan-su/Luong/Phieu-luong-ca-nhan/phieu-luong-it-leader-thang-07-2026.md",
+      "sha256": "8dc4fa5268e45214c9d7c5edffa11b54c445da7ff0fe2de12e208970aaf06b8f",
+      "size_bytes": 683
+    },
+    {
+      "path": "03-Nhan-su/Luong/Phieu-luong-ca-nhan/phieu-luong-it-user1-thang-07-2026.md",
+      "sha256": "14d2ea75b0d079845633d14b5cebceaa75f3851c1906875385bdfa0698de1e4b",
+      "size_bytes": 660
+    },
+    {
+      "path": "03-Nhan-su/Luong/Phieu-luong-ca-nhan/phieu-luong-it-user2-thang-07-2026.md",
+      "sha256": "13b636368bd5633cbd031407c3642352ce4c0cfff51739b69f7960b25ea8319f",
+      "size_bytes": 659
+    },
+    {
+      "path": "03-Nhan-su/Luong/Phieu-luong-ca-nhan/phieu-luong-ketoan-leader-thang-07-2026.md",
+      "sha256": "bd89706b39fe298b8cb5cb4603073b4698911997be4554c5dae974a193aa8698",
+      "size_bytes": 672
+    },
+    {
+      "path": "03-Nhan-su/Luong/Phieu-luong-ca-nhan/phieu-luong-ketoan-user1-thang-07-2026.md",
+      "sha256": "fe9bc6adfccc8e84c9af7d15bbed685cb0b158d848a2443f69f0fa90c2d9e3c8",
+      "size_bytes": 671
     },
     {
       "path": "03-Nhan-su/Tuyen-dung/ke-hoach-tuyen-dung-2027.md",
-      "sha256": "d975196547ec95a9808d88709d6e12817fdb6f12a6a7b76fcd3d2aa1194716d9",
-      "size_bytes": 608
+      "sha256": "2cefcf40b8237510fb520ba21254a7f2a931fedcf057e136a89cdca523ac07e4",
+      "size_bytes": 628
+    },
+    {
+      "path": "04-Quan-tri/Nhat-ky-truy-cap/bao-cao-ra-soat-quyen-q2-2026.md",
+      "sha256": "8810c6c1e9690b9305d62163d9d4313d546ace04b39dd91126249f939de11328",
+      "size_bytes": 691
+    },
+    {
+      "path": "04-Quan-tri/Sao-luu/chinh-sach-sao-luu-va-khoi-phuc.md",
+      "sha256": "3477d3f9a568d3aafdffbe26fe3b45edd80b6d26beec2a57f0018fe6d2a1f01d",
+      "size_bytes": 734
     },
     {
       "path": "04-Quan-tri/du-an-hai-au-tom-tat.md",
-      "sha256": "49d9a6786e089b7477dc1de1aa0b179bdba3f9b9d3a47c16af694705b0cd0916",
-      "size_bytes": 735
+      "sha256": "bbf9d6d7566c774da75de2082c0a63134059d78e56b5c39e8bf826ba7157bf9d",
+      "size_bytes": 755
+    },
+    {
+      "path": "05-Luu-tru/quy-dinh-luu-tru-tai-lieu-het-hieu-luc.md",
+      "sha256": "399a3ccbc0c47106aa0e4e436d72b18d5d538f607edb5ac4dbbb7204f87ae96c",
+      "size_bytes": 700
     }
   ],
   "manifest_status": "draft",
   "schema_version": "enterprise-kb-full-1",
   "sensitivity_counts": {
-    "confidential": 5,
-    "internal": 3,
+    "confidential": 11,
+    "internal": 5,
     "public": 3,
-    "restricted": 3
+    "restricted": 22
   }
 }

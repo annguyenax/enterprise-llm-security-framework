@@ -17,12 +17,12 @@
       <button class="new-session" id="newSessionBtn" type="button"><b>＋</b> Phiên so sánh mới</button>
 
       <section class="document-section">
-        <div class="section-head"><div><strong>Kho baseline</strong><small id="documentCount">0 tài liệu</small></div><button id="uploadBtn" type="button" title="Tải tài liệu" aria-label="Tải tài liệu">＋</button></div>
+        <div class="section-head"><div><strong>Kho tri thức dùng chung</strong><small id="documentCount">0 tài liệu</small></div><button id="uploadBtn" type="button" title="Tải tài liệu" aria-label="Tải tài liệu">＋</button></div>
         <div class="document-list" id="documentList"></div>
       </section>
 
       <div class="sidebar-footer">
-        <div class="risk-panel"><b>UNGUARDED</b><strong>Không có Guardrails</strong><p>Prompt, context và output đi thẳng qua Ollama. Chỉ dùng dữ liệu tổng hợp.</p></div>
+        <div class="risk-panel"><b>UNGUARDED</b><strong>Không có inference Guardrails</strong><p>Dùng chung kho và ACL; prompt, context và output không qua chuỗi guard suy luận. Chỉ dùng dữ liệu tổng hợp.</p></div>
         <div class="profile"><span id="profileAvatar">?</span><div><strong id="profileName">Chưa đăng nhập</strong><small id="profileMeta"></small></div><button id="logoutBtn" type="button" aria-label="Đăng xuất" title="Đăng xuất để đổi tài khoản">↪</button></div>
       </div>
     </aside>
@@ -58,10 +58,10 @@
   </div>
 
   <dialog id="uploadDialog">
-    <div class="dialog-head"><div><small>UNGUARDED DOCUMENT STORE</small><h2>Tải tài liệu baseline</h2></div><button id="closeUploadBtn" type="button" aria-label="Đóng">×</button></div>
-    <div class="upload-zone"><input id="documentFile" type="file" accept=".txt,.md,.csv,.json,.jsonl,.html,.htm,.pdf,.py,.js,.ts,.sh,.ps1,.bat,.cmd"><p>Tối đa 1 MB · file chỉ được parse, không quét bảo mật</p></div>
+    <div class="dialog-head"><div><small>SHARED KNOWLEDGE BASE</small><h2>Tải tài liệu dùng chung</h2></div><button id="closeUploadBtn" type="button" aria-label="Đóng">×</button></div>
+    <div class="upload-zone"><input id="documentFile" type="file" accept=".txt,.md,.csv,.json,.jsonl,.html,.htm,.pdf,.py,.js,.ts,.sh,.ps1,.bat,.cmd"><p>Tối đa 1 MB · không qua Upload Scanner hoặc RAG Guard</p></div>
     <p class="form-error" id="uploadError"></p>
-    <button class="upload-submit" id="uploadDocumentBtn" type="button">Tải vào baseline</button>
+    <button class="upload-submit" id="uploadDocumentBtn" type="button">Tải vào kho dùng chung</button>
   </dialog>
 
   <section class="access-screen" id="accessScreen" hidden><div><span>B</span><h2>Không thể mở Baseline AI</h2><p id="accessMessage"></p><a href="index.html">Quay lại Shield AI</a></div></section>

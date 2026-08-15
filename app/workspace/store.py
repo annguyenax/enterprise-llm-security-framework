@@ -46,7 +46,9 @@ def get_retriever() -> EnterpriseAclBm25Retriever:
 # `human_review` are absent by design: those uploads are refused by the
 # route and must never reach storage, so accepting them here would let a
 # future call site persist content the guard rejected.
-STORABLE_GUARD_DECISIONS = frozenset({"allow", "log_only", "sanitize"})
+STORABLE_GUARD_DECISIONS = frozenset(
+    {"allow", "log_only", "sanitize", "not_evaluated"}
+)
 
 
 def now() -> str:
@@ -443,17 +445,32 @@ def accessible_documents(actor: dict[str, Any]) -> list[dict[str, Any]]:
 def sharing_options(actor: dict[str, Any]) -> dict[str, list[str]]:
     """Return stable identifiers accepted by upload sharing parameters."""
     with connect() as db:
+        user_filter = "" if actor["role"] == "superadmin" else " AND department=?"
+        user_params: tuple[Any, ...] = (
+            (actor["id"],) if actor["role"] == "superadmin"
+            else (actor["id"], actor["department"])
+        )
         usernames = [
             str(row[0]) for row in db.execute(
-                "SELECT username FROM users WHERE id<>? ORDER BY username", (actor["id"],)
+                f"SELECT username FROM users WHERE id<>?{user_filter} ORDER BY username",
+                user_params,
             )
         ]
-        departments = [
-            str(row[0]) for row in db.execute(
-                "SELECT code FROM departments WHERE code<>'WORKSPACE' ORDER BY code"
-            )
-        ]
-    groups = [f"{department}:{role}" for department in departments for role in ("member", "leader")]
+        if actor["role"] == "superadmin":
+            departments = [
+                str(row[0]) for row in db.execute(
+                    "SELECT code FROM departments WHERE code<>'WORKSPACE' ORDER BY code"
+                )
+            ]
+        elif actor["role"] == "leader":
+            departments = [str(actor["department"])]
+        else:
+            departments = []
+    groups = [
+        f"{department}:{role}"
+        for department in departments
+        for role in ("member", "leader")
+    ]
     return {"users": usernames, "groups": groups}
 
 
@@ -480,7 +497,11 @@ def _direct_document_context(document: dict[str, Any]) -> tuple[list[Any], list[
     except OSError:
         return None
     filename = str(document["filename"])
-    metadata = {"filename": filename, "scope": document["scope"]}
+    metadata = {
+        "filename": filename,
+        "scope": document["scope"],
+        "guard_decision": document.get("guard_decision", ""),
+    }
     return (
         [RAGContextChunk(doc_id=document["id"], text=text, metadata=metadata)],
         [{"id": document["id"], "filename": filename, "scope": document["scope"]}],
@@ -511,6 +532,7 @@ def retrieve(actor: dict[str, Any], query: str, limit: int = 4) -> tuple[list[An
     # small local model.
     normalized_query = query.casefold()
     accessible = accessible_documents(actor)
+    accessible_by_id = {str(document["id"]): document for document in accessible}
     accessible_ids = {str(document["id"]) for document in accessible}
     for document in accessible:
         filename = str(document["filename"])
@@ -617,7 +639,16 @@ def retrieve(actor: dict[str, Any], query: str, limit: int = 4) -> tuple[list[An
             hit = lexical_by_id.get(did)
             if hit is not None:
                 filename=hit.metadata.get("filename", "unknown"); scope=hit.metadata.get("scope", "unknown")
-                chunks.append(RAGContextChunk(doc_id=did,text=hit.text,metadata={"filename":filename,"scope":scope}))
+                authoritative_document = accessible_by_id.get(did, {})
+                chunks.append(RAGContextChunk(
+                    doc_id=did,
+                    text=hit.text,
+                    metadata={
+                        "filename": filename,
+                        "scope": scope,
+                        "guard_decision": authoritative_document.get("guard_decision", ""),
+                    },
+                ))
             else:
                 document=semantic_by_id[did]; direct=_direct_document_context(document)
                 if direct is None: continue
@@ -690,7 +721,11 @@ def _upsert_document_index(row: dict[str, Any], content: bytes) -> None:
     owner_user_id = row["owner_user_id"]
 
     text = content.decode("utf-8", errors="replace")
-    chunk_metadata = {"filename": filename, "scope": scope}
+    chunk_metadata = {
+        "filename": filename,
+        "scope": scope,
+        "guard_decision": str(row.get("guard_decision", "")),
+    }
     chunks = []
     for chunk in chunk_text(text):
         chash = hashlib.sha256(chunk.text.encode()).hexdigest()
@@ -763,7 +798,9 @@ def add_document(actor: dict[str, Any], filename: str, content: bytes, scope: st
     the *sanitized* text, not the caller's original upload.
 
     `guard_decision` is keyword-only and required, so no call site can
-    silently record a decision the guard did not actually make. It
+    silently record a decision the guard did not actually make. The explicit
+    `not_evaluated` value is reserved for the intentionally unguarded lab
+    upload route; guarded upload paths must pass their actual decision. It
     previously read `"allow"` unconditionally, which meant a document the
     guard had SANITIZEd was stored with its original bytes on disk *and* an
     audit row claiming a clean pass -- and every later retrieval read the
@@ -783,7 +820,7 @@ def add_document(actor: dict[str, Any], filename: str, content: bytes, scope: st
         raise ValueError("Mỗi tài liệu chỉ được chia sẻ thêm tối đa 20 user và 20 nhóm")
     with connect() as db:
         user_rows = list(db.execute(
-            f"SELECT id,username FROM users WHERE username IN ({','.join('?' for _ in allowed_users)}) COLLATE NOCASE"
+            f"SELECT id,username,department FROM users WHERE username IN ({','.join('?' for _ in allowed_users)}) COLLATE NOCASE"
             if allowed_users else "SELECT id,username FROM users WHERE 0",
             allowed_users,
         ))
@@ -792,12 +829,32 @@ def add_document(actor: dict[str, Any], filename: str, content: bytes, scope: st
     missing_users = [name for name in allowed_users if name.casefold() not in found_users]
     if missing_users:
         raise ValueError("Không tìm thấy user được chia sẻ: " + ", ".join(missing_users))
+    if actor["role"] != "superadmin":
+        cross_department_users = [
+            str(row["username"])
+            for row in user_rows
+            if str(row["department"]).casefold() != str(actor["department"]).casefold()
+        ]
+        if cross_department_users:
+            raise PermissionError(
+                "Chỉ superadmin được chia sẻ tài liệu cho user thuộc phòng ban khác"
+            )
+    if actor["role"] == "member" and allowed_groups:
+        raise PermissionError("Member không được chia sẻ tài liệu cho cả nhóm hoặc phòng ban")
     parsed_groups: list[tuple[str, str]] = []
     for value in allowed_groups:
         parts = value.split(":", 1)
         if len(parts) != 2 or parts[0].casefold() not in departments or parts[1] not in ROLE_RANK:
             raise ValueError(f"Nhóm chia sẻ không hợp lệ: {value}; dùng định dạng PHONGBAN:role")
-        parsed_groups.append((departments[parts[0].casefold()], parts[1]))
+        group_department = departments[parts[0].casefold()]
+        if (
+            actor["role"] != "superadmin"
+            and group_department.casefold() != str(actor["department"]).casefold()
+        ):
+            raise PermissionError(
+                "Chỉ superadmin được chia sẻ tài liệu cho nhóm thuộc phòng ban khác"
+            )
+        parsed_groups.append((group_department, parts[1]))
     did=str(uuid.uuid4()); DOC_ROOT.mkdir(parents=True,exist_ok=True); path=DOC_ROOT/f"{did}.txt"; path.write_bytes(content)
     row={"id":did,"owner_user_id":actor["id"],"department":department,"scope":scope,"audience_role":audience,"filename":filename,"mime_type":mime_type,"size_bytes":len(content),"guard_decision":guard_decision,"storage_path":str(path),"created_at":now()}
     with connect() as db:

@@ -81,7 +81,12 @@ $FocusedModules = @(
 # KB / ACL retriever workstream began: that workstream's whole purpose is to
 # change `app/`, so keeping it here would fail the gate on every commit and
 # train reviewers to ignore the result. The remaining entries are unchanged.
-$ProtectedPaths = @("requirements.txt", "redteam/", "reports/evaluation/", "report-latex-template/")
+#
+# `report-latex-template/` was dropped from this list in the 2026-08-14 repo
+# hygiene cleanup: that legacy LaTeX tree is no longer tracked (the live report
+# source is `bao_cao_latex_dot2/`, which is edited every report cycle and so is
+# deliberately not protected).
+$ProtectedPaths = @("requirements.txt", "redteam/", "reports/evaluation/")
 
 $results = [ordered]@{}
 $failures = @()

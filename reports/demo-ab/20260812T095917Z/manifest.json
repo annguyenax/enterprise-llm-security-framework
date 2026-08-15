@@ -1,0 +1,16 @@
+{
+  "schema": "demo-ab-manifest-v1",
+  "run_id": "20260812T095917Z",
+  "files": [
+    {
+      "path": "ab_result.json",
+      "sha256": "ffa51f4bccd9c0832823119ef80735b3ce2012043334d7e0f928cd8533464eea",
+      "bytes": 12190
+    },
+    {
+      "path": "transcript.txt",
+      "sha256": "eab7ab46fd209f5dba951bca7fd3902c18f4871b94a68dfafe29826842a0afb5",
+      "bytes": 5594
+    }
+  ]
+}

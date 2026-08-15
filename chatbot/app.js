@@ -453,6 +453,16 @@ function updateProfile() {
   $('#adminBtn').hidden = state.user.role !== 'superadmin';
   $('#documentScope').querySelector('option[value="department"]').disabled = state.user.role === 'member';
   $('#documentScope').querySelector('option[value="global"]').disabled = state.user.role !== 'superadmin';
+  $('#documentDepartment').disabled = state.user.role !== 'superadmin';
+  $('#documentAllowedGroups').disabled = state.user.role === 'member';
+  $('#documentAllowedUsers').placeholder = state.user.role === 'superadmin'
+    ? 'Chia sẻ thêm cho user ở bất kỳ phòng ban nào'
+    : `Chỉ chia sẻ thêm cho user thuộc phòng ${state.user.department}`;
+  $('#documentAllowedGroups').placeholder = state.user.role === 'member'
+    ? 'Member không được chia sẻ cho nhóm'
+    : state.user.role === 'leader'
+      ? `Nhóm trong phòng ${state.user.department}, ví dụ ${state.user.department}:member`
+      : 'Nhóm được chia sẻ, ví dụ HR:leader';
   $('#documentAudience').querySelector('option[value="superadmin"]').disabled = state.user.role !== 'superadmin';
 }
 
@@ -533,7 +543,10 @@ async function prepareUpload(file) {
   if (!file) return;
   if (!$('#documentDepartment').options.length) {
     const departments = await api('/departments');
-    $('#documentDepartment').innerHTML = departments.map(item => `<option value="${escapeHtml(item.code)}">${escapeHtml(item.name)}</option>`).join('');
+    const availableDepartments = state.user?.role === 'superadmin'
+      ? departments
+      : departments.filter(item => item.code === state.user?.department);
+    $('#documentDepartment').innerHTML = availableDepartments.map(item => `<option value="${escapeHtml(item.code)}">${escapeHtml(item.name)}</option>`).join('');
     if (state.user?.department) $('#documentDepartment').value = state.user.department;
   }
   $('#chatUploadName').textContent = file.name;

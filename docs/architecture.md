@@ -35,9 +35,8 @@ graph TD
 
     %% Workspace / RAG
     subgraph DataTier [Lớp Dữ liệu & RAG]
-        WorkspaceDB[(Workspace DB<br>SQLite/BM25)]
+        SharedKB[(Workspace DB dùng chung<br>SQLite/BM25 + ACL)]
         VectorDB[(Vector DB<br>Chroma/Faiss)]
-        UnG_Store[(Unguarded Lab Store)]
     end
 
     %% LLM Engine
@@ -64,7 +63,16 @@ graph TD
     ContextG --> LLM
     LLM --> OutputG
     OutputG --> GuardedUI
+    Routes --> SharedKB
+    SharedKB --> LLM
+    LLM --> UnguardedUI
 ```
+
+Hai giao diện dùng cùng `store.retrieve()` và cùng biên ACL. Nhánh có tường
+chạy chuỗi guard suy luận; nhánh không tường chuyển cùng context đã truy xuất
+thẳng tới provider để so sánh. Upload từ giao diện không tường cố ý bỏ qua
+Upload Scanner và RAG Context Guard để minh họa rủi ro đầu độc kho dùng chung;
+phạm vi này chỉ dành cho dữ liệu tổng hợp trong lab.
 
 ## 2. Công nghệ, Công cụ & Framework
 

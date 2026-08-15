@@ -1,0 +1,7 @@
+{
+  "canary_count": 200,
+  "files": {
+    "datasets/v3/corpus/canary-docs.jsonl": "8cc05cd683feda35c2f62b473e61ee9c0fa6df4ced2ed475f1351cfd27cb9648"
+  },
+  "schema": "phase13-v3-canary-corpus-v1"
+}

@@ -14,7 +14,7 @@ from app.guards.rag_guard import evaluate_rag_context
 from app.schemas.requests import RAGContextChunk
 from app.services.gateway import run_chat, run_unguarded_chat
 from app.services.upload_scanner import scan_upload
-from app.workspace import store, unguarded_store
+from app.workspace import store
 from app.workspace.file_parsing import (
     SUPPORTED_TEXT_SUFFIXES,
     FileParseError,
@@ -222,6 +222,7 @@ def post_message_unguarded(conversation_id: str, body: MessageBody, user: dict =
 
 @router.post("/unguarded/chat")
 def unguarded_lab_chat(body: UnguardedChatBody, user: dict = Depends(actor)) -> dict:
+    # Both comparison paths share retrieval and ACL; only inference guards differ.
     chunks, sources = store.retrieve(user, body.content)
     started = time.perf_counter()
     result = run_unguarded_chat(
@@ -247,7 +248,7 @@ def unguarded_lab_chat(body: UnguardedChatBody, user: dict = Depends(actor)) -> 
 
 @router.get("/unguarded/documents")
 def unguarded_documents(user: dict = Depends(actor)) -> list[dict]:
-    return unguarded_store.documents(user)
+    return store.accessible_documents(user)
 
 
 @router.post("/unguarded/documents")
@@ -256,6 +257,9 @@ def upload_unguarded_document(
     x_filename: Annotated[str | None, Header()] = None,
     user: dict = Depends(actor),
 ) -> dict:
+    # Intentionally unguarded lab upload: parse and persist into the same
+    # workspace document table without Upload Scanner or RAG Context Guard.
+    # Read-time ACL remains enforced because both chat paths use store.retrieve.
     if len(content) > 1_000_000:
         raise HTTPException(413, "Tệp vượt quá giới hạn 1 MB")
     filename = Path(unquote(x_filename or "document.txt")).name
@@ -267,15 +271,22 @@ def upload_unguarded_document(
         raise HTTPException(400, str(exc)) from exc
     if not text.strip():
         raise HTTPException(422, "Tài liệu không có nội dung có thể đọc")
-    return unguarded_store.add_document(
-        user, filename, text, mime_type or "text/plain", len(content)
+    return store.add_document(
+        user,
+        filename,
+        text.encode("utf-8"),
+        "user",
+        "member",
+        user["department"],
+        guard_decision="not_evaluated",
+        mime_type=mime_type or "text/plain",
     )
 
 
 @router.delete("/unguarded/documents/{document_id}", status_code=204)
 def delete_unguarded_document(document_id: str, user: dict = Depends(actor)) -> Response:
-    if not unguarded_store.delete_document(user, document_id):
-        raise HTTPException(404, "Không tìm thấy tài liệu baseline")
+    if not store.delete_document(user, document_id):
+        raise HTTPException(403, "Bạn không được xóa tài liệu này")
     return Response(status_code=204)
 
 

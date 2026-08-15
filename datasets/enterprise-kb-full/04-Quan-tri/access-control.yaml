@@ -1,0 +1,46 @@
+version: 2
+default_policy: deny
+
+workspace_roles:
+  member: 1
+  leader: 2
+  superadmin: 3
+
+departments:
+  - KETOAN
+  - IT
+  - HR
+  - WORKSPACE
+
+classifications:
+  public:
+    scope: global
+    minimum_role: member
+  internal:
+    scope: department
+    minimum_role: member
+  confidential:
+    scope: department
+    minimum_role: leader
+  restricted:
+    scope: department
+    minimum_role: leader
+
+record_level_resources:
+  salary_slip:
+    scope: user
+    required_metadata: [related_employee_id, allowed_users]
+    log_download: true
+  employment_contract:
+    scope: user
+    required_metadata: [related_employee_id, allowed_users]
+    immutable_after_signing: true
+    log_download: true
+
+controls:
+  public_links: false
+  grant_outside_department: superadmin_only
+  revoke_on_department_change: true
+  revoke_on_termination: true
+  quarterly_access_review: true
+  secrets_storage: external_secret_manager

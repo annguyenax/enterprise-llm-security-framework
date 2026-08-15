@@ -1,0 +1,59 @@
+\chapter{Cấu trúc thư mục và thành phần mã nguồn}
+\label{ap:source-tree}
+\markboth{PHỤ LỤC \Alph{chapter}. CẤU TRÚC THƯ MỤC VÀ THÀNH PHẦN MÃ NGUỒN}{}
+
+\begin{itemize}
+    \item \texttt{app/} --- gateway, các guard, pipeline RAG, provider (Mock/ollama cục bộ).
+    \item \texttt{scripts/} --- sinh dữ liệu đánh giá và chạy bộ đánh giá bảo mật.
+    \item \texttt{tests/} --- pytest cho guard, pipeline RAG và bộ chạy đánh giá.
+    \item \texttt{datasets/} --- bộ tấn công/lành tính tổng hợp và corpus canary (sinh xác định, băm SHA-256).
+    \item \texttt{docs/} --- thiết kế, quyết định và hướng dẫn.
+\end{itemize}
+
+\chapter{Danh sách nhóm kịch bản kiểm thử}
+\label{ap:test-groups}
+\markboth{PHỤ LỤC \Alph{chapter}. DANH SÁCH NHÓM KỊCH BẢN KIỂM THỬ}{}
+
+Bộ đánh giá bảo mật tổng hợp gồm \textbf{425 case}: \textbf{200 case tấn công}
+lấy cảm hứng từ các họ kỹ thuật (jailbreak, chèn chỉ dẫn trực tiếp/gián tiếp,
+đóng vai/mạo danh thẩm quyền, chia tách payload, làm rối ký tự Unicode, trích
+xuất dữ liệu) và \textbf{225 câu lành tính} gồm 100 câu nghiệp vụ thông thường và
+125 câu \emph{hard benign} (câu hợp lệ nhưng bề mặt trông đáng ngờ). Toàn bộ là
+dữ liệu tổng hợp, sinh xác định.
+
+\chapter{Bảng kết quả kiểm thử tóm tắt}
+\label{ap:test-detail}
+\markboth{PHỤ LỤC \Alph{chapter}. BẢNG KẾT QUẢ KIỂM THỬ TÓM TẮT}{}
+
+Xem Bảng~\ref{tab:test-summary} và các bảng ma trận nhầm lẫn~\ref{tab:v3-cm-mock},~\ref{tab:v3-cm-semantic} trong Chương~4. Full suite: 1531 passed, 0 failed, 4 skipped, 1 warning.
+
+\chapter{Bảng truy vết yêu cầu và cơ chế kiểm soát}
+\label{ap:traceability}
+\markboth{PHỤ LỤC \Alph{chapter}. BẢNG TRUY VẾT YÊU CẦU VÀ CƠ CHẾ KIỂM SOÁT}{}
+
+\begin{table}[H]
+\centering
+\caption{Truy vết yêu cầu -- cơ chế -- kiểm thử (tóm tắt)}
+\label{tab:trace}
+\begin{tabular}{@{}p{0.15\linewidth}p{0.35\linewidth}p{0.40\linewidth}@{}}
+\toprule
+\textbf{Yêu cầu} & \textbf{Cơ chế} & \textbf{Kiểm thử liên quan} \\
+\midrule
+FR-IN/OUT & Input/Output/DLP guards & Bộ đánh giá bảo mật; pytest guard \\
+FR-CTX & RAG Context Guard & Bộ đánh giá bảo mật (họ tấn công gián tiếp) \\
+FR-RAG & BM25 + embedding + RBAC & Pipeline tests \\
+FR-LOG & Nhật ký content-free & Kiểm thử ghi nhận \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\chapter{Các giới hạn và giả định}
+\label{ap:limits}
+\markboth{PHỤ LỤC \Alph{chapter}. CÁC GIỚI HẠN VÀ GIẢ ĐỊNH}{}
+
+\begin{itemize}
+    \item Dữ liệu và secret đều giả định; không dùng PII/secret thật.
+    \item Mock Provider không mô phỏng đầy đủ hành vi mô hình thương mại; mô hình cục bộ ollama chỉ dùng cho cấu hình Semantic Judge.
+    \item Không đánh giá trên LLM hay dữ liệu doanh nghiệp thật.
+    \item Số liệu đánh giá tổng hợp không suy rộng ra môi trường thật.
+\end{itemize}

@@ -1,5 +1,5 @@
 ---
-document_id: DOC-2026-0012
+document_id: DOC-2026-0018
 title: Kế hoạch tuyển dụng năm 2027
 department: hr
 owner: hr.leader
@@ -10,6 +10,7 @@ status: APPROVED
 effective_date: 2026-07-01
 retention_until: 2031-07-01
 related_employee_id: null
+allowed_users: null
 approved_by: hr.leader
 version: 1.0
 ---

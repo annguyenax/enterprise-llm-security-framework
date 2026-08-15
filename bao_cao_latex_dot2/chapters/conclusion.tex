@@ -1,0 +1,50 @@
+\chapter*{Kết luận và kiến nghị}
+\addcontentsline{toc}{chapter}{Kết luận và kiến nghị}
+\markboth{KẾT LUẬN VÀ KIẾN NGHỊ}{}
+
+\section*{Kết quả chính đã đạt được}
+
+Đề tài đã hoàn thành một vòng khép kín ở quy mô lab: khảo sát rủi ro an toàn của
+ứng dụng LLM/RAG; thiết kế và hiện thực gateway cùng chuỗi guard phòng thủ nhiều
+lớp (đầu vào, ngữ cảnh truy hồi, đầu ra/DLP, Semantic Judge) trên một pipeline
+RAG có kiểm soát truy cập RBAC và cơ chế truy hồi lai được tối ưu; xây dựng bộ
+đánh giá bảo mật tổng hợp 425 case và đo hiệu quả tường trên ba cấu hình guard;
+và tối ưu lớp luật lũy tiến qua ba bước (chống mạo danh, chuẩn hoá Unicode đầu
+vào, chống tiêm nhiễm gián tiếp) để nâng recall rule-based từ TPR $48{,}5\%$ lên
+$97{,}0\%$ mà giữ FPR $0\%$ trên bộ tổng hợp; bổ sung Output-DLP canary và thí
+nghiệm canary-sạch A/B.
+
+\section*{Mức độ hoàn thành mục tiêu}
+
+Các mục tiêu về xây dựng khung kiểm soát nhiều lớp, đo hiệu quả bằng thí nghiệm
+có kiểm soát và minh bạch hạn chế bằng chứng đã đạt trong phạm vi lab. Việc đánh
+giá trên LLM và dữ liệu doanh nghiệp thật \textbf{chưa} nằm trong kết quả này.
+
+\section*{Ý nghĩa thực tiễn}
+
+Kết quả phục vụ đào tạo và nghiên cứu: minh họa một guardrail rule-based có
+precision cao, đánh đổi recall/precision của lớp LLM-as-judge, và kỷ luật đo
+lường trung thực (chỉ báo số đo được, nêu rõ nhiễu và cỡ mẫu). Không thay thế
+giải pháp bảo mật doanh nghiệp.
+
+\section*{Hạn chế}
+
+Recall rule-based (TPR $97\%$) còn giới hạn ở nhóm yêu cầu dữ liệu người khác
+không có dấu hiệu từ vựng (\emph{direct\_kb\_exfil} $6/10$ qua được lớp luật) và
+đòn diễn đạt lại không còn bất biến từ vựng; FPR $0\%$ không khái quát ra ngoài bộ
+tổng hợp; Semantic Judge nhỏ tăng FPR mà không tăng Stop-before-LLM; phép đo
+exfil trên 425 còn nhiễu prompt-canary (đã bổ sung demo canary-sạch và Output-DLP
+nhưng n nhỏ); toàn bộ dùng dữ liệu tổng hợp và mô hình cục bộ. Hệ thống lab,
+không production/enterprise-ready.
+
+\section*{Hướng phát triển và kiến nghị}
+
+\begin{enumerate}
+    \item Tách chỉ thị ẩn trong văn xuôi / giải nhiễu sâu hơn để nâng recall injecagent (chuẩn hoá Unicode đã có một phần).
+    \item Mở rộng bộ canary-sạch (chỉ trong kho) với $n$ đủ lớn để báo cáo tỉ lệ rò kho tin cậy.
+    \item Giữ Semantic Judge opt-in; giảm FPR nếu bật, và mở rộng hard benign.
+    \item Thí nghiệm trên LLM thật, tách bạch kết luận khỏi Mock Provider.
+\end{enumerate}
+
+Báo cáo này là quyển báo cáo thực tập tốt nghiệp/đồ án học thuật ở quy mô lab, với
+mọi diễn giải nằm trong giới hạn của dữ liệu tổng hợp và mô hình cục bộ.
