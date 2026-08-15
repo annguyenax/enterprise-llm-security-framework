@@ -32,12 +32,26 @@ numbers are lab-scale and do not generalize to production.
 | + Semantic Judge (`qwen3:4b`) | 100% | 26.7% | Opt-in, **default OFF** — precision ROI negative |
 | Reference (`hermes3:8b`) | 100% | 66.7% | Over-blocks — not operable |
 
-- **Progressive ablation** (same 425 cases, FPR held at 0%): rule recall improved
-  `48.5% → 77.0% → 81.5% → 97.0%` across three targeted, non-overfit steps
-  (anti-impersonation → Unicode normalization → anti-indirect-injection).
 - **Clean-canary A/B demo:** with a secret canary seeded **only in the knowledge
   base**, the unguarded path leaked it in **12/18** trials while the guarded path
   leaked **0/18** (system-level comparison; small `n`, not a statistical claim).
+
+**Progressive rule ablation** — recall improved across three targeted, non-overfit
+steps while FPR stayed at 0% (same 425 cases):
+
+| Step | TPR | FPR | PyRIT | garak | InjecAgent |
+|---|:---:|:---:|:---:|:---:|:---:|
+| Baseline | 48.5% | 0.0% | 0% | 75.2% | 47.4% |
+| + Anti-impersonation | 77.0% | 0.0% | 100% | 75.2% | 47.4% |
+| + Unicode normalization | 81.5% | 0.0% | 100% | 83.8% | 47.4% |
+| **+ Anti-indirect-injection** | **97.0%** | **0.0%** | **100%** | **94.3%** | **100%** |
+
+**Confusion matrix** — rule-based, after optimization (`n = 425`):
+
+|  | Blocked | Answered |
+|---|:---:|:---:|
+| **Attacks (200)** | 194 (TP) | 6 (FN) |
+| **Benign (225)** | 0 (FP) | 225 (TN) |
 
 > **Honest scope.** FPR 0% holds only on the synthetic benign set and does not
 > generalize out-of-distribution. `100%` on the PyRIT family reflects its current
@@ -48,25 +62,31 @@ numbers are lab-scale and do not generalize to production.
 
 ## Architecture
 
-Guards **wrap** the RAG pipeline at three points — input, retrieved context, and
-output — following a **fail-closed** principle (the strictest decision wins).
+<p align="center">
+  <img src="bao_cao_latex_dot2/figures/fig-kien-truc.png" width="900" alt="System architecture: user to gateway to guard chain to hybrid retrieval to LLM to controlled response">
+</p>
+<p align="center"><em>End-to-end request flow — FastAPI gateway → guard chain → hybrid retrieval → LLM → controlled response.</em></p>
 
-```
- Request
-    │
-    ▼
-┌──────────────┐  ┌───────────────────┐  ┌────────────────────────┐  ┌──────────┐  ┌────────────────────┐
-│ Input Guard  │─▶│ ACL / RBAC        │─▶│ Provenance +           │─▶│ LLM      │─▶│ DLP + Output Guard │─▶ Response
-│ + normalize  │  │ + Retrieve        │  │ RAG Context Guard      │  │ Ollama / │  │ canary · PII ·     │
-│ (NFKC/ZW/    │  │ (BM25 + embedding,│  │ (hidden instructions,  │  │ Mock     │  │ policy refusal     │
-│  homoglyph)  │  │  RRF fusion)      │  │  poisoning)            │  │ Provider │  │                    │
-└──────────────┘  └───────────────────┘  └────────────────────────┘  └──────────┘  └────────────────────┘
-        pre-retrieval                    post-retrieval / pre-LLM                     post-LLM
-                    Semantic Judge (LLM-as-judge) — optional, default OFF
-```
+Guards follow a **fail-closed** principle (the strictest decision wins) and wrap the
+RAG pipeline at three points — input, retrieved context, and output. **Five guard
+modules** live in `app/guards/` (Input · Provenance · RAG Context · DLP · Output),
+plus **ACL/RBAC** enforced before retrieval and an optional Semantic Judge
+(default OFF). Input is normalized (NFKC, zero-width stripping, homoglyph folding)
+before rule matching to defeat Unicode evasion.
 
-**Five guard modules** (`app/guards/`): Input · Provenance · RAG Context · DLP ·
-Output, plus **ACL/RBAC** enforced before retrieval and an optional Semantic Judge.
+### Threat model
+
+<p align="center">
+  <img src="bao_cao_latex_dot2/figures/fig-threat-model.png" width="900" alt="Three attack surfaces mapped to defense guards">
+</p>
+<p align="center"><em>Three attack surfaces (OWASP LLM01 / LLM04 / LLM02) and the guard that defends each.</em></p>
+
+### Retrieval with access control
+
+<p align="center">
+  <img src="bao_cao_latex_dot2/figures/fig-rag-rbac.png" width="900" alt="Hybrid retrieval with role-based access control">
+</p>
+<p align="center"><em>Role/department ACL is applied <strong>before</strong> retrieval; BM25 (keyword) and cosine-embedding (numpy) results are fused by Reciprocal Rank Fusion.</em></p>
 
 ---
 
