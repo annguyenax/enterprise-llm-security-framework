@@ -74,6 +74,13 @@ plus **ACL/RBAC** enforced before retrieval and an optional Semantic Judge
 (default OFF). Input is normalized (NFKC, zero-width stripping, homoglyph folding)
 before rule matching to defeat Unicode evasion.
 
+### Fail-closed decision flow
+
+<p align="center">
+  <img src="bao_cao_latex_dot2/figures/fig-phong-thu.png" width="560" alt="Fail-closed guard decision flow across Input, RAG Context, and Output/DLP guards">
+</p>
+<p align="center"><em>At every stage a Block/Reject stops the pipeline with a safe refusal; Allow/Sanitize continues to the next guard — the strictest decision wins.</em></p>
+
 ### Threat model
 
 <p align="center">
