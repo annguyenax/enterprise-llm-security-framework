@@ -7,7 +7,7 @@
 ![Status](https://img.shields.io/badge/status-PoC%20·%20lab--scale-6b7a8d)
 ![Python](https://img.shields.io/badge/python-3.11%2B-0e7c86)
 ![API](https://img.shields.io/badge/API-FastAPI-0e7c86)
-![Tests](https://img.shields.io/badge/tests-1531%20passing-15803d)
+![Tests](https://img.shields.io/badge/tests-pytest%20suite-15803d)
 ![Data](https://img.shields.io/badge/data-100%25%20synthetic-c2410c)
 ![License](https://img.shields.io/badge/license-academic-lightgrey)
 
@@ -34,7 +34,8 @@ numbers are lab-scale and do not generalize to production.
 
 - **Clean-canary A/B demo:** with a secret canary seeded **only in the knowledge
   base**, the unguarded path leaked it in **12/18** trials while the guarded path
-  leaked **0/18** (system-level comparison; small `n`, not a statistical claim).
+  leaked **0/18** (paired demo measured on the two-path setup; small `n`, not a
+  statistical claim).
 
 **Progressive rule ablation** — recall improved across three targeted, non-overfit
 steps while FPR stayed at 0% (same 425 cases):
@@ -121,9 +122,11 @@ uvicorn app.main:app --reload      # then open http://127.0.0.1:8000/docs
 pytest -q                          # run the test suite
 ```
 
-The main path is **offline by default** (deterministic Mock Provider). To enable
-the optional Semantic Judge, install [Ollama](https://ollama.com), pull a model,
-and set `SEMANTIC_GUARD_USE_LLM=1`.
+The main path is **offline by default** (deterministic Mock Provider). Local
+models run via [Ollama](https://ollama.com) in three distinct roles: RAG
+generation (`qwen3:4b-instruct`), embeddings (`nomic-embed-text`), and — only
+when explicitly enabled with `SEMANTIC_GUARD_USE_LLM=1` — the optional Semantic
+Judge (`qwen3:4b`, the configuration evaluated in the results above).
 
 **Reproduce the results:**
 
