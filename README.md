@@ -7,7 +7,7 @@
 ![Status](https://img.shields.io/badge/status-PoC%20·%20lab--scale-6b7a8d)
 ![Python](https://img.shields.io/badge/python-3.11%2B-0e7c86)
 ![API](https://img.shields.io/badge/API-FastAPI-0e7c86)
-![Tests](https://img.shields.io/badge/tests-1531%20passing-15803d)
+![Tests](https://img.shields.io/badge/tests-pytest%20suite-15803d)
 ![Data](https://img.shields.io/badge/data-100%25%20synthetic-c2410c)
 ![License](https://img.shields.io/badge/license-academic-lightgrey)
 
@@ -34,7 +34,8 @@ numbers are lab-scale and do not generalize to production.
 
 - **Clean-canary A/B demo:** with a secret canary seeded **only in the knowledge
   base**, the unguarded path leaked it in **12/18** trials while the guarded path
-  leaked **0/18** (system-level comparison; small `n`, not a statistical claim).
+  leaked **0/18** (paired demo measured on the two-path setup; small `n`, not a
+  statistical claim).
 
 **Progressive rule ablation** — recall improved across three targeted, non-overfit
 steps while FPR stayed at 0% (same 425 cases):
@@ -63,7 +64,7 @@ steps while FPR stayed at 0% (same 425 cases):
 ## Architecture
 
 <p align="center">
-  <img src="bao_cao_latex_dot2/figures/fig-kien-truc.png" width="900" alt="System architecture: user to gateway to guard chain to hybrid retrieval to LLM to controlled response">
+  <img src="docs/report-figures/fig-kien-truc.png" width="900" alt="System architecture: user to gateway to guard chain to hybrid retrieval to LLM to controlled response">
 </p>
 <p align="center"><em>End-to-end request flow — FastAPI gateway → guard chain → hybrid retrieval → LLM → controlled response.</em></p>
 
@@ -77,21 +78,21 @@ before rule matching to defeat Unicode evasion.
 ### Fail-closed decision flow
 
 <p align="center">
-  <img src="bao_cao_latex_dot2/figures/fig-phong-thu.png" width="560" alt="Fail-closed guard decision flow across Input, RAG Context, and Output/DLP guards">
+  <img src="docs/report-figures/fig-phong-thu.png" width="560" alt="Fail-closed guard decision flow across Input, RAG Context, and Output/DLP guards">
 </p>
 <p align="center"><em>At every stage a Block/Reject stops the pipeline with a safe refusal; Allow/Sanitize continues to the next guard — the strictest decision wins.</em></p>
 
 ### Threat model
 
 <p align="center">
-  <img src="bao_cao_latex_dot2/figures/fig-threat-model.png" width="900" alt="Three attack surfaces mapped to defense guards">
+  <img src="docs/report-figures/fig-threat-model.png" width="900" alt="Three attack surfaces mapped to defense guards">
 </p>
 <p align="center"><em>Three attack surfaces (OWASP LLM01 / LLM04 / LLM02) and the guard that defends each.</em></p>
 
 ### Retrieval with access control
 
 <p align="center">
-  <img src="bao_cao_latex_dot2/figures/fig-rag-rbac.png" width="900" alt="Hybrid retrieval with role-based access control">
+  <img src="docs/report-figures/fig-rag-rbac.png" width="900" alt="Hybrid retrieval with role-based access control">
 </p>
 <p align="center"><em>Role/department ACL is applied <strong>before</strong> retrieval; BM25 (keyword) and cosine-embedding (numpy) results are fused by Reciprocal Rank Fusion.</em></p>
 
@@ -121,9 +122,11 @@ uvicorn app.main:app --reload      # then open http://127.0.0.1:8000/docs
 pytest -q                          # run the test suite
 ```
 
-The main path is **offline by default** (deterministic Mock Provider). To enable
-the optional Semantic Judge, install [Ollama](https://ollama.com), pull a model,
-and set `SEMANTIC_GUARD_USE_LLM=1`.
+The main path is **offline by default** (deterministic Mock Provider). Local
+models run via [Ollama](https://ollama.com) in three distinct roles: RAG
+generation (`qwen3:4b-instruct`), embeddings (`nomic-embed-text`), and — only
+when explicitly enabled with `SEMANTIC_GUARD_USE_LLM=1` — the optional Semantic
+Judge (`qwen3:4b`, the configuration evaluated in the results above).
 
 **Reproduce the results:**
 
@@ -148,7 +151,8 @@ chatbot/                minimal demo UI (guarded vs unguarded)
 redteam/                synthetic attack prompt manifest
 reports/                evaluation runs, evidence, A/B artifacts
 docs/                   architecture, methodology, decisions (ADRs), diagrams
-bao_cao_latex_dot2/     LaTeX source of the thesis report
+baocaodot2_fixed.zip    compiled thesis report (PDF + LaTeX source)
+docs/report-figures/    report diagrams referenced by this README
 ```
 
 ---
@@ -201,7 +205,7 @@ framing; Perez & Ribeiro (2022) and Greshake et al. (2023) for prompt/indirect
 injection; PoisonedRAG (Zou et al., 2024) and InjecAgent (Zhan et al., 2024) for
 RAG poisoning; Llama Guard (Inan et al., 2023) and NeMo Guardrails (Rebedea et al.,
 2023) for defenses; and Hackett et al. (2025) on guardrail evasion. Full citations
-are in [`bao_cao_latex_dot2/refs.bib`](bao_cao_latex_dot2/refs.bib).
+are in [`docs/references.bib`](docs/references.bib).
 
 ## License
 
