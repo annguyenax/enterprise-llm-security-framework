@@ -13,11 +13,14 @@ poisoning. **PoC học thuật, KHÔNG phải production**, dữ liệu tổng h
 
 Nếu bạn là một AI Agent (Claude, Grok, Gemini, v.v...) vừa được giao task mới, BẠN PHẢI ĐỌC các file sau theo thứ tự để hiểu bối cảnh dự án, tránh lặp lại lỗi, và biết file nào cần sửa:
 
-1. `docs/ai-collaboration/00_PROJECT_STATE.md` — trạng thái hiện tại (phase nào, commit nào, gate nào đã qua). Cập nhật file này khi hoàn thành Phase.
-2. `AGENT_RULES.md` — luật cứng của dự án (KHÔNG dùng API trả phí, KHÔNG tự ý cài thư viện nặng, v.v...).
-3. `docs/ai-collaboration/01_AGENT_ROLES.md` — vai trò của bạn (Implementer, Auditor, v.v...) và quyền hạn tương ứng.
-4. `TASK_BOARD.md` & `PROJECT_PLAN.md` — roadmap tổng thể.
-5. `walkthrough.md` (nếu có trong workspace) — những thay đổi gần nhất vừa thực hiện.
+1. `TASK_BOARD.md` — trạng thái hiện tại (phase nào, gate nào đã qua) và roadmap chi tiết.
+2. `AGENT_RULES.md` — luật cứng của dự án (KHÔNG dùng API trả phí, KHÔNG tự ý cài thư viện nặng, v.v...) và vai trò/quyền hạn của agent.
+3. `PROJECT_PLAN.md` — roadmap tổng thể.
+4. `docs/decisions/` (ADR) và `docs/benchmark-v2-methodology.md` — quyết định kiến trúc và phương pháp benchmark.
+
+> Ghi chú: các nhật ký cộng tác/review AI chi tiết (`docs/ai-collaboration/`,
+> `docs/modernization-ai-reviews/`) đã được lưu trong lịch sử Git ở các commit
+> trước, không còn trong cây làm việc hiện tại.
 
 ## Trạng thái hiện tại (2026-07-19)
 
@@ -33,13 +36,13 @@ tại `2233002ccf3e067ab932a5a8fa2b6a7bbe350b01` qua G2 PASS.
 
 **Phase 12E.3 đã đóng với verdict PASS** — implementation identity
 `c6d91c78e11009e96a76db08c0dfbb710504c227`; validation artifact closure PASS
-(`docs/modernization-ai-reviews/code-x-phase-12e-3-validation-artifact-closure.md`);
+(hồ sơ review lưu trong lịch sử Git);
 không còn Critical hoặc blocking Major. Analyzer tồn tại tại
 `scripts/analyze_v2_results.py`. **Validation đã được quan sát và KHOÁ LẠI —
 không chạy lại** trừ khi có re-adjudication tường minh riêng.
 
-**Phase 12E.4 đang lập kế hoạch.** Kế hoạch ràng buộc:
-`docs/ai-collaboration/07_PHASE_12E4_HOLDOUT_PLAN.md`. Latency theo **L2**: RQ4
+**Phase 12E.4 đang lập kế hoạch.** Kế hoạch ràng buộc (lưu trong lịch sử Git).
+Latency theo **L2**: RQ4
 bị gỡ khỏi research question có thể báo cáo, H5 phân loại lại thành mô tả không
 báo cáo, `latency_reportable=false`, `p50`/`p95` null. **Holdout CHƯA ĐƯỢC THỰC
 THI và CHƯA ĐƯỢC PHÊ DUYỆT.**
@@ -105,7 +108,7 @@ Luôn dùng `.venv\Scripts\python.exe`, không dùng `python` trần.
 
 ## Quy trình
 
-Xem `docs/ai-collaboration/README.md`. Tóm tắt: Grok planning chat → Code X
-implement → Qwen preflight (advisory) → `verify_phase.ps1` → handoff/commit →
-Grok audit chat + Gemini gate tương ứng → người duy trì adjudicate. Grok
-planning và audit không dùng chung chat.
+Tóm tắt quy trình cộng tác AI: Grok planning chat → Code X implement → Qwen
+preflight (advisory) → `verify_phase.ps1` → handoff/commit → Grok audit chat +
+Gemini gate tương ứng → người duy trì adjudicate. Grok planning và audit không
+dùng chung chat. (Nhật ký cộng tác chi tiết lưu trong lịch sử Git.)
