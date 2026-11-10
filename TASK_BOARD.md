@@ -792,13 +792,22 @@ Full traceable resolution: `docs/modernization-ai-reviews/phase-12c-audit-resolu
 - Deferrable recommendations carried forward: semantic/homoglyph resistance
   and trusted-internal ablation profiles stay within the documented future
   evaluation scope (candidates for the Phase 12E ablation design).
-- **Phase 12C: DONE.** Phase 12D: **DONE**. **Phase 12E: 12E.1 G1 PASS; 12E.2 G2 PASS; 12E.3 NOT STARTED.**
+- Board text kept from base `TASK_BOARD.md:795`: **Phase 12C: DONE.**
+  Phase 12D: **DONE**. **Phase 12E: 12E.1 G1 PASS; 12E.2 G2 PASS; 12E.3
+  NOT STARTED.** That line sits in the Phase 12C section. It does not
+  mean G1 or G2 occurred at the Phase 12C implementation commit.
+  `56b749a47501ab9686503ca007c5197d8a6b47b0` is named only at base
+  `TASK_BOARD.md:756` as the 12C final implementation commit. G1 is
+  recorded at base `TASK_BOARD.md:1186-1188`. G2 is recorded at base
+  `TASK_BOARD.md:1191-1193`. This is not the 2026-11-07 status.
 
-**Next stage:** Phase 12E.3 analyzer and metric implementation. Per
-`AGENT_RULES.md` rule 12, 12E.3 does not start automatically and requires a
-separate, explicit task. Phase 12E.1 received G1 PASS; the development-only
-runner at `2233002ccf3e067ab932a5a8fa2b6a7bbe350b01` received G2 PASS. No
-validation or holdout has run.
+**Next-stage text kept from base `TASK_BOARD.md:797-801`:** 12E.3 required
+a separate explicit task; 12E.1 had received G1 PASS; the runner at
+`2233002ccf3e067ab932a5a8fa2b6a7bbe350b01` had received G2 PASS; and that
+paragraph says no validation or holdout has run. Those 12E gates are the
+records at base `TASK_BOARD.md:1186-1193`, not events of commit
+`56b749a4`. Current meaning is the 2026-11-07 reconciliation table in the
+Phase 12E section.
 
 ## Phase 12D — Independent Benchmark V2 Design, Generation, Validation and Freeze — **Status: Done**
 
@@ -1168,9 +1177,28 @@ manifest) then corrected:
 **Next phase:** Phase 12E — Benchmark V2 Evaluation and Ablation. Per
 `AGENT_RULES.md` rule 12, implementation requires a separate, explicit task.
 The G0 planning gate, 12E.1 G1 gate, and 12E.2 G2 gate have since passed.
-The analyzer does not exist; validation and holdout have not been executed.
+The following clause is the board text last committed in
+`1571db1cb928277b9c6c28166858d2fe72cf8ad3` (2026-07-14 16:47:45 +0700),
+before `47bd393d1a7ac9106ce5a64bb8edd736615ad038` added the analyzer later
+that day: the analyzer does not exist; validation and holdout have not been
+executed. Kept as that point-in-time claim. It is not the 2026-11-07 status.
 
-## Phase 12E — Benchmark V2 Evaluation and Ablation — **Status: 12E.1 G1 PASS; 12E.2 G2 PASS; 12E.3 Not Started**
+## Phase 12E — Benchmark V2 Evaluation and Ablation — **Status (2026-11-07 reconciliation): analyzer file present; validation-split closure is a historical git record and was not re-run; governance-valid holdout is not authorized; a later exploratory attempt is recorded only as diagnostic**
+
+### Document status reconciliation (2026-11-07)
+
+Scope: status meaning only. Base `ff047623a265af3a99fe716b561de7eac3cc830f` (2026-08-16 10:38:56 +0700). This note does not re-run tests, does not change benchmark figures, does not open holdout cases or labels, and does not sign holdout authorization. Analyzer presence is not completion. Missing bytes stay UNKNOWN.
+
+| Layer | What is true | Source and time | This 2026-11-07 pass |
+|---|---|---|---|
+| Analyzer implementation | `scripts/analyze_v2_results.py` is in the tree. Presence is not completion. | `ff047623:scripts/analyze_v2_results.py:1`. First commit `47bd393d1a7ac9106ce5a64bb8edd736615ad038` (2026-07-14 18:47:44 +0700). Alignment commit `c6d91c78e11009e96a76db08c0dfbb710504c227` (2026-07-14 20:20:37 +0700). | Path observed. Script not executed. |
+| 12E.3 validation execution record | Line 6 names implementation `c6d91c78e11009e96a76db08c0dfbb710504c227`. Line 7 records `provider_id=mock` and `split=validation`. Line 16 records attempt 2 as eight complete validation runs and one analysis publication. Line 9 says that audit did not execute the runner or analyzer. Line 70 says the result artifacts are not tracked. Bytes in this worktree: UNKNOWN. | `94eafc686cb03262f77d7bd3572ee6557f7d6a98:docs/modernization-ai-reviews/code-x-phase-12e-3-validation-artifact-closure.md` lines 6, 7, 9, 16, 70. Absent at `ff047623` after `24e70831f077d2430387007a46148c99e5b5dc6d` (2026-08-15 13:42:45 +0700). | Not re-run. Not a new PASS. |
+| Historical “12E.3 CLOSED PASS” sentence | The block headed 2026-07-19 records 12E.3 CLOSED PASS and validation artifact closure PASS, with the review dossier kept in git history. This pass does not re-adjudicate that sentence. | `ff047623:CLAUDE.md:29` and `:37-39` | Preserved as history. |
+| Holdout at the 12E.3 closure | The same audit records that holdout execution was not authorized and was not executed, and that the audit does not authorize holdout. | `94eafc686cb03262f77d7bd3572ee6557f7d6a98:docs/modernization-ai-reviews/code-x-phase-12e-3-validation-artifact-closure.md` lines 63 and 65 | Preserved. Not an authorization. |
+| Later exploratory holdout | Classification is `POST-EXECUTION EXPLORATORY / DIAGNOSTIC EVIDENCE ONLY`. Fully completed human adjudication before execution is recorded as No (governance gap). Final Phase 12E.4 PASS must not be claimed. Attempt bytes were not opened: UNKNOWN. | `ff047623:docs/final/00_FINAL_STATUS.md:63`, `:70`, and `:71`. Package commit `4da5d8ccc9e52da3384f3e8c6982bfdd6ea21857` (2026-07-24 14:23:42 +0700). Last change before this reconciliation: `8a5db083592473c8576090b691104b43b5000a73` (2026-07-25 10:05:14 +0700). | Not re-opened. No metrics added. |
+| Authorization | This reconciliation signs no holdout authorization. The base rule says the maintainer is the only person who approves holdout. | `ff047623:CLAUDE.md:63` | Unchanged rule. No signature added. |
+
+The bullets under this heading through “As of the 12E.2 close, 12E.3 required a separate explicit task.” remain the pre-reconciliation board record. Where they conflict with the table, the table is the current status meaning.
 
 - Audited master-plan commit:
   `d82bac7828e2e54520e0aa29271e820a52ec6f47`.
@@ -1196,9 +1224,13 @@ The analyzer does not exist; validation and holdout have not been executed.
   `3da58e32b8ae0c1d72ccd0dd2aed0f8092a56624a1614967c9661920c3d49ef2`, and
   result size `84995` bytes.
 - The smoke is infrastructure evidence only, not validation evidence or a final
-  experimental result. No aggregate metrics were calculated. Validation:
-  **NOT EXECUTED**. Holdout: **NOT EXECUTED**.
-- Analyzer: **DOES NOT EXIST**. Phase 12E.3: **NOT STARTED**.
+  experimental result. No aggregate metrics were calculated. The next two
+  labels are the board text as of the 12E.2 close (`1571db1c…`, 2026-07-14
+  16:47:45 +0700), before the analyzer commit that evening. Validation:
+  **NOT EXECUTED** (point-in-time). Holdout: **NOT EXECUTED** (point-in-time).
+- Analyzer: **DOES NOT EXIST** (point-in-time at that same 12E.2 close).
+  Phase 12E.3: **NOT STARTED** (point-in-time). The 2026-11-07 table is the
+  current status meaning.
 - Operating model: Grok Web planning chat riêng; Code X primary implementer;
   Qwen2.5-Coder local mechanical preflight; Hermes3 local adversarial candidate
   generation; `scripts/verify_phase.ps1` mechanical verifier; Grok Web audit
@@ -1209,7 +1241,9 @@ The analyzer does not exist; validation and holdout have not been executed.
   PASS/REVISE; Qwen finding cần người hoặc Code X kiểm chứng trực tiếp, và
   Hermes candidate không bao giờ trở thành frozen benchmark ground truth.
 - The approved limitations and deferred recommendations remain unchanged.
-  12E.3 requires a separate explicit task.
+  As of the 12E.2 close, 12E.3 required a separate explicit task. That gate
+  condition is historical; later commits recorded above added the analyzer
+  and a validation-split closure record. They do not authorize holdout.
 
 ## Notes
 

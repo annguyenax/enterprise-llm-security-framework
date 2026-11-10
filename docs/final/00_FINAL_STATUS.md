@@ -6,6 +6,21 @@
 **This documentation branch:** `phase-12g-integration` (docs authored on `phase-12g-grok-final-docs`)\
 **This package:** documentation only under `docs/final/**`
 
+The authoring label above remains the historical branch name. This file is present on `main` at `ff047623a265af3a99fe716b561de7eac3cc830f` (2026-08-16 10:38:56 +0700). Section 1 identities stay historical pins. They are not retargeted by the 2026-11-07 reconciliation.
+
+### Document status reconciliation (2026-11-07)
+
+Scope: status meaning only. Base `ff047623a265af3a99fe716b561de7eac3cc830f` (2026-08-16 10:38:56 +0700). This note does not re-run tests, does not change benchmark figures, does not open holdout cases or labels, and does not sign holdout authorization. Analyzer presence is not completion. Missing bytes stay UNKNOWN.
+
+| Layer | What is true | Source and time | This 2026-11-07 pass |
+|---|---|---|---|
+| Analyzer implementation | `scripts/analyze_v2_results.py` is in the tree. Presence is not completion. | `ff047623:scripts/analyze_v2_results.py:1`. First commit `47bd393d1a7ac9106ce5a64bb8edd736615ad038` (2026-07-14 18:47:44 +0700). Alignment commit `c6d91c78e11009e96a76db08c0dfbb710504c227` (2026-07-14 20:20:37 +0700). | Path observed. Script not executed. |
+| 12E.3 validation execution record | Line 6 names implementation `c6d91c78e11009e96a76db08c0dfbb710504c227`. Line 7 records `provider_id=mock` and `split=validation`. Line 16 records attempt 2 as eight complete validation runs and one analysis publication. Line 9 says that audit did not execute the runner or analyzer. Line 70 says the result artifacts are not tracked. Bytes in this worktree: UNKNOWN. | `94eafc686cb03262f77d7bd3572ee6557f7d6a98:docs/modernization-ai-reviews/code-x-phase-12e-3-validation-artifact-closure.md` lines 6, 7, 9, 16, 70. Absent at `ff047623` after `24e70831f077d2430387007a46148c99e5b5dc6d` (2026-08-15 13:42:45 +0700). | Not re-run. Not a new PASS. |
+| Historical “12E.3 CLOSED PASS” sentence | The block headed 2026-07-19 records 12E.3 CLOSED PASS and validation artifact closure PASS, with the review dossier kept in git history. This pass does not re-adjudicate that sentence. | `ff047623:CLAUDE.md:29` and `:37-39` | Preserved as history. |
+| Holdout at the 12E.3 closure | The same audit records that holdout execution was not authorized and was not executed, and that the audit does not authorize holdout. | `94eafc686cb03262f77d7bd3572ee6557f7d6a98:docs/modernization-ai-reviews/code-x-phase-12e-3-validation-artifact-closure.md` lines 63 and 65 | Preserved. Not an authorization. |
+| Later exploratory holdout | Classification is `POST-EXECUTION EXPLORATORY / DIAGNOSTIC EVIDENCE ONLY`. Fully completed human adjudication before execution is recorded as No (governance gap). Final Phase 12E.4 PASS must not be claimed. Attempt bytes were not opened: UNKNOWN. | `ff047623:docs/final/00_FINAL_STATUS.md:63`, `:70`, and `:71`. Package commit `4da5d8ccc9e52da3384f3e8c6982bfdd6ea21857` (2026-07-24 14:23:42 +0700). Last change before this reconciliation: `8a5db083592473c8576090b691104b43b5000a73` (2026-07-25 10:05:14 +0700). | Not re-opened. No metrics added. |
+| Authorization | This reconciliation signs no holdout authorization. The base rule says the maintainer is the only person who approves holdout. | `ff047623:CLAUDE.md:63` | Unchanged rule. No signature added. |
+
 ---
 
 ## 1. Exact identities
@@ -61,6 +76,8 @@ These figures are **recorded from Phase 12F integration / correction packages an
 
 **Classification (binding):**  
 `POST-EXECUTION EXPLORATORY / DIAGNOSTIC EVIDENCE ONLY`
+
+The classification and the adjudication row below are the base text at `ff047623:docs/final/00_FINAL_STATUS.md:63` and `:70-71`. The earlier 12E.3 audit, `94eafc686cb03262f77d7bd3572ee6557f7d6a98:docs/modernization-ai-reviews/code-x-phase-12e-3-validation-artifact-closure.md:63` and `:65`, records holdout as not executed and not authorized. This later record does not erase those lines, does not become a governance-valid execution, and does not sign authorization. Its bytes were not opened: UNKNOWN.
 
 | Fact | Status |
 |---|---|
