@@ -1,0 +1,40 @@
+{
+  "fixture_label": "mock/in-sample contract fixture; no provider execution",
+  "artifact": {
+    "schema_version": "provenance-v1",
+    "run_id": "mock-in-sample-run",
+    "commit_sha": {"value": null, "evidence": null, "reason": "Mock/in-sample fixture has no commit claim"},
+    "provider": {
+      "requested": {"value": "mock", "evidence": "fixture:mock-in-sample#request", "reason": null},
+      "effective": {"value": "mock", "evidence": "fixture:mock-in-sample#execution", "reason": null}
+    },
+    "model": {
+      "requested": {"value": "mock-in-sample-request-model", "evidence": "fixture:mock-in-sample#request", "reason": null},
+      "effective": {"value": "mock-in-sample-execution-model", "evidence": "fixture:mock-in-sample#execution", "reason": null}
+    },
+    "execution_path": {"value": "gateway", "evidence": "fixture:mock-in-sample#execution", "reason": null},
+    "storage_backend": {"value": "memory", "evidence": "fixture:mock-in-sample#execution", "reason": null},
+    "acl_enabled": {"value": true, "evidence": "fixture:mock-in-sample#execution", "reason": null},
+    "is_mock": {"value": true, "evidence": "fixture:mock-in-sample#execution", "reason": null},
+    "llm_verified": {"value": false, "evidence": "fixture:mock-in-sample#execution", "reason": null},
+    "latency_reportable": {"value": false, "evidence": "fixture:mock-in-sample#execution", "reason": "Mock/in-sample fixture has no timing marks"},
+    "timing": null
+  },
+  "evidence": {
+    "fixture:mock-in-sample#request": {
+      "kind": "fixture",
+      "run_id": "mock-in-sample-run",
+      "claims": {"provider.requested": "mock", "model.requested": "mock-in-sample-request-model"}
+    },
+    "fixture:mock-in-sample#execution": {
+      "kind": "fixture",
+      "run_id": "mock-in-sample-run",
+      "execution": true,
+      "claims": {
+        "provider.effective": "mock", "model.effective": "mock-in-sample-execution-model",
+        "execution_path": "gateway", "storage_backend": "memory", "acl_enabled": true,
+        "is_mock": true, "llm_verified": false, "latency_reportable": false
+      }
+    }
+  }
+}

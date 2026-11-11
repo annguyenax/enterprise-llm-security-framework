@@ -1,0 +1,7 @@
+{
+  "fixture_label": "mock/in-sample versionless history; original numbers only",
+  "p50_ms": 12.345678901234567890123456789,
+  "p95_ms": 98.765432109876543210987654321,
+  "samples": [1, 2.500, 3],
+  "directory": "mock-in-sample/ollama/rag/persistent"
+}
