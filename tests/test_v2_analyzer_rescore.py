@@ -58,7 +58,7 @@ def no_real_holdout_or_network(monkeypatch):
 
 
 def synthetic_benchmark(split="holdout"):
-    """60 cases, 52 end-to-end, all 23 public analysis families."""
+    """SYNTHETIC / MOCK / in-sample: 60 cases, 52 end-to-end, 23 families."""
     families = [f for values in analyzer.ANALYSIS_GROUPS.values() for f in values]
     inventory = [(families[i % len(families)], "end_to_end") for i in range(52)]
     inventory += [("provenance_denied_at_ingestion", "component")] * 2
@@ -71,6 +71,10 @@ def synthetic_benchmark(split="holdout"):
         labels[case_id] = dict(category="benign" if family in analyzer.ANALYSIS_GROUPS["benign_control"] else "malicious",
             allowed_final_decisions=[Decision.ALLOW.value], allowed_stop_reasons=["allowed"],
             expected_provider_called=True, scenario_family=family)
+    # Exercise every runner-legal category and expected provider-call value.
+    labels[cases[0]["case_id"]].update(category="mixed", expected_provider_called=None)
+    labels[cases[1]["case_id"]]["category"] = "neutral"
+    labels[cases[2]["case_id"]]["expected_provider_called"] = False
     return runner.LoadedBenchmark((), tuple(cases), labels)
 
 
@@ -90,10 +94,14 @@ def fixture_provider(settings, blobs):
     return runner.ProviderSpec("ollama", lambda: pytest.fail("provider factory called"), descriptor)
 
 
-def build_matrix(root, benchmark, repository, manifest, provider, settings, auth=None):
+def build_matrix(root, benchmark, repository, manifest, provider, settings, auth=None, *, network_disabled=None):
     split = benchmark.cases[0]["split"]
     schema = runner.HOLDOUT_RESULT_SCHEMA_VERSION if auth else runner.RESULT_SCHEMA_VERSION
     safety = runner._settings_safety_limits(settings, 30.0)
+    if auth and provider.provider_id == "ollama":
+        safety["network_disabled"] = False  # Match holdout_preflight without executing it.
+    if network_disabled is not None:
+        safety["network_disabled"] = network_disabled
     dependencies = ["synthetic-fixture==1"]
     dependency_hash = sha(runner._canonical_json_bytes(dependencies))
     experiment = runner._experiment_id(repository, manifest, provider, safety, dependency_hash, split)
@@ -297,6 +305,68 @@ def test_authorized_ollama_rescore_end_to_end(attempt, monkeypatch, capsys):
     assert analysis["configs"]["C0_all_on"]["coverage"]["value"] == 1.0
     assert analysis["configs"]["C0_all_on"]["expected_case_count"] == 60
     assert all(analysis["configs"][key]["expected_case_count"] == 52 for key in list(runner.CONFIG_REGISTRY)[1:])
+
+
+def test_synthetic_mock_in_sample_runner_legal_ollama_rescore(attempt):
+    """SYNTHETIC / MOCK / in-sample only; Ollama-shaped artifacts, no inference."""
+    assert len(attempt.paths) == 8
+    for path in attempt.paths:
+        result = json.loads((path.parent / "result.json").read_bytes())
+        assert result["provider_id"] == "ollama"
+        assert result["schema_version"] == runner.HOLDOUT_RESULT_SCHEMA_VERSION
+        assert result["safety_limits"]["network_disabled"] is False
+        assert result["safety_limits"]["temporary_sqlite_required"] is True
+        assert all(result[key] == analyzer._holdout_identity_value(attempt.auth, key)
+                   for key in analyzer.HOLDOUT_IDENTITY_KEYS)
+        records = result["cases"]
+        assert {record["category"] for record in records} == {"benign", "malicious", "mixed", "neutral"}
+        assert {record["expected_outcome"]["provider_called"] for record in records} == {True, False, None}
+        assert all(type(record["actual_provider_called"]) is bool for record in records)
+        assert all(len(record["latency_ms_samples"][key]) == 2
+                   for record in records for key in analyzer.LATENCY_SAMPLE_KEYS)
+
+    written = run(attempt)
+    analysis = json.loads(written.analysis_path.read_bytes())
+    assert tuple(analysis["configs"]) == tuple(runner.CONFIG_REGISTRY)
+    for config in analysis["configs"].values():
+        # 52 end-to-end slots: 31 malicious, one mixed, one neutral, 19 benign.
+        assert config["confusion"] == dict(TP=32, FN=0, TN=19, FP=0, n_M=32, n_B=19)
+        assert config["aomr"]["numerator"] == config["aomr"]["denominator"] == 32
+        assert config["fpr"]["numerator"] == 0
+        assert config["fpr"]["denominator"] == 19
+
+
+@pytest.mark.parametrize("value", [0, 1, "true", [], {}])
+def test_rescore_rejects_non_boolean_non_null_expected_provider_call(attempt, value):
+    rebind(attempt, result_change=lambda obj: obj["cases"][0]["expected_outcome"].update(provider_called=value))
+    with pytest.raises(analyzer.AnalysisError, match="expected provider call must be boolean"):
+        run(attempt)
+    assert not attempt.request.output_root.exists()
+
+
+@pytest.mark.parametrize("field,value", [
+    ("network_disabled", True), ("network_disabled", 0), ("network_disabled", None),
+    ("temporary_sqlite_required", False),
+])
+def test_verified_ollama_safety_flags_remain_strict(attempt, field, value):
+    context, inputs = analyzer._verify_holdout_rescore_identity_preclaim(
+        attempt.request, repo_root=attempt.repo, hooks=attempt.hooks)
+    result = copy.deepcopy(inputs[0].result)
+    result["safety_limits"][field] = value
+    with pytest.raises(analyzer.AnalysisError) as error:
+        analyzer._validate_result(replace(inputs[0], result=result), repository=attempt.state,
+            manifest_identity=attempt.manifest, benchmark=synthetic_benchmark(),
+            expected_split="holdout", context=context)
+    assert error.value.code == "safety_identity"
+    assert field in str(error.value)
+
+
+@pytest.mark.parametrize("value", [None, 0])
+def test_rescore_completed_actual_provider_call_remains_boolean(attempt, value):
+    rebind(attempt, result_change=lambda obj: obj["cases"][0].update(actual_provider_called=value))
+    with pytest.raises(analyzer.AnalysisError, match="actual_provider_called must be boolean"):
+        run(attempt)
+    assert not attempt.request.output_root.exists()
 
 
 def test_rescore_splits_execution_and_analyzer_commit(attempt):
@@ -617,16 +687,25 @@ def test_analysis_metadata_does_not_authorize_ollama(attempt):
         analyzer._expected_provider_behavior_hash(context=object())
 
 
-def test_legacy_mock_analysis_end_to_end(tmp_path, monkeypatch):
+@pytest.mark.parametrize("network_disabled", [True, False])
+def test_legacy_mock_analysis_end_to_end(tmp_path, monkeypatch, network_disabled):
     settings = runner.load_settings()
     provider = runner.default_provider_spec("mock", settings)
     repository = runner.RepositoryState("mock-fixture", "c" * 40, False)
     manifest = runner.ManifestIdentity("a" * 64, "final", 0)
     benchmark = synthetic_benchmark("development")
-    paths = build_matrix(tmp_path / "input", benchmark, repository, manifest, provider, settings)
+    paths = build_matrix(tmp_path / "input", benchmark, repository, manifest, provider, settings,
+                         network_disabled=network_disabled)
     monkeypatch.setattr(runner, "verify_frozen_manifest", lambda root: manifest)
     monkeypatch.setattr(runner, "load_split_benchmark", lambda root, split: benchmark)
     req = analyzer.AnalysisRequest("development", repository.branch, repository.commit, tmp_path / "mock-analysis", paths)
+    if not network_disabled:
+        with pytest.raises(analyzer.AnalysisError) as error:
+            analyzer.analyze_results(req, hooks=analyzer.AnalyzerHooks(repository_state_loader=lambda root: repository))
+        assert error.value.code == "safety_identity"
+        assert "network_disabled" in str(error.value)
+        assert not req.output_root.exists()
+        return
     written = analyzer.analyze_results(req, hooks=analyzer.AnalyzerHooks(repository_state_loader=lambda root: repository))
     doc = json.loads(written.analysis_path.read_bytes())
     assert doc["identity"]["provider_id"] == "mock"

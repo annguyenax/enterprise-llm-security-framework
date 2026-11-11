@@ -1117,7 +1117,10 @@ def _validate_result(
     if environment["provider_output_limit"] != safety_limits["provider_output_limit"]:
         _fail("safety_identity", "provider output limits disagree")
     for key, value in safety_limits.items():
-        if key in {"temporary_sqlite_required", "network_disabled"}:
+        if key == "network_disabled" and context is not None:
+            if value is not False:
+                _fail("safety_identity", "network_disabled must be false for verified Ollama rescore")
+        elif key in {"temporary_sqlite_required", "network_disabled"}:
             if value is not True:
                 _fail("safety_identity", f"{key} must remain enabled")
         elif key == "chunk_overlap_chars":
@@ -3382,10 +3385,11 @@ def _benchmark_from_bound_results(inputs: Sequence[VerifiedInput]) -> runner.Loa
         scope = _string(record["evaluation_scope"], "C0 scope")
         counts[scope] = counts.get(scope, 0) + 1
         expected = _exact_keys(record["expected_outcome"], EXPECTED_OUTCOME_KEYS, "C0 expected outcome")
-        if record["category"] not in {"benign", "malicious"} or record["split"] != runner.HOLDOUT_SPLIT:
+        if record["category"] not in {"benign", "malicious", "mixed", "neutral"} or record["split"] != runner.HOLDOUT_SPLIT:
             _fail("case_labels", "C0 category or split is unsupported")
         _string(record["scenario_family"], "C0 family", safe_id=True)
-        _boolean(expected["provider_called"], "C0 expected provider call")
+        if expected["provider_called"] is not None:
+            _boolean(expected["provider_called"], "C0 expected provider call")
         for key in ("allowed_final_decisions", "allowed_stop_reasons"):
             values = expected[key]
             if not isinstance(values, list) or not values or len(values) != len(set(values)):
