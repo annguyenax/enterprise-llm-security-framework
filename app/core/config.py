@@ -7,7 +7,9 @@ of simple values (AGENT_RULES.md rule 11 — ask before adding heavy deps).
 """
 from __future__ import annotations
 
+import math
 import os
+import re
 from dataclasses import dataclass
 
 
@@ -23,6 +25,10 @@ def _str_to_bool(value: str) -> bool:
 RAG_MAX_TOP_K_HARD_LIMIT = 50
 RAG_MAX_AGGREGATE_CONTEXT_CHARS_HARD_LIMIT = 100_000
 DLP_MAX_INSPECT_CHARS_HARD_LIMIT = 1_000_000
+OLLAMA_PRIMARY_MODEL = "gemma4:e4b-it-qat"
+OLLAMA_PRIMARY_DIGEST = "ee665637121887cf3befff38abbb1be4ee117c7db867d97a67e29049ecd7e15f"
+OLLAMA_BACKUP_MODEL = "gemma4:e2b-it-q4_K_M"
+OLLAMA_BACKUP_DIGEST = "b37049369adfe3d2b653af0ab301a062ca5cbe96ace6aa0d3f2559ee9b563fc2"
 
 
 @dataclass(frozen=True)
@@ -72,9 +78,62 @@ class Settings:
     # the existing BM25-only behavior without downloading a model implicitly.
     workspace_embedding_model: str = ""
     ollama_embedding_base_url: str = "http://127.0.0.1:11434"
+    # None means resolve the selected, known model's identity. Unknown tags
+    # must supply their own identity; they never inherit the primary digest.
+    ollama_model_digest: str | None = None
+    ollama_model_quantization: str | None = None
+    ollama_backup_model_name: str = OLLAMA_BACKUP_MODEL
+    ollama_backup_model_digest: str | None = None
+    ollama_backup_model_quantization: str | None = None
+    ollama_expected_version: str = "0.40.11"
+    ollama_temperature: float = 0.0
+    ollama_seed: int = 42
+    ollama_num_ctx: int = 4096
+    ollama_num_predict: int = 512
+    llm_repeat_count: int = 1
+    ollama_think: bool = False
+    ollama_max_retries: int = 2
 
     def __post_init__(self) -> None:
         """Fail startup/construction on unsafe Phase 12C limits."""
+        temperature = self.ollama_temperature
+        if type(temperature) not in {int, float} or not math.isfinite(temperature) or temperature < 0:
+            raise ValueError("ollama_temperature must be finite and non-negative")
+        if type(self.ollama_seed) is not int:
+            raise ValueError("ollama_seed must be an integer")
+        for name in ("ollama_num_ctx", "ollama_num_predict", "llm_repeat_count"):
+            if type(getattr(self, name)) is not int or getattr(self, name) <= 0:
+                raise ValueError(f"{name} must be a positive integer")
+        if type(self.ollama_think) is not bool:
+            raise ValueError("ollama_think must be a boolean")
+        if type(self.ollama_max_retries) is not int or self.ollama_max_retries not in {0, 1, 2}:
+            raise ValueError("ollama_max_retries must be 0, 1 or 2")
+        if self.ollama_backup_model_name == OLLAMA_BACKUP_MODEL:
+            if self.ollama_backup_model_digest is None:
+                object.__setattr__(self, "ollama_backup_model_digest", OLLAMA_BACKUP_DIGEST)
+            if self.ollama_backup_model_quantization is None:
+                object.__setattr__(self, "ollama_backup_model_quantization", "Q4_K_M")
+        if self.llm_provider == "ollama":
+            if not isinstance(self.llm_model_name, str) or not self.llm_model_name.strip() or self.llm_model_name.strip().startswith("mock"):
+                raise ValueError("Ollama requires a non-mock model tag")
+            for name in ("ollama_backup_model_name", "ollama_backup_model_quantization", "ollama_expected_version"):
+                if not isinstance(getattr(self, name), str) or not getattr(self, name).strip():
+                    raise ValueError(f"{name} must be a non-empty string")
+            if self.llm_model_name == OLLAMA_PRIMARY_MODEL:
+                identity = (OLLAMA_PRIMARY_DIGEST, "Q4_0")
+            elif self.llm_model_name == self.ollama_backup_model_name:
+                identity = (self.ollama_backup_model_digest, self.ollama_backup_model_quantization)
+            else:
+                identity = (None, None)
+            for name, default in zip(("ollama_model_digest", "ollama_model_quantization"), identity):
+                if getattr(self, name) is None:
+                    object.__setattr__(self, name, default)
+            for name in ("ollama_model_digest", "ollama_backup_model_digest"):
+                value = getattr(self, name)
+                if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+                    raise ValueError(f"{name} must be a lowercase SHA-256")
+            if not isinstance(self.ollama_model_quantization, str) or not self.ollama_model_quantization.strip():
+                raise ValueError("ollama_model_quantization must be a non-empty string")
         integer_fields = {
             "rag_default_top_k": self.rag_default_top_k,
             "rag_max_top_k": self.rag_max_top_k,
@@ -122,12 +181,13 @@ def load_settings() -> Settings:
     Exposed separately from the module-level `settings` singleton so tests
     can construct alternate configurations without monkeypatching env vars.
     """
+    provider = os.getenv("LLM_PROVIDER", "mock")
     return Settings(
         app_env=os.getenv("APP_ENV", "dev"),
         log_path=os.getenv("LOG_PATH", "logs/audit.jsonl"),
         enable_audit_log=_str_to_bool(os.getenv("ENABLE_AUDIT_LOG", "true")),
-        llm_provider=os.getenv("LLM_PROVIDER", "mock"),
-        llm_model_name=os.getenv("LLM_MODEL_NAME", "mock-rag-guard-v1"),
+        llm_provider=provider,
+        llm_model_name=os.getenv("LLM_MODEL_NAME", OLLAMA_PRIMARY_MODEL if provider == "ollama" else "mock-rag-guard-v1"),
         llm_provider_timeout_seconds=int(os.getenv("LLM_PROVIDER_TIMEOUT_SECONDS", "30")),
         retrieval_db_path=os.getenv("RETRIEVAL_DB_PATH", "data/retrieval.db"),
         retrieval_max_batch_size=int(os.getenv("RETRIEVAL_MAX_BATCH_SIZE", "20")),
@@ -147,6 +207,19 @@ def load_settings() -> Settings:
         enterprise_kb_db_path=os.getenv("ENTERPRISE_KB_DB_PATH", "data/enterprise-kb.db"),
         workspace_embedding_model=os.getenv("WORKSPACE_EMBEDDING_MODEL", ""),
         ollama_embedding_base_url=os.getenv("OLLAMA_EMBEDDING_BASE_URL", "http://127.0.0.1:11434"),
+        ollama_model_digest=os.getenv("OLLAMA_MODEL_DIGEST"),
+        ollama_model_quantization=os.getenv("OLLAMA_MODEL_QUANTIZATION"),
+        ollama_backup_model_name=os.getenv("OLLAMA_BACKUP_MODEL_NAME", OLLAMA_BACKUP_MODEL),
+        ollama_backup_model_digest=os.getenv("OLLAMA_BACKUP_MODEL_DIGEST"),
+        ollama_backup_model_quantization=os.getenv("OLLAMA_BACKUP_MODEL_QUANTIZATION"),
+        ollama_expected_version=os.getenv("OLLAMA_EXPECTED_VERSION", "0.40.11"),
+        ollama_temperature=float(os.getenv("OLLAMA_TEMPERATURE", "0.0")),
+        ollama_seed=int(os.getenv("OLLAMA_SEED", "42")),
+        ollama_num_ctx=int(os.getenv("OLLAMA_NUM_CTX", "4096")),
+        ollama_num_predict=int(os.getenv("OLLAMA_NUM_PREDICT", "512")),
+        llm_repeat_count=int(os.getenv("LLM_REPEAT_COUNT", "1")),
+        ollama_think=_str_to_bool(os.getenv("OLLAMA_THINK", "false")),
+        ollama_max_retries=int(os.getenv("OLLAMA_MAX_RETRIES", "2")),
     )
 
 
