@@ -1,0 +1,8 @@
+# Offline availability suite (item 003) extra requirements.
+#
+# Everything else comes from requirements.txt. This file adds only:
+#
+# aiohttp: required by the A02 network-guard probes, which must demonstrate
+# that the async client transport is blocked like every other entry.
+# Already installed in .venv; declared here so a clean install works.
+aiohttp>=3.9,<4.0
