@@ -3,22 +3,28 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import csv
 import hashlib
 import io
 import json
 import math
+import ntpath
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
+from types import FunctionType, MappingProxyType, ModuleType, SimpleNamespace
 from typing import Any
+from weakref import WeakValueDictionary
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.dont_write_bytecode = True
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -543,6 +549,9 @@ class AnalyzerHooks:
     repository_state_loader: Callable[[Path], runner.RepositoryState] = field(
         default=lambda root: runner.read_repository_state(root)
     )
+    git_blob_loader: Callable[[Path, str, str], bytes] = field(
+        default=lambda root, commit, path: _read_git_blob(root, commit, path)
+    )
 
 
 @dataclass(frozen=True)
@@ -685,8 +694,10 @@ def _strict_json(raw: bytes, location: str) -> Mapping[str, Any]:
 def _contains_symlink(path: Path) -> bool:
     current = path
     while True:
-        if current.exists() and current.is_symlink():
-            return True
+        if os.path.lexists(current):
+            # Windows junctions and other reparse points also redirect paths.
+            if current.is_symlink() or getattr(current.lstat(), "st_file_attributes", 0) & 0x400:
+                return True
         if current.parent == current:
             return False
         current = current.parent
@@ -727,7 +738,9 @@ def _validate_holdout_identity_fields(payload: Mapping[str, Any], location: str)
         _fail("holdout_identity", f"{location}.holdout_authorized must be boolean true")
 
 
-def _read_verified_input(path: Path, *, holdout: bool = False) -> VerifiedInput:
+def _read_verified_input(
+    path: Path, *, holdout: bool = False, binding: ResultBinding | None = None
+) -> VerifiedInput:
     """Read and structurally verify one result manifest and its result.json.
 
     `holdout=True` selects the Phase 12E.4 holdout contract: the holdout
@@ -740,6 +753,8 @@ def _read_verified_input(path: Path, *, holdout: bool = False) -> VerifiedInput:
         manifest_bytes = manifest_path.read_bytes()
     except OSError as exc:
         raise AnalysisIntegrityError("manifest_unreadable", "result manifest is unavailable") from exc
+    if binding is not None and hashlib.sha256(manifest_bytes).hexdigest() != binding.manifest_sha256:
+        _fail("manifest_hash", "manifest differs from the explicit approved binding")
     manifest = _strict_json(manifest_bytes, "result-manifest.json")
     expected_manifest_keys = (
         RESULT_MANIFEST_KEYS | frozenset(HOLDOUT_IDENTITY_KEYS) if holdout else RESULT_MANIFEST_KEYS
@@ -798,6 +813,12 @@ def _read_verified_input(path: Path, *, holdout: bool = False) -> VerifiedInput:
     if len(result_bytes) != manifest["result_size_bytes"]:
         _fail("result_size", "result.json byte size does not match its manifest")
     result_sha256 = hashlib.sha256(result_bytes).hexdigest()
+    if binding is not None and (
+        result_sha256 != binding.result_sha256 or len(result_bytes) != binding.result_size_bytes
+        or manifest["result_sha256"] != binding.result_sha256
+        or manifest["result_size_bytes"] != binding.result_size_bytes
+    ):
+        _fail("result_binding", "result differs from the explicit approved binding")
     if result_sha256 != manifest["result_sha256"]:
         _fail("result_hash", "result.json SHA-256 does not match its manifest")
     result = _strict_json(result_bytes, "result.json")
@@ -981,12 +1002,16 @@ def _validate_result(
     manifest_identity: runner.ManifestIdentity,
     benchmark: runner.LoadedBenchmark,
     expected_split: str | None = None,
+    context: VerifiedHoldoutAnalysisContext | None = None,
 ) -> None:
+    repository = _execution_repository(repository, context)
     if expected_split is None:
         if request is None:
             _fail("split_mismatch", "an expected split is required to validate a result")
         expected_split = request.split
     holdout = expected_split == runner.HOLDOUT_SPLIT
+    if context is not None and not holdout:
+        _fail("rescore_context", "rescore context applies only to holdout results")
     expected_result_keys = RESULT_KEYS | frozenset(HOLDOUT_IDENTITY_KEYS) if holdout else RESULT_KEYS
     result = _exact_keys(verified.result, expected_result_keys, "result.json")
     manifest = verified.manifest
@@ -1029,8 +1054,10 @@ def _validate_result(
 
     environment = _exact_keys(result["environment"], ENVIRONMENT_KEYS, "result.environment")
     safety_limits = _exact_keys(result["safety_limits"], SAFETY_LIMIT_KEYS, "result.safety_limits")
-    if result["provider_id"] != runner.SUPPORTED_PROVIDER_ID:
-        _fail("provider_identity", "only mock provider results may be analyzed")
+    if result["provider_id"] != _expected_provider(context):
+        _fail("provider_identity", "result provider is not authorized for this analysis")
+    if context is not None and result["provider_behavior_hash"] != context.provider_behavior_hash:
+        _fail("provider_identity", "result behavior differs from the execution settings")
     common_expected = {
         "git_commit": repository.commit,
         "git_branch": repository.branch,
@@ -1246,7 +1273,9 @@ def _validate_common_inputs(
     request: AnalysisRequest,
     repository: runner.RepositoryState,
     manifest_identity: runner.ManifestIdentity,
+    context: VerifiedHoldoutAnalysisContext | None = None,
 ) -> tuple[VerifiedInput, ...]:
+    repository = _execution_repository(repository, context)
     by_config: dict[str, VerifiedInput] = {}
     for item in inputs:
         config_id = item.result["config_id"]
@@ -1517,7 +1546,9 @@ def _build_marginal(configs: Mapping[str, Mapping[str, Any]], inputs: Sequence[V
     return rows
 
 
-def _validate_primary_matrix(inputs: Sequence[VerifiedInput]) -> None:
+def _validate_primary_matrix(inputs: Sequence[VerifiedInput], *,
+                             context: VerifiedHoldoutAnalysisContext | None = None) -> None:
+    _require_rescore_context(context)
     partial = [item.result["config_id"] for item in inputs if item.result["run_status"] != "complete"]
     if partial:
         _fail("partial_matrix", "partial runs are diagnostic only and cannot enter primary metrics")
@@ -1529,7 +1560,9 @@ def _build_analysis(
     request: AnalysisRequest,
     repository: runner.RepositoryState,
     manifest_identity: runner.ManifestIdentity,
+    context: VerifiedHoldoutAnalysisContext | None = None,
 ) -> dict[str, Any]:
+    execution = _execution_repository(repository, context)
     configs = {
         item.result["config_id"]: _build_config_analysis(item)
         for item in inputs
@@ -1563,8 +1596,8 @@ def _build_analysis(
             for item in inputs
         ],
         "identity": {
-            "git_branch": repository.branch,
-            "git_commit": repository.commit,
+            "git_branch": execution.branch,
+            "git_commit": execution.commit,
             "git_dirty": False,
             "provider_id": inputs[0].result["provider_id"],
             "provider_behavior_hash": inputs[0].result["provider_behavior_hash"],
@@ -1598,7 +1631,13 @@ def _build_analysis(
             "leakage_not_real_exfiltration": True,
         },
     }
-    _validate_generated_analysis(analysis, holdout=request.split == runner.HOLDOUT_SPLIT)
+    if context is not None:
+        analysis.update({
+            "execution_commit": context.execution_commit,
+            "analyzer_repository": {"git_commit": repository.commit, "git_branch": repository.branch, "git_dirty": False},
+            "rescore_binding": context.binding_metadata(),
+        })
+    _validate_generated_analysis(analysis, holdout=request.split == runner.HOLDOUT_SPLIT, context=context)
     runner.scan_forbidden_artifact_content(analysis)
     return analysis
 
@@ -1661,8 +1700,11 @@ def _validate_confusion_shape(value: Any, location: str) -> None:
         _fail("analysis_shape", f"{location} has inconsistent confusion counts")
 
 
-def _validate_generated_analysis(value: Any, *, holdout: bool = False) -> None:
-    analysis = _exact_keys(value, ANALYSIS_KEYS, "analysis")
+def _validate_generated_analysis(value: Any, *, holdout: bool = False,
+                                 context: VerifiedHoldoutAnalysisContext | None = None) -> None:
+    _require_rescore_context(context)
+    extra = frozenset({"execution_commit", "analyzer_repository", "rescore_binding"}) if context is not None else frozenset()
+    analysis = _exact_keys(value, ANALYSIS_KEYS | extra, "analysis")
     static_pairs = {
         "schema_version": ANALYSIS_SCHEMA_VERSION,
         "analysis_contract_version": ANALYSIS_CONTRACT_VERSION,
@@ -1721,10 +1763,23 @@ def _validate_generated_analysis(value: Any, *, holdout: bool = False) -> None:
 
     identity = _exact_keys(analysis["identity"], ANALYSIS_IDENTITY_KEYS, "analysis.identity")
     _string(identity["git_branch"], "analysis.identity.git_branch", safe_id=True)
-    if identity["git_commit"] != analysis["analyzer_commit"] or identity["git_dirty"] is not False:
+    if identity["git_commit"] != (context.execution_commit if context is not None else analysis["analyzer_commit"]) or identity["git_dirty"] is not False:
         _fail("analysis_shape", "analysis repository identity is inconsistent")
-    if identity["provider_id"] != runner.SUPPORTED_PROVIDER_ID:
+    if identity["provider_id"] != _expected_provider(context):
         _fail("analysis_shape", "analysis provider identity is unsupported")
+    if context is not None:
+        if (not holdout or analysis["execution_commit"] != context.execution_commit
+            or analysis["analyzer_commit"] != context.analyzer_commit
+            or analysis["analyzer_repository"] != {
+                "git_commit": context.analyzer_commit, "git_branch": context.analyzer_repository.branch, "git_dirty": False}
+            or identity["git_branch"] != context.execution_branch
+            or identity["provider_behavior_hash"] != context.provider_behavior_hash
+            or analysis["rescore_binding"] != context.binding_metadata()):
+            _fail("analysis_shape", "rescore identity or binding differs from verified context")
+        for entry, binding in zip(input_manifests, context.profile.bindings, strict=True):
+            if any(entry[key] != getattr(binding, key) for key in (
+                "config_id", "manifest_sha256", "result_sha256", "result_size_bytes")):
+                _fail("analysis_shape", "analysis input binding differs from verified context")
     _hash(identity["provider_behavior_hash"], "analysis.identity.provider_behavior_hash")
     _hash(identity["dependencies_sha256"], "analysis.identity.dependencies_sha256")
     if analysis["family_to_group"] != dict(sorted(_family_to_group_lookup().items())):
@@ -2165,10 +2220,13 @@ def _validate_analysis_manifest(
 
 
 def _publish_directory_atomically(staging_directory: Path, final_directory: Path) -> None:
+    _guard_legacy_io(output_root=final_directory,
+                     input_paths=(staging_directory / "artifact", final_directory / "artifact"))
     os.rename(staging_directory, final_directory)
 
 
 def _remove_staging_best_effort(staging_directory: Path) -> None:
+    _guard_legacy_io(output_root=staging_directory, input_paths=(staging_directory / "artifact",))
     try:
         shutil.rmtree(staging_directory)
     except (FileNotFoundError, OSError):
@@ -2177,6 +2235,7 @@ def _remove_staging_best_effort(staging_directory: Path) -> None:
 
 def _publish_analysis(output_root: Path, analysis: Mapping[str, Any], table_bytes: bytes) -> WrittenAnalysis:
     runner.scan_forbidden_artifact_content(analysis)
+    _guard_legacy_io(output_root=output_root, input_paths=(output_root / "artifact",))
     analysis_bytes = runner._canonical_json_bytes(analysis)  # noqa: SLF001
     manifest = _build_analysis_manifest(analysis_bytes, table_bytes, analysis)
     _validate_analysis_manifest(
@@ -2257,6 +2316,7 @@ def analyze_results(
     benchmark_root: Path | None = None,
     hooks: AnalyzerHooks | None = None,
 ) -> WrittenAnalysis:
+    _guard_legacy_io(input_paths=request.result_manifests, output_root=request.output_root)
     _validate_request(request)
     active_hooks = hooks or AnalyzerHooks()
     repository = active_hooks.repository_state_loader(repo_root)
@@ -2364,8 +2424,10 @@ def _validate_holdout_matrix(
     inputs: Sequence[VerifiedInput],
     *,
     authorization: runner.HoldoutAuthorization,
+    context: VerifiedHoldoutAnalysisContext | None = None,
 ) -> tuple[VerifiedInput, ...]:
     """Require exactly one complete C0-C7 attempt under one authorization."""
+    _require_rescore_context(context)
     if len(inputs) != len(runner.CONFIG_REGISTRY):
         _fail("manifest_count", "exactly eight holdout result manifests are required")
 
@@ -2399,8 +2461,10 @@ def _validate_holdout_matrix(
             _fail("attempt_mismatch", "holdout matrix mixes supersedes lineage")
         if manifest["git_commit"] != authorization.execution_commit:
             _fail("commit_mismatch", "holdout matrix mixes implementation commits")
-        if manifest["provider_id"] != runner.SUPPORTED_PROVIDER_ID:
-            _fail("provider_identity", "holdout matrix contains a non-mock provider result")
+        if manifest["provider_id"] != _expected_provider(context):
+            message = ("holdout matrix contains a non-mock provider result" if context is None
+                       else "holdout matrix contains an unauthorized provider result")
+            _fail("provider_identity", message)
         if manifest["benchmark_manifest_sha256"] != authorization.benchmark_manifest_sha256:
             _fail("benchmark_manifest", "holdout matrix mixes benchmark identities")
         expected_hash = runner.CONFIG_REGISTRY[manifest["config_id"]].config_hash
@@ -2412,6 +2476,8 @@ def _validate_holdout_matrix(
     behavior_hashes = {item.manifest["provider_behavior_hash"] for item in inputs}
     if len(behavior_hashes) != 1:
         _fail("provider_identity", "holdout matrix mixes provider behavior identities")
+    if context is not None and behavior_hashes != {context.provider_behavior_hash}:
+        _fail("provider_identity", "holdout matrix differs from the execution provider behavior")
     experiment_ids = {item.manifest["experiment_id"] for item in inputs}
     if len(experiment_ids) != 1:
         _fail("experiment_identity", "holdout matrix mixes experiment identities")
@@ -2451,6 +2517,7 @@ def analyze_holdout_results(
     the full-matrix cross-checks. Only after all of those pass are frozen
     holdout records loaded through the dedicated authorized loader.
     """
+    _guard_legacy_io(input_paths=request.result_manifests, authorization_path=request.authorization_path)
     active_hooks = hooks or AnalyzerHooks()
     benchmark_path = (benchmark_root or repo_root / "datasets" / "v2").resolve()
 
@@ -2528,8 +2595,10 @@ def _validate_holdout_result_identity(
     authorization: runner.HoldoutAuthorization,
     repository: runner.RepositoryState,
     manifest: runner.ManifestIdentity,
+    context: VerifiedHoldoutAnalysisContext | None = None,
 ) -> None:
     """Stage A per-result identity. Reads no benchmark record."""
+    repository = _execution_repository(repository, context)
     result = verified.result
     location = "result.json"
     for payload, where in ((verified.manifest, "manifest"), (result, "result")):
@@ -2569,8 +2638,8 @@ def _validate_holdout_result_identity(
     if environment.get("benchmark_manifest_sha256") != manifest.sha256:
         _fail("benchmark_manifest", f"{location} benchmark identity does not match")
 
-    if result.get("provider_id") != runner.SUPPORTED_PROVIDER_ID:
-        _fail("provider_identity", f"{location} is not a mock-provider result")
+    if result.get("provider_id") != _expected_provider(context):
+        _fail("provider_identity", f"{location} does not use the authorized provider")
     config_id = result.get("config_id")
     if config_id not in runner.CONFIG_REGISTRY:
         _fail("config_identity", f"{location} contains an unknown configuration")
@@ -2589,15 +2658,15 @@ def _validate_holdout_result_identity(
     if result.get("guard_profile") != config.profile_payload:
         _fail("config_identity", f"{location} guard booleans disagree with the registry")
 
-    expected_behavior_hash = _expected_provider_behavior_hash()
+    expected_behavior_hash = _expected_provider_behavior_hash(context=context)
     if result.get("provider_behavior_hash") != expected_behavior_hash:
-        _fail("provider_identity", f"{location} provider behavior hash does not match the mock provider")
+        _fail("provider_identity", f"{location} provider behavior hash does not match the expected provider")
     if environment.get("provider_behavior_hash") != expected_behavior_hash:
         _fail("provider_identity", f"{location}.environment provider behavior hash is inconsistent")
     if verified.manifest.get("provider_behavior_hash") != expected_behavior_hash:
-        _fail("provider_identity", "manifest provider behavior hash does not match the mock provider")
-    if environment.get("provider_id") != runner.SUPPORTED_PROVIDER_ID:
-        _fail("provider_identity", f"{location}.environment provider is not the mock provider")
+        _fail("provider_identity", "manifest provider behavior hash does not match the expected provider")
+    if environment.get("provider_id") != _expected_provider(context):
+        _fail("provider_identity", f"{location}.environment provider is not the expected provider")
     if environment.get("guard_profile") != config.profile.profile_id:
         _fail("config_identity", f"{location}.environment guard profile disagrees with the registry")
     if environment.get("benchmark_manifest_status") != "final":
@@ -2645,14 +2714,18 @@ def _validate_holdout_result_identity(
         _fail("manifest_result_mismatch", "manifest experiment identity disagrees with result.json")
 
 
-def _expected_provider_behavior_hash() -> str:
-    """Behavior hash of the only provider an authorized holdout run may use."""
+def _expected_provider_behavior_hash(*, context: VerifiedHoldoutAnalysisContext | None = None) -> str:
+    """Mock by default; Ollama identity requires a verifier-issued context."""
+    _require_rescore_context(context)
+    if context is not None:
+        return context.provider_behavior_hash
     spec = runner.default_provider_spec(runner.SUPPORTED_PROVIDER_ID, load_settings())
     return spec.behavior_hash
 
 
 def validate_holdout_analysis_document(
-    analysis: Any, *, authorization: runner.HoldoutAuthorization
+    analysis: Any, *, authorization: runner.HoldoutAuthorization,
+    context: VerifiedHoldoutAnalysisContext | None = None,
 ) -> None:
     """Dedicated exact-key validation of the FINAL holdout analysis document.
 
@@ -2662,7 +2735,9 @@ def validate_holdout_analysis_document(
     """
     if not isinstance(analysis, dict):
         _fail("analysis_shape", "holdout analysis is not a JSON object")
-    expected = ANALYSIS_KEYS | frozenset(HOLDOUT_IDENTITY_KEYS)
+    _require_rescore_context(context)
+    extra = frozenset({"execution_commit", "analyzer_repository", "rescore_binding"}) if context is not None else frozenset()
+    expected = ANALYSIS_KEYS | frozenset(HOLDOUT_IDENTITY_KEYS) | extra
     _exact_keys(analysis, expected, "holdout analysis.json")
     if analysis["schema_version"] != HOLDOUT_ANALYSIS_SCHEMA_VERSION:
         _fail("analysis_schema", "holdout analysis schema version is unsupported")
@@ -2672,6 +2747,9 @@ def validate_holdout_analysis_document(
     for key in HOLDOUT_IDENTITY_KEYS:
         if analysis[key] != _holdout_identity_value(authorization, key):
             _fail("holdout_identity", f"holdout analysis {key} does not match the authorization")
+    if context is not None:
+        primary = {key: value for key, value in analysis.items() if key not in HOLDOUT_IDENTITY_KEYS}
+        _validate_generated_analysis(primary, holdout=True, context=context)
     runner.scan_forbidden_artifact_content(analysis)
 
 
@@ -2769,6 +2847,9 @@ def _publish_holdout_analysis(
     authorization: runner.HoldoutAuthorization,
     attempt_root: Path,
 ) -> WrittenAnalysis:
+    _guard_legacy_io(input_paths=(attempt_root / "artifact",), output_root=output_root)
+    if _official_authorization(authorization):
+        _fail("official_input", "legacy publication of official input is prohibited")
     analysis_bytes = runner._canonical_json_bytes(analysis)  # noqa: SLF001
     manifest = _build_analysis_manifest(
         analysis_bytes=analysis_bytes, table_bytes=table_bytes, analysis=analysis
@@ -2817,6 +2898,609 @@ def _publish_holdout_analysis(
     )
 
 
+@dataclass(frozen=True)
+class ResultBinding:
+    config_id: str
+    manifest_sha256: str
+    result_sha256: str
+    result_size_bytes: int
+
+
+@dataclass(frozen=True)
+class RescoreProfile:
+    binding_profile: str
+    execution_commit: str
+    execution_branch: str
+    provider_id: str
+    issued_by: str
+    attempt: int
+    output_root: str
+    run_id: str
+    authorization_sha256: str
+    freeze_sha256: str
+    bindings: tuple[ResultBinding, ...]
+
+
+# One official execution SHA literal. Expected inputs are never learned from disk.
+OFFICIAL_RESCORE_PROFILE = RescoreProfile(
+    binding_profile="P2-20261111-cc38fae-01",
+    execution_commit="cc38fae8dc889b96f84c3adce176fe8e42a66961",
+    execution_branch="feat-002-003-spec-v5", provider_id="ollama",
+    issued_by="maintainer:annguyenax", attempt=1,
+    output_root=r"D:\DoAnThucTap\p2-output", run_id="P2-20261111-cc38fae-01",
+    authorization_sha256="7b00ccec576b910f1eca9df8cea8452357e89d4a115da4f79a56327dfcb608ca",
+    freeze_sha256="e73399c484a6fdce06950e9f8eb569bbe509737b67f5327f8dee39d81afb40a3",
+    bindings=(
+        ResultBinding("C0_all_on", "88591e6b2fc36481f3ec5ff29f68eb1036ffb7f8e4f7d657142e5359118f661a", "e927b9ddde2bd3fb91ca2f59b1502f7b3e09ae8315ddb0a124eb53b408268bc7", 166772),
+        ResultBinding("C1_no_input", "865d46528295c55f31c888675c5730fe40e868db434708ff053a632c27d1ec08", "3f5cf624a544d77349f778ffdeb89abc3439945a8909ef47dea358058ace13c1", 155720),
+        ResultBinding("C2_no_provenance", "639c22f115678a283c9d3d574a2d8a38a04c3225c76f383ad7d7ef2cdf4ce900", "32eaf2f4210ca48cb28bb7f6383a982165c511bba52370c89afc42c0833d6c53", 153302),
+        ResultBinding("C3_no_context", "83c1c2f926db53adb8a3f33d451c7bf6f92d10fd6c24b703b690a937a4c59518", "478de69c571ee0dd18ba6b8e95cfde8f541954bde852b952aade644f11a25cbe", 124166),
+        ResultBinding("C4_no_dlp", "c2dfe4ce1870daf08d0c8c74107fbe22c0017491c61095866dbcd49de840bae7", "bacb75ddc67f8aca0acae4c88a276fb42aea0c79c230ef1de0c24e3e02676eb4", 152651),
+        ResultBinding("C5_no_output", "5c5eaa4a18422bdf2d2e82a425aac81c40b338e6fb12566087ce5ca6091f7252", "568e7e2eb34911666d8baf91ae91ac3bd3ee1515969bc36d79949bc147f25340", 153016),
+        ResultBinding("C6_none", "9d5267cf1f49741d9ca6121a014279124cb6bb09c84a5f6d6de9115444a06f60", "b63e2c9338052935f39dd2b6036bfc911bab96d897d0f7a5e8beff7a587c076e", 124326),
+        ResultBinding("C7_no_context_no_output", "2d253760e37797fb9d7d9ae6662267fe5df82273790e4d26577aafbff3517c7e", "bb082c86d0d8ad2127c625a42a2a28852ba7d2f0b67702bb1a473b835c6d6138", 124522),
+    ),
+)
+
+
+@dataclass(frozen=True)
+class RescoreRequest:
+    binding_profile: str
+    attempt_root: Path
+    authorization: Path
+    authorization_sha256: str
+    freeze: Path
+    freeze_sha256: str
+    bindings: tuple[ResultBinding, ...]
+    expected_analyzer_commit: str
+    output_root: Path
+
+
+@dataclass(frozen=True, init=False)
+class VerifiedHoldoutAnalysisContext:
+    profile: RescoreProfile
+    analyzer_repository: runner.RepositoryState
+    authorization: runner.HoldoutAuthorization
+    settings_sources: tuple[tuple[str, str], ...]
+    provider_behavior_hash: str
+    input_root: Path
+    output_root: Path
+
+    def __init__(self) -> None:
+        _fail("rescore_context", "context can only be issued by the rescore verifier")
+
+    @property
+    def execution_commit(self) -> str:
+        return self.profile.execution_commit
+
+    @property
+    def execution_branch(self) -> str:
+        return self.profile.execution_branch
+
+    @property
+    def analyzer_commit(self) -> str:
+        return self.analyzer_repository.commit
+
+    @property
+    def provider_id(self) -> str:
+        return self.profile.provider_id
+
+    def binding_metadata(self) -> dict[str, Any]:
+        return {
+            "binding_profile": self.profile.binding_profile,
+            "attempt": self.profile.attempt, "run_id": self.profile.run_id,
+            "authorization_sha256": self.profile.authorization_sha256,
+            "freeze_sha256": self.profile.freeze_sha256,
+            "settings_execution_commit": self.execution_commit,
+            "settings_sources": dict(self.settings_sources),
+            "results": [dict(vars(item)) for item in self.profile.bindings],
+        }
+
+
+# Object identity, rather than artifact metadata, grants access to the validators.
+# This is a procedural misuse barrier within the trusted Python process.
+_VERIFIED_RESCORE_CONTEXTS: WeakValueDictionary[int, VerifiedHoldoutAnalysisContext] = WeakValueDictionary()
+
+
+def _require_rescore_context(context: VerifiedHoldoutAnalysisContext | None) -> None:
+    if context is not None and _VERIFIED_RESCORE_CONTEXTS.get(id(context)) is not context:
+        _fail("rescore_context", "unverified rescore context")
+
+
+def _expected_provider(context: VerifiedHoldoutAnalysisContext | None) -> str:
+    _require_rescore_context(context)
+    return context.provider_id if context is not None else runner.SUPPORTED_PROVIDER_ID
+
+
+def _execution_repository(repository: runner.RepositoryState,
+                          context: VerifiedHoldoutAnalysisContext | None) -> runner.RepositoryState:
+    _require_rescore_context(context)
+    if context is None:
+        return repository
+    return runner.RepositoryState(context.execution_branch, context.execution_commit, False)
+
+
+def _read_git_blob(root: Path, commit: str, path: str) -> bytes:
+    reference = f"{commit}:{path}"
+    for args in (["git", "cat-file", "-e", reference], ["git", "show", reference]):
+        try:
+            completed = subprocess.run(args, cwd=root, capture_output=True, check=False,
+                                       env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"}, timeout=15)
+        except (OSError, subprocess.SubprocessError):
+            _fail("settings_source", "cannot read execution Git objects")
+        if completed.returncode != 0:
+            _fail("settings_source", "execution Git object is unavailable")
+    return completed.stdout
+
+
+def _read_rescore_repository_state(root: Path) -> runner.RepositoryState:
+    """Read live identity without Git's optional index-refresh writes."""
+    def read(*args: str) -> str:
+        try:
+            completed = subprocess.run(
+                ["git", *args], cwd=root, capture_output=True, check=False,
+                text=True, encoding="utf-8", errors="strict", timeout=15,
+                env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"},
+            )
+        except (OSError, subprocess.SubprocessError, UnicodeError):
+            _fail("git_state_unavailable", "analyzer repository identity is unavailable")
+        if completed.returncode != 0:
+            _fail("git_state_unavailable", "analyzer repository identity is unavailable")
+        return completed.stdout.strip()
+    return runner.RepositoryState(
+        read("branch", "--show-current"), read("rev-parse", "HEAD"),
+        bool(read("status", "--porcelain=v1", "--untracked-files=all")),
+    )
+
+
+def _parse_authorization_bytes(raw: bytes) -> runner.HoldoutAuthorization:
+    # Reuse the canonical parser unchanged against a byte snapshot. Its only
+    # filesystem operation with repo_root=None is Path(path).read_bytes().
+    # A private globals copy avoids patching runner or reading the file twice.
+    parse = runner.parse_holdout_authorization
+    namespace = {**parse.__globals__, "Path": lambda path: SimpleNamespace(read_bytes=lambda: raw)}
+    parser = FunctionType(parse.__code__, namespace, parse.__name__, parse.__defaults__)
+    parser.__kwdefaults__ = parse.__kwdefaults__
+    return parser("byte-snapshot")
+
+
+def _path_within(candidate: Path | str, root: Path | str) -> bool:
+    # Also recognize Windows official paths on the fixture host. On Windows,
+    # resolve() handles aliases before normcase/commonpath handle case/volume.
+    c, r = str(candidate), str(root)
+    if ntpath.splitdrive(c)[0] or ntpath.splitdrive(r)[0]:
+        if os.name == "nt":
+            c, r = str(Path(c).resolve()), str(Path(r).resolve())
+        c, r = ntpath.normcase(ntpath.normpath(c)), ntpath.normcase(ntpath.normpath(r))
+        try:
+            return ntpath.commonpath([c, r]) == r
+        except ValueError:
+            return False
+    return Path(c).resolve().is_relative_to(Path(r).resolve())
+
+
+def _official_authorization(auth: runner.HoldoutAuthorization) -> bool:
+    p = OFFICIAL_RESCORE_PROFILE
+    return (auth.authorization_sha256 == p.authorization_sha256
+            or auth.execution_commit == p.execution_commit
+            or _path_within(auth.output_root, p.output_root))
+
+
+def _guard_legacy_io(*, input_paths: Sequence[Path] = (), output_root: Path | None = None,
+                     authorization_path: Path | None = None) -> None:
+    """Fail closed before any legacy loader/writer can reinterpret official input."""
+    p = OFFICIAL_RESCORE_PROFILE
+    if output_root is not None and _path_within(output_root, p.output_root):
+        _fail("official_input", "writes under the official attempt root are prohibited")
+    if authorization_path is not None:
+        try:
+            auth = _parse_authorization_bytes(authorization_path.read_bytes())
+        except OSError:
+            raise runner.HoldoutAuthorizationError(
+                "authorization_unreadable", "holdout authorization file could not be read"
+            ) from None
+        if _official_authorization(auth):
+            _fail("official_input", "official input requires the verified rescore subcommand")
+    roots: set[Path] = set()
+    for path in input_paths:
+        if _path_within(path, p.output_root):
+            _fail("official_input", "official input requires the verified rescore subcommand")
+        # Layout: attempt/runs/experiment/config/run/result-manifest.json.
+        # Only inspect linked ancestors, never unrelated authorization files.
+        roots.update(path.absolute().parents)
+    for root in roots:
+        receipt_path = root / "start-receipt.json"
+        if os.path.lexists(receipt_path):
+            try:
+                if _contains_symlink(receipt_path):
+                    _fail("holdout_marker", "linked holdout receipt is not regular")
+                receipt = _strict_json(receipt_path.read_bytes(), "linked start receipt")
+                _exact_keys(receipt, runner.HOLDOUT_START_RECEIPT_KEYS, "linked start receipt")
+                if (receipt["schema_version"] != runner.HOLDOUT_START_RECEIPT_SCHEMA
+                    or receipt["status"] != "claimed"
+                    or not _FULL_SHA_RE.fullmatch(str(receipt["execution_commit"]))
+                    or not _HASH_RE.fullmatch(str(receipt["holdout_authorization_sha256"]))):
+                    _fail("holdout_marker", "linked holdout receipt is ambiguous")
+                if (receipt["execution_commit"] == p.execution_commit
+                    or receipt["holdout_authorization_sha256"] == p.authorization_sha256):
+                    _fail("official_input", "linked receipt identifies official input")
+                # Validate all remaining fields without granting execution rights.
+                _validate_linked_receipt(receipt)
+            except (OSError, runner.RunnerError):
+                _fail("holdout_marker", "linked holdout receipt is unreadable or invalid")
+        linked_auth = root / "holdout-authorization.json"
+        if os.path.lexists(linked_auth):
+            try:
+                if _contains_symlink(linked_auth):
+                    _fail("holdout_marker", "linked authorization is not regular")
+                auth = _parse_authorization_bytes(linked_auth.read_bytes())
+            except (OSError, runner.RunnerError):
+                _fail("holdout_marker", "linked authorization is unreadable or invalid")
+            if _official_authorization(auth):
+                _fail("official_input", "linked authorization identifies official input")
+
+
+def _validate_linked_receipt(receipt: Mapping[str, Any]) -> None:
+    # A complete nonofficial marker must be distinguishable from a damaged
+    # official receipt; validate its types and public contracts as well.
+    for key in ("authorization_id", "execution_branch", "started_at_utc"):
+        _string(receipt[key], "linked receipt identity")
+    if not runner._CANONICAL_UUID_RE.fullmatch(receipt["authorization_id"]):
+        _fail("holdout_marker", "linked receipt UUID is invalid")
+    if not runner._ISO_UTC_RE.fullmatch(receipt["started_at_utc"]):
+        _fail("holdout_marker", "linked receipt timestamp is invalid")
+    if (type(receipt["attempt"]) is not int or receipt["attempt"] < 1
+        or receipt["provider_id"] not in runner.AUTHORIZED_HOLDOUT_PROVIDER_IDS
+        or receipt["benchmark_manifest_status"] != "final"
+        or receipt["config_ids"] != list(runner.CONFIG_REGISTRY)
+        or receipt["config_hashes"] != {k: v.config_hash for k, v in runner.CONFIG_REGISTRY.items()}):
+        _fail("holdout_marker", "linked receipt contract is invalid")
+    for key in ("benchmark_manifest_sha256", "analysis_contract_sha256", "mapping_sha256"):
+        _hash(receipt[key], "linked receipt digest")
+    for key in ("result_schema_version", "result_manifest_schema_version",
+                "analysis_schema_version", "analysis_manifest_schema_version"):
+        if type(receipt[key]) is not int or receipt[key] != 1:
+            _fail("holdout_marker", "linked receipt schema is invalid")
+    if receipt["attempt"] == 1:
+        if receipt["supersedes_authorization_sha256"] is not None:
+            _fail("holdout_marker", "linked receipt lineage is invalid")
+    else:
+        _hash(receipt["supersedes_authorization_sha256"], "linked receipt lineage")
+
+
+def _rescore_output_root(output: Path, *, attempt: Path, repo: Path, analyzer_commit: str) -> Path:
+    absolute = Path(os.path.abspath(output.expanduser()))
+    if (".." in output.parts or _contains_symlink(absolute)
+        or any(getattr(parent, "is_junction", lambda: False)()
+               for parent in (absolute, *absolute.parents))):
+        _fail("output_containment", "output must not traverse aliases or parent segments")
+    if os.path.lexists(absolute):
+        _fail("analysis_exists", "analysis destination already exists")
+    resolved = absolute.resolve()
+    for root in (attempt, repo, repo / "datasets" / "v2", OFFICIAL_RESCORE_PROFILE.output_root):
+        if _path_within(resolved, root) or _path_within(root, resolved):
+            _fail("output_containment", "analysis output overlaps a protected input tree")
+    if resolved.name != f"p2-analysis-cc38fae-{analyzer_commit}":
+        _fail("output_containment", "output name must include the full analyzer commit")
+    if not resolved.parent.is_dir():
+        _fail("output_containment", "output parent must already exist")
+    return resolved
+
+
+_PROVIDER_ENV_RE = re.compile(r"^(?:OLLAMA_|LLM_|.*(?:PROVIDER|OLLAMA).*)", re.I)
+
+
+def _reject_provider_overrides(repo: Path) -> None:
+    for key in os.environ:
+        if _PROVIDER_ENV_RE.match(key):
+            _fail("settings_override", f"provider environment override is prohibited: {key}")
+    # The pinned loader has no dotenv/alias/local-settings loader. Reject
+    # related declarations in conventional local files as well; never load them.
+    candidates = {Path.cwd(), repo}
+    for directory in candidates:
+        for pattern in (".env", ".env.*", "settings.local.*", "config.local.*"):
+            for path in directory.glob(pattern):
+                if path.name in {".env.example", ".env.sample"}:
+                    continue
+                if not path.is_file() or _contains_symlink(path):
+                    _fail("settings_override", "local settings source cannot be verified")
+                try:
+                    raw = path.read_text(encoding="utf-8")
+                except (OSError, UnicodeError):
+                    _fail("settings_override", "local settings source cannot be verified")
+                if re.search(r"(?:LLM_|OLLAMA_|provider|ollama|llm_)", raw, re.I):
+                    _fail("settings_override", "local provider settings override is prohibited")
+
+
+def _pinned_ollama_identity(repo: Path, commit: str, hooks: AnalyzerHooks,
+                            frozen: Mapping[str, Any], freeze_path: Path,
+                            authorization: runner.HoldoutAuthorization,
+                            freeze_raw: bytes) -> tuple[str, tuple[tuple[str, str], ...]]:
+    """Evaluate only pinned configuration and the runner's descriptor expression.
+
+    default_provider_spec('ollama') requires an execution capability and imports
+    a provider. Instead, reuse the exact descriptor AST from that Git blob; no
+    factory, capability, runner entry point or provider code is executed.
+    """
+    _reject_provider_overrides(repo)
+    paths = ("app/core/config.py", "scripts/run_v2_evaluation.py", "app/services/providers/ollama.py")
+    blobs = {path: hooks.git_blob_loader(repo, commit, path) for path in paths}
+    sources = tuple((path, hashlib.sha256(raw).hexdigest()) for path, raw in blobs.items())
+    tree = ast.parse(blobs[paths[0]])
+    # Omit the live-environment singleton, then replace os before invoking the
+    # pinned loader. Only the provider selection comes from the bound profile.
+    tree.body = [node for node in tree.body if not (
+        isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "settings" for t in node.targets))]
+    module = ModuleType("_p2_execution_settings")
+    sys.modules[module.__name__] = module
+    try:
+        exec(compile(tree, "<execution-settings>", "exec"), module.__dict__)
+        module.os = SimpleNamespace(getenv=lambda key, default=None: {"LLM_PROVIDER": "ollama"}.get(key, default))
+        settings = module.load_settings()
+        if settings.llm_model_name != module.OLLAMA_PRIMARY_MODEL:
+            _fail("settings_source", "pinned settings do not select the primary model")
+        # Reuse the slim-freeze validator against the same byte snapshot.
+        snapshot = SimpleNamespace(read_bytes=lambda: freeze_raw, resolve=lambda: freeze_path.resolve())
+        runner._load_ollama_freeze(
+            SimpleNamespace(frozen_config_path=snapshot, frozen_config_sha256=hashlib.sha256(freeze_raw).hexdigest()),
+            authorization, settings,
+        )
+    finally:
+        sys.modules.pop(module.__name__, None)
+    source = ast.parse(blobs[paths[1]])
+    function = next(node for node in source.body if isinstance(node, ast.FunctionDef) and node.name == "_ollama_provider_spec")
+    descriptors = [node.value for node in function.body if isinstance(node, ast.Assign)
+                   and any(isinstance(t, ast.Name) and t.id == "descriptor" for t in node.targets)]
+    endpoint = next(node.value for node in source.body if isinstance(node, ast.Assign)
+                    and any(isinstance(t, ast.Name) and t.id == "OLLAMA_EVALUATION_BASE_URL" for t in node.targets))
+    if len(descriptors) != 1:
+        _fail("settings_source", "pinned runner descriptor is ambiguous")
+    namespace = {
+        "active_settings": settings, "ROOT": repo,
+        "OLLAMA_EVALUATION_BASE_URL": ast.literal_eval(endpoint),
+        "os": SimpleNamespace(getenv=lambda key, default=None: default),
+        "_sha256_file": lambda path: hashlib.sha256(blobs[path.relative_to(repo).as_posix()]).hexdigest(),
+    }
+    descriptor = eval(compile(ast.Expression(descriptors[0]), "<execution-descriptor>", "eval"), namespace)
+    # ProviderSpec.behavior_hash uses the runner's canonical hashing; the
+    # factory is a tripwire and is never needed by this analyzer.
+    spec = runner.ProviderSpec("ollama", lambda: _fail("provider_execution", "rescore cannot execute providers"), descriptor)
+    for name, expected in (("authorization_sha256", authorization.authorization_sha256),
+                           ("holdout_authorization_sha256", authorization.authorization_sha256),
+                           ("provider_behavior_hash", spec.behavior_hash)):
+        value = runner._freeze_field(frozen, name, required=False)
+        if value is not runner._ABSENT_FREEZE_FIELD and value != expected:
+            _fail("freeze_identity", "freeze linkage or provider behavior differs")
+    return spec.behavior_hash, sources
+
+
+def _verify_holdout_rescore_identity_preclaim(
+    request: RescoreRequest, *, repo_root: Path, hooks: AnalyzerHooks,
+) -> tuple[VerifiedHoldoutAnalysisContext, tuple[VerifiedInput, ...]]:
+    p = OFFICIAL_RESCORE_PROFILE
+    if (request.binding_profile != p.binding_profile or request.bindings != p.bindings
+        or request.authorization_sha256 != p.authorization_sha256
+        or request.freeze_sha256 != p.freeze_sha256 or p.provider_id != "ollama"):
+        _fail("binding_profile", "explicit binding differs from the official profile")
+    if not _FULL_SHA_RE.fullmatch(request.expected_analyzer_commit):
+        _fail("analyzer_commit", "expected analyzer commit must be a full SHA-1")
+    repository = hooks.repository_state_loader(repo_root)
+    if repository.dirty:
+        _fail("git_dirty", "analyzer repository must be clean, including untracked files")
+    if repository.commit != request.expected_analyzer_commit or repository.commit == p.execution_commit:
+        _fail("analyzer_commit", "analyzer HEAD must match the explicit patch commit")
+    if not _path_within(request.attempt_root, p.output_root) or not _path_within(p.output_root, request.attempt_root):
+        _fail("attempt_root", "attempt root differs from the official profile")
+    attempt = request.attempt_root.resolve(strict=True)
+    if not attempt.is_dir() or _contains_symlink(request.attempt_root):
+        _fail("attempt_root", "attempt root must be a regular existing directory")
+    output = _rescore_output_root(request.output_root, attempt=attempt, repo=repo_root,
+                                  analyzer_commit=repository.commit)
+    for path in (request.authorization, request.freeze):
+        runner.assert_external_holdout_path(path.absolute(), repo_root=repo_root,
+            benchmark_root=repo_root / "datasets" / "v2", label="rescore_identity")
+        if _contains_symlink(path):
+            _fail("identity_path", "identity input must not traverse symlinks")
+    auth_raw = request.authorization.read_bytes()
+    if hashlib.sha256(auth_raw).hexdigest() != p.authorization_sha256:
+        _fail("authorization_hash", "authorization bytes differ from approved binding")
+    authorization = _parse_authorization_bytes(auth_raw)
+    for name in ("execution_commit", "execution_branch", "provider_id", "issued_by", "attempt"):
+        if getattr(authorization, name) != getattr(p, name):
+            _fail("authorization_identity", "authorization differs from the official profile")
+    if not (_path_within(authorization.output_root, attempt) and _path_within(attempt, authorization.output_root)):
+        _fail("attempt_root", "authorization output root differs from attempt input")
+    runner.verify_holdout_contract_identities(authorization,
+        analysis_contract_sha256=ANALYSIS_CONTRACT_SHA256, mapping_sha256=MAPPING_SHA256)
+    freeze_raw = request.freeze.read_bytes()
+    if hashlib.sha256(freeze_raw).hexdigest() != p.freeze_sha256:
+        _fail("freeze_hash", "freeze bytes differ from approved binding")
+    frozen = _strict_json(freeze_raw, "freeze")
+    if runner._freeze_field(frozen, "run_id") != p.run_id:
+        _fail("freeze_identity", "freeze run ID differs from the official profile")
+    execution = runner.RepositoryState(p.execution_branch, p.execution_commit, False)
+    manifest = runner.ManifestIdentity(authorization.benchmark_manifest_sha256, "final", 0)
+    receipt_path = attempt / "start-receipt.json"
+    if _contains_symlink(receipt_path):
+        _fail("start_receipt", "receipt must be a regular file")
+    runner.verify_start_receipt(_strict_json(receipt_path.read_bytes(), "start receipt"),
+                               authorization, repository=execution, manifest=manifest)
+    inputs = []
+    # Use the existing runs/experiment/config/run resolver; no recursive scan
+    # of the attempt and no runtime logs or dataset records are read.
+    paths = tuple((attempt / "runs").glob("*/*/*/result-manifest.json"))
+    if len(paths) != len(p.bindings):
+        _fail("manifest_count", "attempt must contain exactly eight result manifests")
+    by_config = {b.config_id: b for b in p.bindings}
+    for path in paths:
+        binding = by_config.get(path.parent.parent.name)
+        if binding is None:
+            _fail("config_identity", "unexpected config in attempt layout")
+        item = _read_verified_input(path, holdout=True, binding=binding)
+        result = _exact_keys(item.result, RESULT_KEYS | frozenset(HOLDOUT_IDENTITY_KEYS), "bound result")
+        _validate_holdout_identity_fields(result, "bound result")
+        environment = _exact_keys(result["environment"], ENVIRONMENT_KEYS, "bound environment")
+        if (result["schema_version"] != runner.HOLDOUT_RESULT_SCHEMA_VERSION
+            or result["run_status"] != "complete" or item.manifest["run_status"] != "complete"
+            or result["config_id"] != binding.config_id or result["provider_id"] != p.provider_id
+            or environment["provider_id"] != p.provider_id or environment["git_commit"] != p.execution_commit
+            or environment["git_branch"] != p.execution_branch or environment["git_dirty"] is not False):
+            _fail("result_identity", "bound result must be complete and match execution identity")
+        if item.manifest["config_id"] != binding.config_id:
+            _fail("config_identity", "config differs from its bound layout")
+        if item.manifest_path.parent != runner._holdout_run_directory(attempt, item.manifest):
+            _fail("attempt_root", "manifest path differs from the runner layout")
+        # The frozen run ID is a batch ID; individual config run IDs are
+        # generated by the runner and are already bound by manifest hashes.
+        inputs.append(item)
+    if {item.manifest["config_id"] for item in inputs} != set(by_config):
+        _fail("config_identity", "attempt config inventory differs from the profile")
+    behavior, sources = _pinned_ollama_identity(repo_root, p.execution_commit, hooks, frozen,
+                                               request.freeze, authorization, freeze_raw)
+    # Freeze and input binding are now verified. Only the verifier can issue
+    # this context; the complete scoring validators run below in the caller.
+    authorization = replace(authorization, config_hashes=MappingProxyType(dict(authorization.config_hashes)))
+    context = object.__new__(VerifiedHoldoutAnalysisContext)
+    for name, value in dict(profile=p, analyzer_repository=repository,
+        authorization=authorization, settings_sources=sources, provider_behavior_hash=behavior,
+        input_root=attempt, output_root=output).items():
+        object.__setattr__(context, name, value)
+    _VERIFIED_RESCORE_CONTEXTS[id(context)] = context
+    return context, tuple(inputs)
+
+
+def _benchmark_from_bound_results(inputs: Sequence[VerifiedInput]) -> runner.LoadedBenchmark:
+    c0 = inputs[0].result["cases"]
+    if not isinstance(c0, list) or len(c0) != runner.HOLDOUT_CASE_COUNT:
+        _fail("case_completeness", "C0 must contain the full 60-case inventory")
+    cases, labels, by_id, counts = [], {}, {}, {}
+    for record in c0:
+        _exact_keys(record, CASE_KEYS, "C0 case")
+        case_id = _string(record["case_id"], "C0 case ID", safe_id=True)
+        if case_id in by_id:
+            _fail("duplicate_case", "C0 inventory contains duplicate cases")
+        scope = _string(record["evaluation_scope"], "C0 scope")
+        counts[scope] = counts.get(scope, 0) + 1
+        expected = _exact_keys(record["expected_outcome"], EXPECTED_OUTCOME_KEYS, "C0 expected outcome")
+        if record["category"] not in {"benign", "malicious"} or record["split"] != runner.HOLDOUT_SPLIT:
+            _fail("case_labels", "C0 category or split is unsupported")
+        _string(record["scenario_family"], "C0 family", safe_id=True)
+        _boolean(expected["provider_called"], "C0 expected provider call")
+        for key in ("allowed_final_decisions", "allowed_stop_reasons"):
+            values = expected[key]
+            if not isinstance(values, list) or not values or len(values) != len(set(values)):
+                _fail("case_labels", "C0 expected outcomes must be nonempty unique lists")
+            for value in values:
+                _string(value, "C0 expected outcome", safe_id=True)
+        cases.append({key: record[key] for key in ("case_id", "scenario_family", "evaluation_scope", "split")})
+        labels[case_id] = {"category": record["category"],
+            "allowed_final_decisions": expected["allowed_final_decisions"],
+            "allowed_stop_reasons": expected["allowed_stop_reasons"],
+            "expected_provider_called": expected["provider_called"]}
+        by_id[case_id] = record
+    if counts != runner.EXPECTED_HOLDOUT_SCOPE_COUNTS:
+        _fail("case_completeness", "C0 scope inventory differs from the holdout contract")
+    end_to_end = tuple(sorted(key for key, record in by_id.items() if record["evaluation_scope"] == "end_to_end"))
+    for item in inputs[1:]:
+        records = item.result["cases"]
+        if not isinstance(records, list) or tuple(record.get("case_id") for record in records) != end_to_end:
+            _fail("case_completeness", "ablated inventory differs from C0 end-to-end inventory")
+        for record in records:
+            for name in ("scenario_family", "evaluation_scope", "split", "category", "expected_outcome"):
+                if record.get(name) != by_id[record["case_id"]][name]:
+                    _fail("case_labels", "ablated case identity or label differs from C0")
+    return runner.LoadedBenchmark(corpus=(), cases=tuple(cases), labels_by_id=labels)
+
+
+def analyze_authorized_ollama_rescore(request: RescoreRequest, *, repo_root: Path = ROOT,
+                                      hooks: AnalyzerHooks | None = None) -> WrittenAnalysis:
+    context, inputs = _verify_holdout_rescore_identity_preclaim(request, repo_root=repo_root,
+        hooks=hooks or AnalyzerHooks(repository_state_loader=_read_rescore_repository_state))
+    authorization = context.authorization
+    manifest = runner.ManifestIdentity(authorization.benchmark_manifest_sha256, "final", 0)
+    repository = context.analyzer_repository
+    inputs = _validate_holdout_matrix(inputs, authorization=authorization, context=context)
+    for item in inputs:
+        _validate_holdout_result_identity(item, authorization=authorization, repository=repository,
+                                          manifest=manifest, context=context)
+    benchmark = _benchmark_from_bound_results(inputs)
+    for item in inputs:
+        _validate_result(item, repository=repository, manifest_identity=manifest, benchmark=benchmark,
+                         expected_split=runner.HOLDOUT_SPLIT, context=context)
+    validate_family_mapping(benchmark)
+    _validate_primary_matrix(inputs, context=context)
+    ordered = _validate_common_inputs(inputs,
+        request=_holdout_analysis_shim(authorization, context.output_root), repository=repository,
+        manifest_identity=manifest, context=context)
+    analysis = _build_analysis(ordered, request=_holdout_analysis_shim(authorization, context.output_root),
+                               repository=repository, manifest_identity=manifest, context=context)
+    for key in HOLDOUT_IDENTITY_KEYS:
+        analysis[key] = _holdout_identity_value(authorization, key)
+    validate_holdout_analysis_document(analysis, authorization=authorization, context=context)
+    _assert_no_authorization_disclosure(analysis, authorization, context.input_root)
+    table_bytes = _build_csv(analysis)
+    analysis_bytes = runner._canonical_json_bytes(analysis)
+    output_manifest = _build_analysis_manifest(analysis_bytes, table_bytes, analysis)
+    _validate_analysis_manifest(output_manifest, analysis_bytes=analysis_bytes,
+                                table_bytes=table_bytes, analysis=analysis)
+    output_manifest.update({key: _holdout_identity_value(authorization, key) for key in HOLDOUT_IDENTITY_KEYS})
+    validate_holdout_analysis_manifest_document(output_manifest, authorization=authorization)
+    _assert_no_authorization_disclosure(output_manifest, authorization, context.input_root)
+    payloads = (("analysis.json", analysis_bytes), ("analysis-table.csv", table_bytes),
+                ("analysis-manifest.json", runner._canonical_json_bytes(output_manifest)))
+    # No staging, parent mkdir, cleanup or retry. A failed external output is
+    # deliberately left in place for inspection and cannot be reused.
+    output = _rescore_output_root(context.output_root, attempt=context.input_root, repo=repo_root,
+                                  analyzer_commit=context.analyzer_commit)
+    output.mkdir(exist_ok=False)
+    directory_identity = output.stat()
+    for name, payload in payloads:
+        current_identity = output.stat()
+        if (_contains_symlink(output) or output.resolve() != context.output_root
+            or (current_identity.st_dev, current_identity.st_ino) != (directory_identity.st_dev, directory_identity.st_ino)):
+            _fail("output_containment", "output changed before publication")
+        with (output / name).open("xb") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+    return WrittenAnalysis(output, output / "analysis.json", output / "analysis-table.csv",
+                            output / "analysis-manifest.json")
+
+
+def _parse_result_binding(value: str) -> ResultBinding:
+    match = re.fullmatch(r"([A-Za-z0-9_]+)=([0-9a-f]{64}):([0-9a-f]{64}):([1-9][0-9]*)", value)
+    if match is None:
+        raise argparse.ArgumentTypeError("binding must be CONFIG=SHA256:SHA256:POSITIVE_SIZE")
+    config_id, manifest, result, size = match.groups()
+    return ResultBinding(config_id, manifest, result, int(size))
+
+
+class _UniqueRescoreOption(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        if getattr(namespace, self.dest, None) is not None:
+            parser.error(f"duplicate option: {option_string}")
+        setattr(namespace, self.dest, values)
+
+
+def build_rescore_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Rescore the bound completed Ollama attempt", allow_abbrev=False)
+    for name in ("binding-profile", "attempt-root", "authorization", "authorization-sha256", "freeze",
+                 "freeze-sha256", "expected-analyzer-commit", "output-root"):
+        parser.add_argument("--" + name, required=True, action=_UniqueRescoreOption,
+                            type=Path if name in {"attempt-root", "authorization", "freeze", "output-root"} else str)
+    parser.add_argument("--result-binding", required=True, action="append", type=_parse_result_binding)
+    return parser
+
+
+def _rescore_request_from_args(args: argparse.Namespace) -> RescoreRequest:
+    bindings = {item.config_id: item for item in args.result_binding}
+    if len(args.result_binding) != 8 or len(bindings) != 8 or set(bindings) != set(runner.CONFIG_REGISTRY):
+        _fail("binding_inventory", "exactly one binding for each C0-C7 config is required")
+    return RescoreRequest(args.binding_profile, args.attempt_root, args.authorization,
+        args.authorization_sha256, args.freeze, args.freeze_sha256,
+        tuple(bindings[key] for key in runner.CONFIG_REGISTRY), args.expected_analyzer_commit, args.output_root)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     # --split accepts only development/validation. Holdout is reachable solely
@@ -2857,6 +3541,19 @@ def _holdout_analysis_request_from_args(args: argparse.Namespace) -> HoldoutAnal
 
 
 def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "rescore-authorized-ollama":
+        args = build_rescore_parser().parse_args(argv[1:])
+        try:
+            written = analyze_authorized_ollama_rescore(_rescore_request_from_args(args))
+        except (AnalysisError, runner.RunnerError) as exc:
+            print(f"FAIL [{exc.code}]: rescore validation failed.", file=sys.stderr)
+            return 1
+        except Exception:
+            print("FAIL [internal_error]: rescore failed closed.", file=sys.stderr)
+            return 1
+        print(f"OK: wrote bound aggregate analysis to {written.output_directory.name}.")
+        return 0
     args = build_parser().parse_args(argv)
 
     if args.holdout_authorization is not None:
