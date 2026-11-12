@@ -7,10 +7,13 @@ This is an operational cap, not protection against the ledger owner's rollback.
 """
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import os
 import stat
+import sys
+import tempfile
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -102,7 +105,9 @@ def claim_validation_slot(path: Path, identity: Mapping[str, Any]) -> dict[str, 
         record["record_sha256"] = hashlib.sha256(canonical(record)).hexdigest()
         payload = canonical(record)
         before = path.stat()
-        fd = os.open(path, os.O_WRONLY | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0))
+        # Windows CRT text descriptors translate LF even in os.write(bytes).
+        fd = os.open(path, os.O_WRONLY | os.O_APPEND | getattr(os, "O_BINARY", 0)
+                     | getattr(os, "O_NOFOLLOW", 0))
         try:
             opened = os.fstat(fd)
             if (opened.st_dev, opened.st_ino, opened.st_size, opened.st_nlink) != (
@@ -116,3 +121,56 @@ def claim_validation_slot(path: Path, identity: Mapping[str, Any]) -> dict[str, 
         return record
     finally:
         lock.rmdir()
+
+
+def self_check_canonical_io() -> None:
+    """Exercise production claim I/O in a disposable ledger, never a campaign.
+
+    No ledger path is accepted. A synthetic claim in a new temporary directory
+    cannot consume a campaign's cap. Any byte/read failure propagates; neither
+    this check nor the production writer repairs an existing ledger.
+    """
+    with tempfile.TemporaryDirectory(prefix="shield-ledger-self-check-") as directory:
+        path = Path(directory) / "synthetic-ledger.jsonl"
+        with path.open("xb"):
+            pass
+        digest = hashlib.sha256(b"synthetic-ledger-self-check").hexdigest()
+        identity = {
+            "campaign_run_id": "SYNTHETIC-LEDGER-SELF-CHECK",
+            "execution_branch": "synthetic-self-check-kiểm-tra",
+            "execution_commit": "0" * 40,
+            "benchmark_manifest_sha256": digest,
+            "provider_behavior_hash": digest,
+            "runtime_settings_sha256": digest,
+            "freeze_sha256": digest,
+            "config_hashes": {"synthetic": digest},
+            "output_root_sha256": digest,
+            "benchmark_root_sha256": digest,
+            "validation_ledger_path_sha256": digest,
+            "case_timeout_seconds": 1.0,
+            "started_at_utc": "2000-01-01T00:00:00Z",
+        }
+        record = claim_validation_slot(path, identity)
+        raw = path.read_bytes()
+        if raw != canonical(record) or b"\r" in raw:
+            raise ValidationLedgerError("self-check ledger bytes differ from canonical LF")
+        if read_claims(path) != (record,):
+            raise ValidationLedgerError("self-check ledger read-back differs from the claim")
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Check disposable validation ledger byte I/O")
+    parser.add_argument("--self-check", action="store_true", required=True,
+                        help="write/read a synthetic temporary ledger; consumes no campaign attempt")
+    parser.parse_args(argv)
+    try:
+        self_check_canonical_io()
+    except (OSError, ValidationLedgerError) as exc:
+        print(f"FAIL [validation_ledger_self_check]: {exc}", file=sys.stderr)
+        return 1
+    print("PASS [validation_ledger_self_check]: canonical UTF-8 LF bytes and read_claims verified")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
