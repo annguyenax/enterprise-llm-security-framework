@@ -183,21 +183,46 @@ def _primary_relevance_chunk_ids(hits: list[RetrievalHit]) -> set[str]:
     }
 
 
-def _best_evidence_was_blocked(
+# Per-chunk exclusions that make a chunk unusable as evidence for an
+# automatic answer, checked in this order. Each maps to the reason code the
+# surviving leftovers are rejected with when that exclusion removed the
+# query's best (or tied-best) evidence.
+_BEST_EVIDENCE_UNUSABLE_KINDS: tuple[tuple[str, str], ...] = (
+    ("block", "context_guard_best_evidence_blocked"),
+    ("human_review", "context_guard_best_evidence_human_review"),
+    ("sanitize_emptied", "context_guard_best_evidence_sanitize_emptied"),
+)
+
+
+def _is_unusable_kind(kind: str, outcome: tuple[bool, str, Decision]) -> bool:
+    accepted, reason_code, decision = outcome
+    if accepted:
+        return False
+    if kind == "block":
+        return decision == Decision.BLOCK
+    if kind == "sanitize_emptied":
+        return decision == Decision.SANITIZE and reason_code == _CONTEXT_SANITIZE_EMPTIED
+    if kind == "human_review":
+        return decision == Decision.HUMAN_REVIEW
+    return False
+
+
+def _excluded_evidence_is_best(
     hits: list[RetrievalHit],
     outcomes: dict[str, tuple[bool, str, Decision]],
+    kind: str,
 ) -> bool:
-    """Whether a BLOCK removed evidence at least as strong as every survivor.
+    """Whether an exclusion of `kind` removed evidence at least as strong as
+    every survivor.
 
     Scores are compared within one query, using the same negative-BM25 /
     positive-similarity convention as the sanitize relevance policy. Exact
     top-score ties count as best evidence too. With unusable scores, retrieval
-    rank is the fallback; incidental lower-ranked BLOCKs do not stop a query.
-    SANITIZE and HUMAN_REVIEW exclusions do not trigger this policy.
+    rank is the fallback; incidental lower-ranked exclusions do not stop a query.
     """
-    blocked = [hit for hit in hits if outcomes[hit.chunk_id][2] == Decision.BLOCK]
+    excluded = [hit for hit in hits if _is_unusable_kind(kind, outcomes[hit.chunk_id])]
     surviving = [hit for hit in hits if outcomes[hit.chunk_id][0]]
-    if not blocked or not surviving:
+    if not excluded or not surviving:
         return False  # The existing empty-context fail-closed path handles no survivors.
     scores = [hit.retrieval_score for hit in hits]
     comparable = all(
@@ -205,10 +230,36 @@ def _best_evidence_was_blocked(
         for score in scores
     ) and (all(score <= 0 for score in scores) or all(score >= 0 for score in scores))
     if comparable and any(score != 0 for score in scores):
-        return max(abs(hit.retrieval_score) for hit in blocked) >= max(
+        return max(abs(hit.retrieval_score) for hit in excluded) >= max(
             abs(hit.retrieval_score) for hit in surviving
         )
-    return min(hit.rank for hit in blocked) <= min(hit.rank for hit in surviving)
+    return min(hit.rank for hit in excluded) <= min(hit.rank for hit in surviving)
+
+
+def _best_evidence_was_blocked(
+    hits: list[RetrievalHit],
+    outcomes: dict[str, tuple[bool, str, Decision]],
+) -> bool:
+    """Whether a BLOCK removed evidence at least as strong as every survivor."""
+    return _excluded_evidence_is_best(hits, outcomes, "block")
+
+
+def _best_evidence_unusable_reason(
+    hits: list[RetrievalHit],
+    outcomes: dict[str, tuple[bool, str, Decision]],
+) -> str | None:
+    """Reason code when the query's best evidence is unusable, else None.
+
+    A BLOCK, a HUMAN_REVIEW (withheld pending a reviewer), and a SANITIZE that
+    removed the whole chunk all leave nothing of the strongest source usable
+    for an automatic answer; clean but weaker leftovers are not an adequate
+    substitute. A SANITIZE that kept text, LOG_ONLY, and exclusions weaker
+    than some survivor do not trigger this policy.
+    """
+    for kind, reason_code in _BEST_EVIDENCE_UNUSABLE_KINDS:
+        if _excluded_evidence_is_best(hits, outcomes, kind):
+            return reason_code
+    return None
 
 
 def _now_ms() -> float:
@@ -875,19 +926,23 @@ def run_rag_query_uncommitted(
             )
             passed_pairs.append((hit, candidate))
 
-    if guard_profile.rag_context_guard and _best_evidence_was_blocked(accepted_hits, context_outcomes):
+    unusable_reason = (
+        _best_evidence_unusable_reason(accepted_hits, context_outcomes)
+        if guard_profile.rag_context_guard else None
+    )
+    if unusable_reason is not None:
         # Security policy: answering from leftovers after the best evidence
-        # was blocked as unsafe is not safe. Clean but weaker neighbours are
-        # not an adequate substitute for the query's strongest evidence.
-        # This is BLOCK-only and relevance-dependent, not an any-BLOCK veto.
+        # was blocked, held for review, or sanitized away is not safe. Clean but weaker
+        # neighbours are not an adequate substitute for the query's strongest
+        # evidence. This is relevance-dependent, not an any-exclusion veto.
         for hit, _chunk in passed_pairs:
             context_outcomes[hit.chunk_id] = (
-                False, "context_guard_best_evidence_blocked", context_outcomes[hit.chunk_id][2],
+                False, unusable_reason, context_outcomes[hit.chunk_id][2],
             )
         stage_results.append(
             StageResult(
                 stage="rag_context_guard", decision=Decision.BLOCK,
-                reason_code="context_guard_best_evidence_blocked",
+                reason_code=unusable_reason,
             )
         )
         passed_pairs = []
