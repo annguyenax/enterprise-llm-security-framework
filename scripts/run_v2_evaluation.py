@@ -168,6 +168,7 @@ DEV_VAL_FROZEN_PATHS = (
 )
 DEV_VAL_MANIFEST_PATH = "manifests/benchmark-v2-dev-val-manifest.json"
 DEV_VAL_MANIFEST_STATUS = "derived-dev-val"
+OFFICIAL_V2_MANIFEST_PATH = ROOT / "datasets/v2/manifests/benchmark-v2-manifest.json"
 
 SAFE_ERROR_CATEGORIES = frozenset({"case_execution_error", "case_timeout"})
 FORBIDDEN_FIELD_NAMES = frozenset(
@@ -1014,6 +1015,19 @@ def _verify_dev_val_artifacts(benchmark_root: Path, entries: Sequence[Mapping[st
             raise IntegrityError("manifest_artifact_mismatch", "dev-val frozen artifact mismatch")
 
 
+def _official_dev_val_metadata() -> tuple[bytes, list[dict[str, Any]]]:
+    """Read the pinned official manifest only; never open its artifacts."""
+    raw, manifest = _read_manifest_metadata(OFFICIAL_V2_MANIFEST_PATH)
+    source_entries = _validate_manifest_table(
+        manifest, expected_paths=REQUIRED_FROZEN_PATHS, status="final",
+    )
+    entries = [
+        {key: entry[key] for key in ("path", "sha256", "size_bytes")}
+        for entry in source_entries if entry["path"] in DEV_VAL_FROZEN_PATHS
+    ]
+    return raw, entries
+
+
 def derive_dev_val_manifest(source_manifest: Path, benchmark_root: Path) -> ManifestIdentity:
     """Derive six entries from official metadata; never open source artifacts.
 
@@ -1021,14 +1035,9 @@ def derive_dev_val_manifest(source_manifest: Path, benchmark_root: Path) -> Mani
     required by the runner, so even dev+val-only provenance is excluded.
     """
     _check_dev_val_working_set(benchmark_root)
-    source_bytes, source = _read_manifest_metadata(source_manifest)
-    source_entries = _validate_manifest_table(
-        source, expected_paths=REQUIRED_FROZEN_PATHS, status="final",
-    )
-    entries = [
-        {key: entry[key] for key in ("path", "sha256", "size_bytes")}
-        for entry in source_entries if entry["path"] in DEV_VAL_FROZEN_PATHS
-    ]
+    if source_manifest.resolve() != OFFICIAL_V2_MANIFEST_PATH.resolve():
+        raise IntegrityError("manifest_source", "source manifest must be the official V2 manifest")
+    source_bytes, entries = _official_dev_val_metadata()
     _verify_dev_val_artifacts(benchmark_root, entries)
     manifest = {
         "manifest_version": 1,
@@ -1061,6 +1070,11 @@ def verify_dev_val_manifest(benchmark_root: Path) -> ManifestIdentity:
     if (manifest.get("benchmark_mode") != "dev-val" or not isinstance(source_sha256, str)
             or not _SHA256_RE.fullmatch(source_sha256)):
         raise IntegrityError("manifest_identity", "derived manifest must bind its dev-val mode and source digest")
+    official_bytes, official_entries = _official_dev_val_metadata()
+    if source_sha256 != _sha256_bytes(official_bytes):
+        raise IntegrityError("manifest_source", "derived source digest differs from the official V2 manifest")
+    if [{key: entry[key] for key in ("path", "sha256", "size_bytes")} for entry in entries] != official_entries:
+        raise IntegrityError("manifest_source", "derived file table differs from the official V2 subset")
     _verify_dev_val_artifacts(benchmark_root, entries)
     return ManifestIdentity(_sha256_bytes(raw), DEV_VAL_MANIFEST_STATUS, len(entries))
 
@@ -4424,7 +4438,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--benchmark-root", type=Path,
-        help="Benchmark working set (default: datasets/v2); unavailable in authorized holdout mode.",
+        help="Benchmark working set for --benchmark-mode dev-val only (default: datasets/v2).",
     )
     parser.add_argument(
         "--holdout-authorization",
@@ -4521,6 +4535,10 @@ def _load_analyzer_contract_identities() -> tuple[str, str]:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if args.benchmark_root is not None and args.benchmark_mode != "dev-val":
+        print("FAIL [cli_benchmark_root]: --benchmark-root requires --benchmark-mode dev-val.", file=sys.stderr)
+        return 1
 
     if args.holdout_authorization is not None:
         try:

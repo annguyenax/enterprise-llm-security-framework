@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Derive a dev+val manifest from FINAL V2 metadata, entirely offline.
+"""Derive a dev+val manifest from pinned official FINAL V2 metadata, offline.
 
 Only the six runtime artifacts in --benchmark-root are hashed. Source artifacts
 are never opened, copied or materialized. The target must contain no holdout
@@ -23,7 +23,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--benchmark-root", required=True, type=Path)
     parser.add_argument(
         "--source-manifest", type=Path,
-        default=ROOT / "datasets/v2/manifests/benchmark-v2-manifest.json",
+        default=runner.OFFICIAL_V2_MANIFEST_PATH,
+        help="Official V2 manifest path; alternate source manifests are prohibited.",
     )
     args = parser.parse_args(argv)
     try:

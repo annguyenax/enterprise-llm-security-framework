@@ -89,8 +89,8 @@ def working_set(tmp_path):
 
 
 @pytest.fixture
-def source_manifest(tmp_path, working_set):
-    """Nine-file metadata, with no source artifacts and no holdout content."""
+def source_manifest(tmp_path, working_set, monkeypatch):
+    """Inject official nine-file metadata without any official artifacts."""
     entries = []
     for relative in runner.REQUIRED_FROZEN_PATHS:
         if relative in runner.DEV_VAL_FROZEN_PATHS:
@@ -104,6 +104,7 @@ def source_manifest(tmp_path, working_set):
         "manifest_version": 1, "benchmark_version": "v2", "manifest_status": "final",
         "file_count": 9, "files": entries,
     })
+    monkeypatch.setattr(runner, "OFFICIAL_V2_MANIFEST_PATH", path)
     return path
 
 
@@ -286,6 +287,53 @@ def test_malformed_derived_manifest_fails_closed(derived, mutation):
         runner.verify_dev_val_manifest(derived)
 
 
+@pytest.mark.parametrize("entrypoint", ["verify", "preflight"])
+def test_valid_source_digest_must_match_official_before_artifact_reads(
+    derived, tmp_path, monkeypatch, entrypoint,
+):
+    path = derived / runner.DEV_VAL_MANIFEST_PATH
+    manifest = json.loads(path.read_bytes())
+    manifest["source_manifest_sha256"] = hashlib.sha256(b"unofficial metadata").hexdigest()
+    write_json(path, manifest)
+    monkeypatch.setattr(runner, "_sha256_file", lambda *_a: pytest.fail("artifact hashed"))
+    with pytest.raises(runner.IntegrityError, match="source digest differs from the official"):
+        if entrypoint == "verify":
+            runner.verify_dev_val_manifest(derived)
+        else:
+            request, hooks = request_and_hooks(tmp_path)
+            runner.preflight(request, benchmark_root=derived, hooks=hooks)
+            pytest.fail("preflight accepted an unofficial source digest")
+    assert not (tmp_path / "output").exists()
+
+
+@pytest.mark.parametrize("relative", runner.DEV_VAL_FROZEN_PATHS)
+def test_self_consistent_table_must_match_official_subset_before_artifact_reads(
+    derived, relative, monkeypatch,
+):
+    artifact = derived / relative
+    raw = artifact.read_bytes() + b"\n"
+    artifact.write_bytes(raw)
+    path = derived / runner.DEV_VAL_MANIFEST_PATH
+    manifest = json.loads(path.read_bytes())
+    entry = next(item for item in manifest["files"] if item["path"] == relative)
+    entry.update(sha256=hashlib.sha256(raw).hexdigest(), size_bytes=len(raw))
+    write_json(path, manifest)
+    monkeypatch.setattr(runner, "_sha256_file", lambda *_a: pytest.fail("artifact hashed"))
+    with pytest.raises(runner.IntegrityError, match="file table differs from the official V2 subset"):
+        runner.verify_dev_val_manifest(derived)
+
+
+@pytest.mark.parametrize("field,value", [("sha256", "f" * 64), ("size_bytes", 0)])
+def test_official_subset_compares_each_hash_and_size(derived, field, value, monkeypatch):
+    path = derived / runner.DEV_VAL_MANIFEST_PATH
+    manifest = json.loads(path.read_bytes())
+    manifest["files"][0][field] = value
+    write_json(path, manifest)
+    monkeypatch.setattr(runner, "_sha256_file", lambda *_a: pytest.fail("artifact hashed"))
+    with pytest.raises(runner.IntegrityError, match="file table differs from the official V2 subset"):
+        runner.verify_dev_val_manifest(derived)
+
+
 @pytest.mark.parametrize("relative", runner.DEV_VAL_FROZEN_PATHS)
 def test_each_dev_val_artifact_mismatch_fails_closed(derived, relative):
     with (derived / relative).open("ab") as handle:
@@ -394,11 +442,40 @@ def test_derived_manifest_is_not_an_official_manifest(derived):
         runner.verify_frozen_manifest(derived)
 
 
-def test_cli_tool_derives_only_from_synthetic_source(working_set, source_manifest, capsys):
-    assert derive.main(["--benchmark-root", str(working_set), "--source-manifest", str(source_manifest)]) == 0
+@pytest.mark.parametrize("explicit_source", [False, True])
+def test_cli_tool_derives_from_injected_official_metadata(
+    working_set, source_manifest, capsys, explicit_source,
+):
+    args = ["--benchmark-root", str(working_set)]
+    if explicit_source:
+        args.extend(["--source-manifest", str(source_manifest)])
+    assert derive.main(args) == 0
     assert "files=6; sha256=" in capsys.readouterr().out
-    assert derive.main(["--benchmark-root", str(working_set), "--source-manifest", str(source_manifest)]) == 1
+    assert derive.main(args) == 1
     assert "manifest_write" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("source_kind", ["metadata", "holdout-path"])
+@pytest.mark.parametrize("entrypoint", ["derive", "cli"])
+def test_nonofficial_source_rejected_before_any_open(
+    working_set, source_manifest, tmp_path, monkeypatch, capsys, source_kind, entrypoint,
+):
+    if source_kind == "metadata":
+        # Even an identical FINAL manifest at a different path is refused.
+        source = tmp_path / "alternate/manifests/benchmark-v2-manifest.json"
+        source.parent.mkdir(parents=True)
+        source.write_bytes(source_manifest.read_bytes())
+    else:
+        source = tmp_path / "holdout.jsonl"
+        source.touch()  # Name-only rejection, with no protected content.
+    monkeypatch.setattr(Path, "open", lambda *_a, **_k: pytest.fail("file opened"))
+    if entrypoint == "derive":
+        with pytest.raises(runner.IntegrityError, match="must be the official V2 manifest"):
+            runner.derive_dev_val_manifest(source, working_set)
+    else:
+        assert derive.main(["--benchmark-root", str(working_set), "--source-manifest", str(source)]) == 1
+        assert "manifest_source" in capsys.readouterr().err
+    assert not (working_set / runner.DEV_VAL_MANIFEST_PATH).exists()
 
 
 def test_cli_runner_passes_dev_val_mode_and_root(derived, tmp_path, monkeypatch):
@@ -416,6 +493,30 @@ def test_cli_runner_passes_dev_val_mode_and_root(derived, tmp_path, monkeypatch)
     ]) == 0
     assert captured["request"].benchmark_mode == "dev-val"
     assert captured["benchmark_root"] == derived
+
+
+@pytest.mark.parametrize("mode", [[], ["--benchmark-mode", "official"]])
+@pytest.mark.parametrize("authorized", [False, True])
+def test_cli_runner_rejects_official_root_before_any_open_or_dispatch(
+    tmp_path, monkeypatch, capsys, mode, authorized,
+):
+    args = [
+        "--benchmark-root", str(tmp_path / "unofficial-benchmark"),
+        "--output-root", str(tmp_path / "output"), *mode,
+    ]
+    if authorized:
+        args.extend(["--holdout-authorization", str(tmp_path / "absent-authorization.json"), "--all-configs"])
+    else:
+        args.extend([
+            "--split", "development", "--config", "C6_none",
+            "--expected-branch", "synthetic", "--expected-commit", "a" * 40,
+        ])
+    monkeypatch.setattr(Path, "open", lambda *_a, **_k: pytest.fail("file opened"))
+    for name in ("run_evaluation", "run_holdout_evaluation", "_holdout_request_from_args"):
+        monkeypatch.setattr(runner, name, lambda *_a, **_k: pytest.fail("runner dispatched"))
+    assert runner.main(args) == 1
+    assert "--benchmark-root requires --benchmark-mode dev-val" in capsys.readouterr().err
+    assert not (tmp_path / "output").exists()
 
 
 def test_dev_val_mode_cannot_enter_authorized_holdout_path(tmp_path):
