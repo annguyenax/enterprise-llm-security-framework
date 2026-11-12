@@ -110,7 +110,9 @@ def test_load_split_benchmark_has_no_authorized_parameter(runner):
 
     parameters = inspect.signature(runner.load_split_benchmark).parameters
     assert "authorized" not in parameters
-    assert set(parameters) == {"benchmark_root", "requested_split"}
+    assert set(parameters) == {"benchmark_root", "requested_split", "benchmark_mode"}
+    assert parameters["benchmark_mode"].default == "official"
+    assert parameters["benchmark_mode"].kind is inspect.Parameter.KEYWORD_ONLY
 
 
 def test_holdout_run_request_has_no_split(runner):

@@ -6,6 +6,10 @@ repository and benchmark identity, builds one temporary SQLite corpus per
 configuration, executes one supported frozen split, projects results through an
 explicit content-free allowlist, and publishes immutable diagnostic artifacts.
 
+The opt-in dev-val benchmark mode verifies a separate derived six-file
+manifest and refuses holdout paths before opening any benchmark artifact.
+The default official freeze and authorized holdout gates remain separate.
+
 Holdout execution is available only through the separate canonical external
 maintainer-authorization path and a verified holdout capability. The ordinary
 development/validation APIs and CLI paths cannot represent holdout: it is not a
@@ -153,6 +157,17 @@ REQUIRED_FROZEN_PATHS = (
     "labels/validation.jsonl",
 )
 FROZEN_SUBDIRECTORIES = ("corpus", "cases", "labels", "design")
+BENCHMARK_MODES = ("official", "dev-val")
+DEV_VAL_FROZEN_PATHS = (
+    "cases/development.jsonl",
+    "cases/validation.jsonl",
+    "contamination-exemptions.json",
+    "corpus/documents.jsonl",
+    "labels/development.jsonl",
+    "labels/validation.jsonl",
+)
+DEV_VAL_MANIFEST_PATH = "manifests/benchmark-v2-dev-val-manifest.json"
+DEV_VAL_MANIFEST_STATUS = "derived-dev-val"
 
 SAFE_ERROR_CATEGORIES = frozenset({"case_execution_error", "case_timeout"})
 FORBIDDEN_FIELD_NAMES = frozenset(
@@ -642,6 +657,7 @@ class RunRequest:
     expected_commit: str
     provider_id: str = SUPPORTED_PROVIDER_ID
     case_timeout_seconds: float = 30.0
+    benchmark_mode: str = "official"
 
 
 @dataclass(frozen=True)
@@ -911,6 +927,150 @@ def verify_frozen_manifest(benchmark_root: Path) -> ManifestIdentity:
         status="final",
         file_count=len(entries),
     )
+
+
+def _check_dev_val_working_set(benchmark_root: Path) -> None:
+    """Inspect names only, before opening any manifest or benchmark artifact.
+
+    Reject links as well: an allowed filename must never alias holdout data.
+    Provenance is not used by the split loader and is deliberately excluded.
+    """
+    if benchmark_root.is_symlink() or not benchmark_root.is_dir():
+        raise IntegrityError("dev_val_working_set", "dev-val requires a directory without links")
+
+    def scan_error(_error: OSError) -> None:
+        raise IntegrityError("dev_val_working_set", "dev-val working set cannot be inspected")
+
+    for directory, directories, files in os.walk(benchmark_root, onerror=scan_error):
+        for name in directories + files:
+            path = Path(directory) / name
+            lowered = name.casefold()
+            if "holdout" in lowered or lowered == "result.json" or "ollama" in lowered:
+                raise IntegrityError("dev_val_holdout", "dev-val working set contains a holdout path or run artifact")
+            if path.is_symlink():
+                raise IntegrityError("dev_val_symlink", "dev-val working set must not contain links")
+    if _iter_frozen_artifact_paths(benchmark_root) != DEV_VAL_FROZEN_PATHS:
+        raise IntegrityError(
+            "dev_val_artifact_set", "dev-val working set must contain exactly the six runtime artifacts"
+        )
+
+
+def _read_manifest_metadata(path: Path) -> tuple[bytes, dict[str, Any]]:
+    # This helper is used only with manifest paths, never benchmark records.
+    if (path.name not in {"benchmark-v2-manifest.json", Path(DEV_VAL_MANIFEST_PATH).name}
+            or any(part.is_symlink() for part in (path, *path.parents))):
+        raise IntegrityError("manifest_path", "manifest path is prohibited or contains a link")
+    try:
+        raw = path.read_bytes()
+        manifest = json.loads(raw)
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise IntegrityError("manifest_unreadable", "benchmark manifest is unavailable or malformed") from exc
+    if not isinstance(manifest, dict):
+        raise IntegrityError("manifest_structure", "benchmark manifest must be an object")
+    return raw, manifest
+
+
+def _validate_manifest_table(
+    manifest: Mapping[str, Any], *, expected_paths: tuple[str, ...], status: str,
+) -> list[dict[str, Any]]:
+    """Validate the complete table before any artifact can be opened."""
+    if manifest.get("manifest_status") != status:
+        raise IntegrityError("manifest_not_final", "benchmark manifest status is unsupported")
+    if (type(manifest.get("manifest_version")) is not int
+            or manifest["manifest_version"] != 1 or manifest.get("benchmark_version") != "v2"):
+        raise IntegrityError("manifest_identity", "benchmark manifest identity is unsupported")
+    entries = manifest.get("files")
+    if (not isinstance(entries, list) or type(manifest.get("file_count")) is not int
+            or manifest["file_count"] != len(entries)):
+        raise IntegrityError("manifest_structure", "benchmark manifest file table is malformed")
+    paths: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, dict) or not isinstance(entry.get("path"), str):
+            raise IntegrityError("manifest_path", "benchmark manifest path is malformed")
+        relative = entry["path"]
+        if status == DEV_VAL_MANIFEST_STATUS and "holdout" in relative.casefold():
+            raise IntegrityError("dev_val_holdout", "dev-val manifest contains a holdout path")
+        if relative not in expected_paths:
+            raise IntegrityError("manifest_file_set", "benchmark manifest contains a prohibited path")
+        if not isinstance(entry.get("sha256"), str) or not _SHA256_RE.fullmatch(entry["sha256"]):
+            raise IntegrityError("manifest_digest", "benchmark manifest digest is invalid")
+        if type(entry.get("size_bytes")) is not int or entry["size_bytes"] < 0:
+            raise IntegrityError("manifest_size", "benchmark manifest size is invalid")
+        paths.append(relative)
+    if tuple(paths) != expected_paths:
+        raise IntegrityError("manifest_file_set", "benchmark manifest paths must be exact, unique and sorted")
+    return entries
+
+
+def _verify_dev_val_artifacts(benchmark_root: Path, entries: Sequence[Mapping[str, Any]]) -> None:
+    for entry in entries:
+        artifact = benchmark_root / entry["path"]
+        try:
+            matches = (artifact.stat().st_size == entry["size_bytes"]
+                       and _sha256_file(artifact) == entry["sha256"])
+        except OSError as exc:
+            raise IntegrityError("manifest_missing_artifact", "dev-val artifact is unavailable") from exc
+        if not matches:
+            raise IntegrityError("manifest_artifact_mismatch", "dev-val frozen artifact mismatch")
+
+
+def derive_dev_val_manifest(source_manifest: Path, benchmark_root: Path) -> ManifestIdentity:
+    """Derive six entries from official metadata; never open source artifacts.
+
+    The target must already be a clean dev+val working set. No provenance is
+    required by the runner, so even dev+val-only provenance is excluded.
+    """
+    _check_dev_val_working_set(benchmark_root)
+    source_bytes, source = _read_manifest_metadata(source_manifest)
+    source_entries = _validate_manifest_table(
+        source, expected_paths=REQUIRED_FROZEN_PATHS, status="final",
+    )
+    entries = [
+        {key: entry[key] for key in ("path", "sha256", "size_bytes")}
+        for entry in source_entries if entry["path"] in DEV_VAL_FROZEN_PATHS
+    ]
+    _verify_dev_val_artifacts(benchmark_root, entries)
+    manifest = {
+        "manifest_version": 1,
+        "benchmark_version": "v2",
+        "manifest_status": DEV_VAL_MANIFEST_STATUS,
+        "benchmark_mode": "dev-val",
+        "source_manifest_sha256": _sha256_bytes(source_bytes),
+        "file_count": len(entries),
+        "files": entries,
+    }
+    raw = _canonical_json_bytes(manifest)
+    target = benchmark_root / DEV_VAL_MANIFEST_PATH
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with target.open("xb") as handle:
+            handle.write(raw)
+    except OSError as exc:
+        raise IntegrityError("manifest_write", "derived manifest cannot be created; overwrite is prohibited") from exc
+    return ManifestIdentity(_sha256_bytes(raw), DEV_VAL_MANIFEST_STATUS, len(entries))
+
+
+def verify_dev_val_manifest(benchmark_root: Path) -> ManifestIdentity:
+    """Separate verifier. Missing holdout is expected; its presence is fatal."""
+    _check_dev_val_working_set(benchmark_root)
+    raw, manifest = _read_manifest_metadata(benchmark_root / DEV_VAL_MANIFEST_PATH)
+    entries = _validate_manifest_table(
+        manifest, expected_paths=DEV_VAL_FROZEN_PATHS, status=DEV_VAL_MANIFEST_STATUS,
+    )
+    source_sha256 = manifest.get("source_manifest_sha256")
+    if (manifest.get("benchmark_mode") != "dev-val" or not isinstance(source_sha256, str)
+            or not _SHA256_RE.fullmatch(source_sha256)):
+        raise IntegrityError("manifest_identity", "derived manifest must bind its dev-val mode and source digest")
+    _verify_dev_val_artifacts(benchmark_root, entries)
+    return ManifestIdentity(_sha256_bytes(raw), DEV_VAL_MANIFEST_STATUS, len(entries))
+
+
+def _verify_benchmark_manifest(benchmark_root: Path, benchmark_mode: str) -> ManifestIdentity:
+    if benchmark_mode == "dev-val":
+        return verify_dev_val_manifest(benchmark_root)
+    if benchmark_mode == "official":
+        return verify_frozen_manifest(benchmark_root)
+    raise IntegrityError("benchmark_mode", "benchmark mode must be official or dev-val")
 
 
 def validate_config_registry(registry: Mapping[str, EvaluationConfig]) -> None:
@@ -1880,7 +2040,9 @@ def load_authorized_holdout_benchmark(
     return _load_frozen_split(benchmark_path, HOLDOUT_SPLIT)
 
 
-def load_split_benchmark(benchmark_root: Path, requested_split: str) -> LoadedBenchmark:
+def load_split_benchmark(
+    benchmark_root: Path, requested_split: str, *, benchmark_mode: str = "official",
+) -> LoadedBenchmark:
     """Ordinary development/validation loader. Never loads holdout.
 
     Holdout is reachable only through `load_authorized_holdout_benchmark`, which
@@ -1890,6 +2052,10 @@ def load_split_benchmark(benchmark_root: Path, requested_split: str) -> LoadedBe
     """
     if requested_split not in SUPPORTED_SPLITS:
         raise IntegrityError("split_not_allowed", "evaluation split must be development or validation")
+    if benchmark_mode == "dev-val":
+        verify_dev_val_manifest(benchmark_root)
+    elif benchmark_mode != "official":
+        raise IntegrityError("benchmark_mode", "benchmark mode must be official or dev-val")
     return _load_frozen_split(benchmark_root, requested_split)
 
 
@@ -2193,7 +2359,7 @@ def preflight(
 
     _validate_result_schema_contract()
     _validate_output_root(request.output_root, repo_root, benchmark_path)
-    manifest = verify_frozen_manifest(benchmark_path)
+    manifest = _verify_benchmark_manifest(benchmark_path, request.benchmark_mode)
     validate_config_registry(CONFIG_REGISTRY)
 
     active_settings = load_settings()
@@ -2202,7 +2368,11 @@ def preflight(
     _validate_provider_environment(provider)
 
     safety_limits = _settings_safety_limits(active_settings, request.case_timeout_seconds)
-    benchmark = load_split_benchmark(benchmark_path, request.split)
+    benchmark = (
+        load_split_benchmark(benchmark_path, request.split, benchmark_mode="dev-val")
+        if request.benchmark_mode == "dev-val"
+        else load_split_benchmark(benchmark_path, request.split)
+    )
     expected_ids, expected_scope_ids = _expected_case_sets(benchmark, request.config_ids)
     dependencies = _dependency_inventory()
     dependencies_hash = _sha256_bytes(_canonical_json_bytes(list(dependencies)))
@@ -3642,7 +3812,10 @@ def _verify_timeout_recovery_state(
             "temporary retrieval state retained an unexpected sidecar",
         )
 
-    manifest = verify_frozen_manifest(context.benchmark_root)
+    manifest = _verify_benchmark_manifest(
+        context.benchmark_root,
+        context.request.benchmark_mode if isinstance(context.request, RunRequest) else "official",
+    )
     if manifest != context.manifest:
         raise IntegrityError(
             "timeout_identity_corruption",
@@ -4246,6 +4419,14 @@ def build_parser() -> argparse.ArgumentParser:
     # and is reachable solely via --holdout-authorization.
     parser.add_argument("--split", choices=list(SUPPORTED_SPLITS))
     parser.add_argument(
+        "--benchmark-mode", choices=BENCHMARK_MODES, default="official",
+        help="dev-val requires a derived six-file manifest and refuses holdout artifacts.",
+    )
+    parser.add_argument(
+        "--benchmark-root", type=Path,
+        help="Benchmark working set (default: datasets/v2); unavailable in authorized holdout mode.",
+    )
+    parser.add_argument(
         "--holdout-authorization",
         type=Path,
         help=(
@@ -4278,6 +4459,10 @@ def _holdout_request_from_args(
     mapping_sha256: str | None = None,
 ) -> HoldoutRunRequest:
     """Validate holdout CLI usage. Every rule here fails closed."""
+    if args.benchmark_mode != "official" or args.benchmark_root is not None:
+        raise IntegrityError(
+            "cli_holdout_benchmark", "benchmark mode/root overrides are prohibited for authorized holdout"
+        )
     if args.split is not None:
         raise IntegrityError(
             "cli_holdout_split", "--split must not be combined with --holdout-authorization"
@@ -4383,9 +4568,10 @@ def main(argv: list[str] | None = None) -> int:
         expected_commit=args.expected_commit,
         provider_id=args.provider or SUPPORTED_PROVIDER_ID,
         case_timeout_seconds=args.case_timeout_seconds,
+        benchmark_mode=args.benchmark_mode,
     )
     try:
-        written = run_evaluation(request)
+        written = run_evaluation(request, benchmark_root=args.benchmark_root)
     except RunnerError as exc:
         print(f"FAIL [{exc.code}]: {exc}", file=sys.stderr)
         return 1

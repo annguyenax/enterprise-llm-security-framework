@@ -104,6 +104,11 @@ no evaluation, and modify no file under `app/`.
 
 ## Other Helpers
 
+- `derive_v2_dev_val_manifest.py` creates the separate six-file W13 dev+val
+  manifest from official V2 manifest metadata, without accessing source
+  artifacts. The runner selects it with `--benchmark-mode dev-val` and
+  `--benchmark-root`. See [W13 usage and validation evidence](../docs/evaluation/phase3-w13-dev-val-manifest.md).
+
 - `run_dev.ps1` starts the local FastAPI application.
 - `smoke_test_gateway.ps1` exercises health, guards, and gateway responses.
 - `inspect_dataset.py` / `inspect_dataset.ps1` inspect the synthetic corpus.
