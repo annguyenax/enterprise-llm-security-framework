@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import math
 import time
 import uuid
 from datetime import datetime, timezone
@@ -135,6 +136,47 @@ _ANSWER_INTERNAL_ERROR = "An unexpected internal error occurred while processing
 
 _AGGREGATE_PER_CHUNK_EXCERPT_CHARS = 400
 _AGGREGATE_SEPARATOR = "\n\n"
+
+# A per-chunk SANITIZE on a chunk whose retrieval score is below this
+# fraction of the strongest candidate's score excludes that chunk instead
+# of passing a sanitized copy -- see `_primary_relevance_chunk_ids`.
+_SANITIZE_PRIMARY_RELEVANCE_RATIO = 0.5
+
+
+def _context_fold_severity(decision: Decision) -> Decision:
+    """Severity a RAG Context Guard decision contributes to `final_decision`.
+
+    LOG_ONLY is advisory telemetry by definition ("log, do not act"): it
+    stays in `stage_results` and the audit event, but a weak signal such
+    as a benign document that merely uses the word "override" must not
+    turn an otherwise clean answer into a non-ALLOW final decision.
+    Every other decision folds unchanged.
+    """
+    return Decision.ALLOW if decision == Decision.LOG_ONLY else decision
+
+
+def _primary_relevance_chunk_ids(hits: list[RetrievalHit]) -> set[str]:
+    """Chunk ids whose retrieval score is within
+    `_SANITIZE_PRIMARY_RELEVANCE_RATIO` of the strongest candidate.
+
+    Only scores from one query are compared, by magnitude, so this works
+    for SQLite `bm25()` (more negative is better) and for higher-is-better
+    scorers alike. When scores cannot be compared safely (non-finite,
+    mixed signs, or all zero) every hit counts as primary, which keeps the
+    legacy sanitize-and-pass behavior.
+    """
+    scores = [hit.retrieval_score for hit in hits]
+    comparable = all(
+        isinstance(score, (int, float)) and not isinstance(score, bool) and math.isfinite(score)
+        for score in scores
+    ) and (all(score <= 0 for score in scores) or all(score >= 0 for score in scores))
+    best = max((abs(score) for score in scores), default=0.0) if comparable else 0.0
+    if best == 0:
+        return {hit.chunk_id for hit in hits}
+    return {
+        hit.chunk_id for hit in hits
+        if abs(hit.retrieval_score) >= _SANITIZE_PRIMARY_RELEVANCE_RATIO * best
+    }
 
 
 def _now_ms() -> float:
@@ -703,6 +745,7 @@ def run_rag_query_uncommitted(
     passed_pairs: list[tuple[RetrievalHit, RAGContextChunk]] = []
     if guard_profile.rag_context_guard:
         t0 = _now_ms()
+        primary_chunk_ids = _primary_relevance_chunk_ids(accepted_hits)
         for hit in accepted_hits:
             candidate = RAGContextChunk(
                 doc_id=hit.document_id, text=hit.text, metadata=_chunk_metadata(hit)
@@ -727,6 +770,25 @@ def run_rag_query_uncommitted(
                     StageResult(
                         stage="rag_context_guard", decision=result.decision,
                         reason_code=f"context_guard_{result.decision.value}",
+                        detail=f"chunk_id={hit.chunk_id}",
+                    )
+                )
+                continue
+            if result.decision == Decision.SANITIZE and hit.chunk_id not in primary_chunk_ids:
+                # A weakly relevant neighbour that needed sanitizing (hidden
+                # markup, a canary marker, ...) adds risk and little answer
+                # value: exclude it outright, like a blocked chunk, rather
+                # than pass a sanitized copy. Excluded chunks never reach
+                # the provider and, like blocked chunks, do not fold into
+                # final_decision -- so incidental retrieval of a poisoned
+                # document no longer escalates an unrelated benign answer.
+                context_outcomes[hit.chunk_id] = (
+                    False, "context_guard_sanitize_low_relevance_excluded", Decision.SANITIZE,
+                )
+                stage_results.append(
+                    StageResult(
+                        stage="rag_context_guard", decision=Decision.SANITIZE,
+                        reason_code="context_guard_sanitize_low_relevance_excluded",
                         detail=f"chunk_id={hit.chunk_id}",
                     )
                 )
@@ -1033,7 +1095,7 @@ def run_rag_query_uncommitted(
             return _finalize(
                 request_id=request_id,
                 final_decision=most_severe(
-                    [input_severity, aggregate_decision, dlp_decision, decision]
+                    [input_severity, _context_fold_severity(aggregate_decision), dlp_decision, decision]
                 ),
                 answer=_ANSWER_OUTPUT_BLOCKED, retrieved_count=len(retrieval_result.hits),
                 accepted_context_count=len(final_chunks),
@@ -1071,9 +1133,16 @@ def run_rag_query_uncommitted(
         )
 
     # -- 9. Allowed: assemble the final safe result -----------------------
-    per_chunk_decisions = [outcome[2] for outcome in context_outcomes.values() if outcome[0]]
+    # Context-layer LOG_ONLY is advisory and stays in stage_results/audit
+    # only (see _context_fold_severity); SANITIZE and above still fold.
+    per_chunk_decisions = [
+        _context_fold_severity(outcome[2]) for outcome in context_outcomes.values() if outcome[0]
+    ]
     final_decision = most_severe(
-        [input_severity, aggregate_decision, dlp_decision, output_decision, *per_chunk_decisions]
+        [
+            input_severity, _context_fold_severity(aggregate_decision), dlp_decision,
+            output_decision, *per_chunk_decisions,
+        ]
     )
     provenance_summaries = _summaries_from_provenance(provenance_decisions, context_outcomes, False)
 
