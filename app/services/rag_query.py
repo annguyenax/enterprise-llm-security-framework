@@ -142,6 +142,10 @@ _AGGREGATE_SEPARATOR = "\n\n"
 # of passing a sanitized copy -- see `_primary_relevance_chunk_ids`.
 _SANITIZE_PRIMARY_RELEVANCE_RATIO = 0.5
 
+# A per-chunk SANITIZE that left no text to pass on (reported as a content
+# exclusion, not as aggregate_budget_exceeded).
+_CONTEXT_SANITIZE_EMPTIED = "context_guard_sanitize_emptied"
+
 
 def _context_fold_severity(decision: Decision) -> Decision:
     """Severity a RAG Context Guard decision contributes to `final_decision`.
@@ -798,6 +802,23 @@ def run_rag_query_uncommitted(
                 if result.decision == Decision.SANITIZE and result.sanitized_chunks
                 else candidate
             )
+            if result.decision == Decision.SANITIZE and not effective_chunk.text.strip():
+                # Sanitization removed the whole chunk, so nothing is left to
+                # pass on. Exclude it here as a content decision; otherwise the
+                # empty excerpt is dropped later and misreported as
+                # aggregate_budget_exceeded. Like other excluded chunks it does
+                # not fold into final_decision.
+                context_outcomes[hit.chunk_id] = (
+                    False, _CONTEXT_SANITIZE_EMPTIED, Decision.SANITIZE,
+                )
+                stage_results.append(
+                    StageResult(
+                        stage="rag_context_guard", decision=Decision.SANITIZE,
+                        reason_code=_CONTEXT_SANITIZE_EMPTIED,
+                        detail=f"chunk_id={hit.chunk_id}",
+                    )
+                )
+                continue
             context_outcomes[hit.chunk_id] = (
                 True, f"context_guard_{result.decision.value}", result.decision,
             )
