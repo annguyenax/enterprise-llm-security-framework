@@ -1,0 +1,75 @@
+# Argon Review — W15 (Canonical LF Ledger & Dev-Val Writers on Windows)
+
+Verdict: PASS
+Reviewer: Argon
+Branch: feat-p3-rag-opt
+Commit: e604aed6cec9d8a348baaacfb3341356b2697614
+Parent: 796ae25f9779cba30c9be60f35af3e67a74d0450
+Blocking Issues: None (0 blocking)
+
+## Non-Blocking Notes & Issue IDs Acknowledged
+- P3W15-FIX-01 (Non-blocking / Runbook): Run `python -m scripts.v2_validation_ledger --self-check` as a mandatory preflight step in `VAL2-RUNBOOK.md` before creating/claiming the production ledger; runner remains unchanged.
+- P3W15-FIX-02 (Non-blocking / Doc-only): Audit logger uses text mode and may emit CRLF on Windows, which is outside the official evidence surface.
+- P3W15-NEW-01 (Non-blocking / Scope): Do not embed `--self-check` inside the official claim path in W15.
+- P3W14-NEW-03 (Preserved): Do not run full unguarded pytest suite when a checkout contains `datasets/v2` holdout artifacts; run the scoped synthetic test suite only.
+
+## Checklist & Evidence
+
+1. `claim_validation_slot` writes exact canonical LF bytes with `O_BINARY`:
+   - Evidence: `scripts/v2_validation_ledger.py:109-110` opens the ledger descriptor with `os.open(path, os.O_WRONLY | os.O_APPEND | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0))` before `os.write(fd, payload)` and `os.fsync(fd)`.
+   - On-disk bytes match `canonical(record)` (`scripts/v2_validation_ledger.py:38-40`: UTF-8, `sort_keys=True`, `separators=(",", ":")`, `ensure_ascii=False`, `allow_nan=False`, single trailing `\n`, no `\r`).
+
+2. `read_claims` remains strict and fail-closed (no relaxation, no auto-repair/rollback):
+   - Evidence: `scripts/v2_validation_ledger.py:56-81` is untouched relative to parent `796ae25f9779cba30c9be60f35af3e67a74d0450`.
+   - `canonical(record) != line` still rejects any CRLF-tainted line with `ValidationLedgerError("ledger is malformed; manual reconciliation required")`.
+   - Existing CRLF ledger bytes on disk remain unmodified when rejected.
+
+3. Regression test reproduces `796ae25` CRLF failure and verifies the `e604aed` writer under the same Windows newline monkeypatch:
+   - Evidence: `tests/test_w15_canonical_io.py:21-65` (`windows_newlines` fixture) patches `os.open`/`os.write`/`os.close` so descriptors opened without `O_BINARY` translate `\n` to `\r\n`, and patches `builtins.open`/`io.open` default text writes (`newline=None`) to emit `\r\n`.
+   - `test_796ae25_append_reproduces_crlf_and_strict_reader_failure` (`tests/test_w15_canonical_io.py:97-115`) confirms the pre-W15 append writes CRLF (`raw == ledger.canonical(record).replace(b"\n", b"\r\n")`), `read_claims` fails closed (`ValidationLedgerError` matching `"malformed"`), `claim_validation_slot` refuses to append or repair, and `path.read_bytes() == raw`.
+   - `test_binary_claims_are_exact_canonical_bytes_under_same_windows_patch` (`tests/test_w15_canonical_io.py:118-131`) confirms 3 consecutive claims via `claim_validation_slot` under `windows_newlines` produce exact canonical LF bytes (`b"\r" not in raw`, `raw.count(b"\n") == 3`), pass `read_claims`, and reject a 4th claim (`MAX_VALIDATION_ATTEMPTS = 3`).
+
+4. Other writers on the official `dev-val` path audited and tested against CRLF:
+   - Evidence: Code audit of `scripts/run_v2_evaluation.py` and `scripts/analyze_v2_results.py` confirms all official artifacts open files in binary mode (`"xb"`, `"wb"`, `"ab"`):
+     - `dev-val-start-receipt.json` (`scripts/run_v2_evaluation.py:920`, `"xb"`)
+     - `dev_val_manifest.json` (`scripts/run_v2_evaluation.py:1244`, `"xb"`)
+     - `ollama-attempts.jsonl` (`scripts/run_v2_evaluation.py:1473`, `"ab"`)
+     - `ollama-runtime.json` (`scripts/run_v2_evaluation.py:1503`, `"wb"`)
+     - evaluation results and result manifests (`scripts/run_v2_evaluation.py:2073, 4493, 4679`, `"xb"`)
+     - official analysis JSON, manifest, and markdown table (`scripts/analyze_v2_results.py:2412, 3070, 3656`, `"xb"`)
+     - frozen config is read-only and verified by SHA-256 (`scripts/run_v2_evaluation.py:975`), never rewritten by the runner.
+   - Tested end-to-end under `windows_newlines` in `test_dev_val_receipt_results_and_analysis_keep_canonical_bytes` (`tests/test_w15_canonical_io.py:142-190`) and `test_ollama_evidence_binary_append_and_runtime_publish` (`tests/test_w15_canonical_io.py:192-206`).
+
+5. Official disposable `--self-check` CLI:
+   - Evidence: `scripts/v2_validation_ledger.py:126-176` (`self_check_canonical_io`, `main`).
+   - Uses `tempfile.TemporaryDirectory(prefix="shield-ledger-self-check-")`, creates an empty temporary ledger (`"xb"`), calls `claim_validation_slot` and `read_claims`, verifies `raw == canonical(record)` and `b"\r" not in raw`, and cleans up the temporary directory.
+   - `argparse` accepts only `--self-check` (`required=True`) and rejects any ledger path argument (exit status `2`), ensuring zero risk of touching or consuming a production campaign ledger.
+   - Tested with `break_binary=False` (exit `0`, `PASS`) and `break_binary=True` (exit `1`, `FAIL`) in `test_supported_self_check_is_temporary_and_detects_crlf` (`tests/test_w15_canonical_io.py:208-232`).
+
+6. Holdout-safety & gate invariants preserved:
+   - Evidence: `git diff 796ae25f9779cba30c9be60f35af3e67a74d0450..e604aed6cec9d8a348baaacfb3341356b2697614 --stat` modifies only `scripts/v2_validation_ledger.py` (+59/-1) and `tests/test_w15_canonical_io.py` (+238).
+   - No changes to holdout/official gates, `MAX_VALIDATION_ATTEMPTS = 3`, Judge, or guards.
+   - `tests/test_w15_canonical_io.py:17` reuses `protected_io` from `tests/test_w14_dev_val_execution.py` to block any real `datasets/v2` access or network sockets during tests.
+   - No validation or holdout dataset/label files were opened or read during this review.
+
+## Test Command Exit Statuses
+
+1. Scoped synthetic pytest suite:
+   Command: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest -q tests/test_w15_canonical_io.py tests/test_w14_dev_val_execution.py tests/test_v2_dev_val_manifest.py tests/test_p2_authorized_ollama_runner.py tests/test_v2_holdout_authorization.py tests/test_v2_analyzer_rescore.py tests/test_p2_ollama_settings.py`
+   Output: `657 passed in 15.62s`
+   Exit status: `0`
+
+2. Official ledger self-check:
+   Command: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m scripts.v2_validation_ledger --self-check`
+   Output: `PASS [validation_ledger_self_check]: canonical UTF-8 LF bytes and read_claims verified`
+   Exit status: `0`
+
+3. Self-check path-rejection check:
+   Command: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m scripts.v2_validation_ledger --self-check /tmp/fake-ledger.jsonl`
+   Output: `v2_validation_ledger.py: error: unrecognized arguments: /tmp/fake-ledger.jsonl`
+   Exit status: `2`
+
+4. Repository worktree cleanliness check:
+   Command: `git -C /workspace/shield-team/enterprise-llm-security-framework status --short --branch`
+   Output: `## feat-p3-rag-opt` (clean)
+   Exit status: `0`

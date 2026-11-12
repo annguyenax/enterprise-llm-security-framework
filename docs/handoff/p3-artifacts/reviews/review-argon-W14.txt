@@ -1,0 +1,28 @@
+# Review — Argon W14
+
+Verdict: PASS
+Reviewer: Argon
+Commit: 796ae25f9779cba30c9be60f35af3e67a74d0450
+Parent: bbb78f3318c09f44847d952027e1fe895ccb5d98
+Branch: feat-p3-rag-opt
+Issue IDs: NONE
+
+## Synthetic Pytest Execution
+- Command:
+  `/workspace/shield-team/enterprise-llm-security-framework/.venv/bin/python -m pytest -q /workspace/shield-team/enterprise-llm-security-framework/tests/test_w14_dev_val_execution.py /workspace/shield-team/enterprise-llm-security-framework/tests/test_v2_dev_val_manifest.py /workspace/shield-team/enterprise-llm-security-framework/tests/test_p2_authorized_ollama_runner.py /workspace/shield-team/enterprise-llm-security-framework/tests/test_v2_holdout_authorization.py /workspace/shield-team/enterprise-llm-security-framework/tests/test_v2_analyzer_rescore.py /workspace/shield-team/enterprise-llm-security-framework/tests/test_p2_ollama_settings.py`
+- Exit status: 0 (`650 passed in 14.77s`)
+- Other nonzero test exits: NONE
+
+## Checklist Verification Summary
+1. `dev-val` holdout protection: PASS — `_dev_val_reference`, `_check_dev_val_working_set`, `_validate_manifest_table`, and `verify_dev_val_manifest` reject any `"holdout"` reference, symlink/junction, or non-6-file working set before opening or hashing any benchmark artifact. `_official_dev_val_metadata` reads only the JSON manifest table (`benchmark-v2-manifest.json`) without opening/hashing/globbing `datasets/v2` artifacts.
+2. Official/holdout gate preservation & capability separation: PASS — `VerifiedHoldoutAuthorization` and `_require_ollama_capability` remain strict and unrelaxed. `VerifiedDevValOllamaCapability` is minted via its own closure registry (`_build_dev_val_capability_system`) and is rejected by `_require_ollama_capability` and `load_authorized_holdout_benchmark`. Boolean/dict/copied/replaced objects fail closed.
+3. Ollama scope restriction & mixed-flag rejection: PASS — `preflight`, `main`, and `_verify_dev_val_claim_inputs` restrict `provider_id="ollama"` (without holdout authorization) strictly to `benchmark_mode="dev-val"` + `split="validation"`. `development+ollama` and un-authorized `official+ollama` fail closed before I/O. Combining `--holdout-authorization` with `--benchmark-mode dev-val`, `--benchmark-root`, `--split`, or validation flags fails in `_holdout_request_from_args` / `_holdout_analysis_request_from_args` before any dataset file is opened.
+4. Analyzer `dev-val` verifier routing: PASS — `analyze_results` uses `verify_dev_val_manifest(benchmark_path)` and `load_split_benchmark(..., benchmark_mode="dev-val")` when `benchmark_mode == "dev-val"`, never invoking the 9-file `verify_frozen_manifest`. The official analyzer path remains intact.
+5. Output identity & append-only validation ledger: PASS — Runner and analyzer artifacts (`result.json`, `result-manifest.json`, `analysis.json`, `analysis-manifest.json`, `analysis-table.csv`) bind `split="validation"`, `benchmark_mode="dev-val"`, `campaign_run_id`, distinct per-config `run_id`, and `validation_cap`. `scripts/v2_validation_ledger.py` enforces regular-file (`st_nlink == 1`, no symlinks/junctions), `mkdir` lock, hash-chained canonical JSONL records, append-only `O_WRONLY | O_APPEND` with `fsync`, and a hard cap of `MAX_VALIDATION_ATTEMPTS = 3` (claimed before worker execution and never rolled back on failure, blocking attempt 4). `mock` runs record `attempt=0, consumed=False, diagnostic_only=True` and reject `--validation-ledger`.
+6. APPROVAL-v6 thresholds: PASS — `_w3_validation_thresholds` evaluates `C0_all_on` against `C3_no_context` on the same validation matrix using exact integer cross-multiplication (`fpr_le_0_15`, `aomr_ge_c3`, `mismatch_le_0_20`, `coverage_eq_1`, `error_rate_le_0_05`). Keeps `official_aomr_threshold: 0.80` unchanged and sets `c0_aomr_below_0_80`, `an_decision_required_before_w5: True`, `decision: "PENDING_AN"`, and `automatic_w5_authorization: False` when AOMR < 0.80.
+7. Post-Claude fixes: PASS — `_ollama_provider_spec` still checks `active_settings.llm_provider != "ollama"` and calls `_validate_ollama_preclaim_environment(active_settings)` (covered by `test_ollama_provider_spec_keeps_settings_and_preclaim_checks`). Analyzer CLI `main` catches `runner.RunnerError` and prints `FAIL [{exc.code}]: {exc}` to `stderr` with exit code `1`.
+
+## Holdout-Safety Evidence
+- No holdout or validation case/label files were opened, read, hashed, or globbed during this review; `--holdout-authorization` and live Ollama were never invoked.
+- Automated test guards (`protected_io` in `tests/test_w14_dev_val_execution.py` and `_guard_against_opening_real_holdout` in `tests/test_v2_holdout_authorization.py`) intercept `builtins.open`, `io.open`, `Path.open`, `Path.glob`, `Path.rglob`, and `os.walk` to fail immediately on any read/hash/walk targeting `datasets/v2` or `holdout.jsonl`, as well as blocking socket/urlopen network calls.
+- All 650 synthetic tests executed purely against in-memory invented data from `tests/v2_synthetic_support.py` (`synthetic_benchmark`), leaving the git working tree at `796ae25f9779cba30c9be60f35af3e67a74d0450` completely clean.

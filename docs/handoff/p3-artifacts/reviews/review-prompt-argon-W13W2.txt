@@ -1,0 +1,23 @@
+Review W13 trên checkout local (coordinator tự dispatch; không gửi từ file này).
+
+Checkout: /workspace/shield-team/enterprise-llm-security-framework
+Không đụng /workspace/repo. Không push, không merge, không sửa code.
+Branch: feat/p3-rag-opt
+Commit cần review: 464218bd65191cf1b88ca180ec71e5ab7bd0effd
+Parent W13 gốc: 0c56e2816514f551c2b8c4a9b612d1a24f2ff24b
+Plan: PLAN-P3-v6 (sha256 45b5530264b4acd13d5792439f3514ac97cc74f8fb86321ade54534d12ce2c0e).
+
+Phạm vi: delta 464218b đóng P3W13-FIX-01 (pin digest + bảng 6 file vào official V2 metadata), P3W13-FIX-02 (--benchmark-root chỉ với --benchmark-mode dev-val), P3W13-NEW-01 (sửa doc lịch sử commit). Có thể git show 464218b hoặc đọc prompts/w13-464218b.patch.
+
+W2 chưa làm: thiếu official dev/val/corpus trên box (blocker W1). Không sửa context-guard. Không chạy val.
+
+Cấm: không mở cases/holdout.jsonl, labels/holdout.jsonl, result.json, log Ollama, ID case holdout (chỉ kiểm path/tên). Không bypass, không nâng Ollama. Official manifest metadata (hash/size) được đọc.
+
+Test coordinator (synthetic): test_v2_dev_val_manifest.py 79 passed; regression chọn lọc 138 passed; tổng 217 passed, 0 failed.
+
+Review đã có (tham khảo, không thay review của bạn):
+- review-claude-w13-fixes.md: PASS; FIX-01/FIX-02/NEW-01 = CLOSED/PASS; không issue mới chặn.
+- review-muse-w13-fixes.md: PASS; 3/3 CLOSED/PASS; không issue mới.
+
+Viết /workspace/deliverables/shield-phase3-rag-opt-20261111/review-argon-W13W2.txt
+Gồm: Verdict PASS/FAIL; trạng thái từng ID P3W13-FIX-01, FIX-02, NEW-01; issue mới nếu có; xác nhận không đọc holdout / official 9-file không bị nới; ghi chú không chặn.

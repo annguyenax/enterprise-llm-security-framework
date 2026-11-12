@@ -1,0 +1,25 @@
+Review W2e trên checkout local (coordinator tự dispatch). Tự ghi kết quả vào:
+/workspace/deliverables/shield-phase3-rag-opt-20261111/review-argon-W2e.txt
+
+Checkout: /workspace/shield-team/enterprise-llm-security-framework
+Không đụng /workspace/repo. Không push, không merge, không sửa code.
+Branch local: feat-p3-rag-opt.
+Commit W2e H3b+H4: bbb78f3318c09f44847d952027e1fe895ccb5d98
+Parent: 40e44619646733f1ef5f1c57974e34b2ead07db7
+Diff: prompts/w2e-bbb78f3.patch
+Báo cáo thí nghiệm: w2e/w2e-results.md ; patch hẹp hơn (đạt cửa, không ship riêng): w2e/h3b.patch
+
+An (11:09 12/11/2026 Asia/Saigon, widget t102s541): "Cho đội cải thiện tiếp tỷ lệ chặn đúng trên dev". Vẫn không chạy val.
+
+W2e mở rộng H1 (nguyên tắc chung, không sửa theo case): nếu bằng chứng tốt nhất (hoặc hòa) bị BLOCK, hoặc SANITIZE emptied, hoặc HUMAN_REVIEW, thì fail-closed cả truy vấn (block / all_context_blocked). Exclusion yếu hơn survivor không veto.
+- H3b+H4 (đã commit): C0 MOCK in-sample AOMR 10/14→12/14 (đổi 0021, 0018), FPR giữ 1/12 (FP 0011). Mixed 0025–0028 vẫn allow/allowed. C3/C6/C7 không đổi.
+- H3b riêng: chỉ đổi 0021, AOMR 11/14, FPR 1/12; không ship riêng vì H3b+H4 đạt cửa.
+- 0014: trần hợp lý dưới ràng buộc FPR (fold mọi emptied sẽ làm 0012 thành FP). 0019: lỗi soạn corpus đóng băng, không sửa.
+
+Tests coordinator trên H3b+H4: 156 related (test_rag_pipeline + test_sqlite_bm25 + test_rag_guard) + 349 bộ rộng hơn (thêm guard/ingestion/routes) + 79 W13 passed. Nếu lúc review có lệnh test bị lỗi, đừng lấy test của Argon làm bằng chứng; bằng chứng là bộ của coordinator.
+
+Codex/Muse PASS, không P3W2E-FIX/BLOCK/NEW. Ghi chú không chặn: overfit n_M=14; H4 cố ý biến best HUMAN_REVIEW thành block/all_context_blocked chứ không phải final human_review.
+
+Cấm: val, holdout, cases/validation.jsonl, /workspace/work/W1, /workspace/work/W2, tắt lớp, bypass, nâng Ollama.
+
+Trong review-argon-W2e.txt ghi: Verdict PASS hoặc FIX; trạng thái theo ID (P3W2E-FIX/BLOCK/NEW); xác nhận không tắt lớp / FPR không tăng / không overfit từng case; ghi chú không chặn.

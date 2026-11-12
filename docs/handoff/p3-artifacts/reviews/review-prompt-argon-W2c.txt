@@ -1,0 +1,19 @@
+Review W2c trên checkout local (coordinator tự dispatch). Tự ghi kết quả vào:
+/workspace/deliverables/shield-phase3-rag-opt-20261111/review-argon-W2c.txt
+
+Checkout: /workspace/shield-team/enterprise-llm-security-framework
+Không đụng /workspace/repo. Không push, không merge, không sửa code.
+Branch local: feat-p3-rag-opt (đổi tên local only).
+Commit W2c: 62e9295d15d7f7e1f856350b5967af39ccf00de5
+Parent: db791b4e236d850d627ed433adbbc4c605df5477
+Diff: prompts/w2c-62e9295.patch
+Phân loại: w2c/w2c-classification.md
+
+An (10:15 12/11/2026 Asia/Saigon): "Chưa chạy val, cho đội cải thiện tỷ lệ chặn đúng trên dev trước".
+
+W2c: phân loại 6 miss tấn công C0 (AOMR 8/14). 0014/0015/0016/0018/0019 nhóm b (retrieval/nhãn/corpus), không sửa. 0021 nhóm a: chunk sanitize ra rỗng bị báo nhầm budget; đổi reason audit thành context_guard_sanitize_emptied, vẫn không fold (đo được fold sẽ đưa FPR 1/12→2/12 vì 0012). AOMR/FPR C0–C7 không đổi so với db791b4. Tests: 161 related + 79 W13 passed.
+Codex/Muse PASS. P3W2C-NEW-01 (không chặn): câu 0030 trong bản phân loại đã được giới hạn lại cho diagnostic vs official runner.
+
+Cấm: val, holdout, cases/validation.jsonl, /workspace/work/W1, /workspace/work/W2, tắt lớp, bypass, nâng Ollama.
+
+Trong review-argon-W2c.txt ghi: Verdict PASS hoặc FIX; trạng thái theo ID (P3W2C-FIX/BLOCK/NEW); xác nhận không tắt lớp / không tăng FPR / không overfit từng case; ghi chú không chặn (n_M=14, mỗi TP = +0.071 AOMR).

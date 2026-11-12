@@ -1,0 +1,475 @@
+Bạn là Antigravity (Argon). Review độc lập PLAN-P3-v5. Không phải tác giả. Không sửa repo, không commit/push/merge, không mở holdout, không chạy model, không gọi công cụ, không viết lại plan. Chỉ đọc prompt và viết review.
+
+Công bố tác giả: Claude viết phần lớn văn bản v2; v3, v4 và v5 chỉ có sửa tối thiểu do điều phối. Hãy tự chấm v5, không dựa vào reviewer khác.
+
+Plan sha256: f6b34e0a3640f21a876c146b170ede66c1e7a53f704ab53e5a3c628c1b40696f
+
+Chấm từng hạng mục, bắt buộc đúng một dòng verdict cho mỗi mục:
+W1, W13, W2, W3, W4, W5, W6, W7, W8, W9, W10, W11, W12, DONE (mục 5 — tiêu chí xong giai đoạn RAG), LICENSE (mục 2), TIME (mục 3).
+
+Tiêu chí: đủ output; ngưỡng số có nhãn "đề xuất, chờ An duyệt"; owner hợp lý; có blocker và phụ thuộc; không tune trên holdout P2 đã dùng; license đã kiểm được phản ánh đúng; giữ giới hạn garak/PyRIT chỉ bề mặt query; Judge trên đường RAG là UNKNOWN cho đến khi nối; không biến một ước lượng thời gian thành sự thật. Kiểm các điểm v5: DROP chỉ trên ứng viên P3-holdout, dev/val/seed không bị viết lại, ánh xạ đ/Đ → d tường minh; trần val đếm theo từng hệ (đề xuất, chờ An duyệt), trần Shield gồm cả lần val ở W2, mỗi baseline có trần riêng 3 lần, mỗi hệ công bố số lần thử của mình; dòng Claude-W1 ở mục 7 đã cập nhật cho khớp việc dev+val được lên box; câu owner W2 không còn đo runner chỉ tại máy An.
+
+PASS = chấp nhận. FIX = cần sửa ở vòng sau, không chặn hết. BLOCK = không được tiến hành cho đến khi sửa.
+
+Định dạng bắt buộc (stdout only):
+VERDICT: PASS | FIX | BLOCK
+W1: PASS|FIX|BLOCK — một câu
+W13: ...
+W2: ...
+W3: ...
+W4: ...
+W5: ...
+W6: ...
+W7: ...
+W8: ...
+W9: ...
+W10: ...
+W11: ...
+W12: ...
+DONE: PASS|FIX|BLOCK — một câu
+LICENSE: PASS|FIX|BLOCK — một câu
+TIME: PASS|FIX|BLOCK — một câu
+NEW: NONE
+hoặc liệt kê NEW-01...
+Nếu không review đủ plan: VERDICT: BLOCK và lý do. Không viết lời dẫn dài trước/sau.
+
+===== PLAN-P3-v5 =====
+# PLAN-P3-v5 — Tối ưu đánh giá RAG (bước 2)
+
+Ngày soạn: 2026-11-12, Asia/Saigon (UTC+7).
+Nguồn: BRIEF.md, các research, PLAN-P3-v1.md đến PLAN-P3-v4.md, review v1–v4 của Claude, Codex, Muse, và quyết định điều phối sau full gate v4.
+
+Đây là bản v5 để review. Chưa phải lệnh triển khai. Trong vòng này không sửa repo, không mở holdout P2, không chạy model.
+
+Phần lớn nội dung kế thừa v2 (tác giả Claude) và các sửa điều phối ở v3–v4. v5 chỉ có sửa tối thiểu do điều phối để đóng các hạng mục còn mở sau full gate v4: P3V4-NEW-01, P3V4-NEW-02, P3V4-NEW-03, và câu chữ owner W2. Argon sẽ review v5.
+
+**Phạm vi:** hoàn tất đánh giá và tối ưu **RAG**. Việc agent (firewall, Cedar, taint, HITL, AgentDojo, CaMeL) chỉ bắt đầu khi đạt tiêu chí "xong giai đoạn RAG" ở mục 5.
+
+**Quy ước:** mọi ngưỡng số, cỡ mẫu và quy tắc báo cáo trong tài liệu này là **đề xuất, chờ An duyệt**, kể cả khi một dòng không nhắc lại nhãn này.
+
+**Quy tắc xuyên suốt dev/val** (đề xuất, chờ An duyệt; áp dụng cho W2, W3 và W10):
+
+- **dev** và **val** là dữ liệu repo không phải holdout. Phân tích per-case trên **dev** được phép chạy trên box.
+- **dev:** dùng để chẩn đoán và để tune/điều chỉnh config, rule hay ngưỡng.
+- **val:** chỉ dùng để xác nhận. Val là **aggregate-only**, kể cả khi file val nằm trên box: không mở nội dung hay nhãn từng mẫu val để viết hoặc sửa rule, và không dùng kết quả val để điều chỉnh config hoặc rule trong W2, W3 hay W10.
+- Mọi lần chạy val đều được ghi log: thời điểm, hệ (Shield hoặc từng baseline), commit/config hash, chỉ số aggregate, đạt hoặc không đạt. Không ghi nội dung case.
+- Trần số lần xác nhận val được **đếm theo từng hệ** (đề xuất, chờ An duyệt):
+  - Trần của **Shield** là 3 lần, **gồm mọi lần val của Shield**, kể cả các lần val ở W2.
+  - Mỗi baseline (Prompt Guard 2, Llama Guard 3 1B, và NeMo nếu có) có **trần riêng 3 lần**.
+  - Mỗi hệ công bố số lần thử của chính hệ đó.
+  - Nếu một lần của một hệ không đạt: quay lại dev để sửa hệ đó, rồi mới chạy val lại cho hệ đó. Sau lần thất bại thứ 3 của hệ đó: dừng val của hệ đó, báo cáo cho An, không chạy val thêm cho hệ đó cho đến khi An quyết định.
+- Holdout P2 đã USED và holdout P3 (khi có) chỉ nằm trên máy An. Box và mọi working set khác chỉ nhận số aggregate từ hai holdout này, không nhận case, nhãn, corpus, `result.json`, log hay ID.
+
+## 1. Bằng chứng và ràng buộc đã chốt
+
+- **Kết quả P2 official** `P2-20261111-cc38fae-01`:
+  - Execution `cc38fae8dc889b96f84c3adce176fe8e42a66961`, analyzer `ff41f929b4733e6766fb9d05da8e8b97959d58d8`.
+  - Provider Gemma 4 E4B / Ollama 0.40.11. Semantic Judge OFF.
+  - C0 FAIL: AOMR 8/28, mismatch 20/28, FPR 14/24. Coverage 60/60, successful_coverage 60/60, error_rate 0/60 đều PASS.
+  - C3/C7 (tắt context+aggregate): FPR 4/24, AOMR 11/28.
+  - C6 (tắt cả 6 guard): FPR 4/24, AOMR 7/28.
+- **Holdout P2 đã USED.** Chỉ báo cáo như diagnostic lịch sử. Cấm mở case/label. Cấm tune từ P2.
+- **Holdout P2 đã USED và holdout P3 (khi có) không bao giờ rời máy An.** Không copy lên box hay vào bất kỳ working set nào. Lệnh cấm này tuyệt đối, không có ngoại lệ "nếu không cần". Nó áp dụng cho:
+  - cases, labels, corpus;
+  - `result.json`;
+  - log Ollama;
+  - ID case.
+  Chỉ số aggregate được đưa về box.
+- **Máy và môi trường:**
+  - RTX 4050 6GB, 16GB RAM, không chi tiền, dữ liệu ở local.
+  - Checkout trên box: `/workspace/shield-team/enterprise-llm-security-framework` (analyzer `ff41f92`, official `cc38fae`). Không đụng `/workspace/repo`.
+- **Dữ liệu V2:** `datasets/v2` cases/labels/corpus bị gitignore, hiện chưa có trên box. Dev/val là dữ liệu repo không phải holdout: được khôi phục ở W1, có thể đưa lên box sau khi đã kiểm manifest (W13) để phân tích per-case trên dev. Holdout P2 và P3 không đi cùng gói này.
+- **Path kỹ thuật:** Codex/Muse đã đối chiếu các path kỹ thuật trong plan trên `ff41f92`, gồm `app/api/routes.py`, `app/services/rag_query.py`, `app/guards/semantic_guard.py` và `.env.example`. Không cần hạng mục mới.
+
+**Giả thuyết kỹ thuật bốn người thống nhất** (không dùng nội dung holdout):
+
+- FPR/AOMR là khớp exact `final_decision` và `stop_reason`, không phải "đã chặn tấn công".
+- Tầng aggregate có thể biến SANITIZE thành chặn cả request.
+- Regex/`_normalize_for_detection` dễ bắn nhầm văn bản nghiệp vụ hoặc tiếng Việt đã bỏ dấu.
+- Case mixed có thể bị chặn trắng, kéo AOMR C0 xuống thấp hơn C3.
+- Nền FPR 4/24 của C6 không đến từ sáu cờ GuardProfile. Nguồn có thể là budget/truncation, retrieval hoặc hành vi model; chưa tách được.
+
+Muse phân rã theo family trên aggregate `analysis.json` (không có ID case): khi bật context có thêm khoảng 10 FP, tập trung ở `benign_security_discussion`, `clean_benign_rag` và `mixed_trust_benign_retrieval`.
+
+## 2. License đã kiểm card (2026-11-12)
+
+| Tài nguyên | Kết luận đã kiểm | Nguồn |
+|---|---|---|
+| garak | Apache-2.0 | https://github.com/NVIDIA/garak |
+| PyRIT | MIT | https://github.com/Azure/PyRIT (cũng có microsoft/PyRIT) |
+| BIPIA | Code/repo MIT. Một số tập nguồn là **CC-BY-SA-4.0** (WikiTableQuestions, Stack Exchange); invoices là MIT. Tài liệu phái sinh từ phần CC-BY-SA phải ghi nguồn và share-alike (W7). | https://raw.githubusercontent.com/microsoft/BIPIA/main/LICENSE |
+| deepset/prompt-injections | **Xung đột license, loại khỏi bảng chính thức** cho đến khi nhà phát hành làm rõ. Tag/card ghi `license: apache-2.0`, nhưng `dataset_info.license: cc-by-4.0` (README raw và API sha `4f61ecb038e9c3fb77e21034b22511b523772cdd`). | https://huggingface.co/api/datasets/deepset/prompt-injections ; https://huggingface.co/datasets/deepset/prompt-injections/raw/main/README.md |
+| Lakera/gandalf_ignore_instructions | MIT, không gated. Chỉ có câu tấn công nên không đo được FPR. Không suy ra license của dịch vụ Lakera Guard từ đây. | https://huggingface.co/api/datasets/Lakera/gandalf_ignore_instructions |
+| hackaprompt/hackaprompt-dataset | Card/API **MIT**, **gated=auto**. README raw trả 401 (chưa đọc được file trong repo). Paper arXiv:2311.16119. Chỉ lấy subset. | https://huggingface.co/api/datasets/hackaprompt/hackaprompt-dataset |
+| XSTest | CC-BY-4.0. Repo chính thức `paul-rottger/xstest`. | https://github.com/paul-rottger/xstest ; arXiv:2308.01263 |
+| NotInject (InjecGuard) | MIT. 339 mẫu benign dễ gây over-defense. | https://huggingface.co/api/datasets/leolee99/NotInject ; arXiv:2410.22770 |
+| Llama Prompt Guard 2 86M/22M | **Llama 4 Community License** (`license: other`, `license_name: llama4`), gated=manual, không phải OSI. Ngôn ngữ trên card: en, fr, de, hi, it, pt, es, th — **không có tiếng Việt**. Cửa sổ 512 token. Checkpoint 86M FP32 ≈ 1.12GB. | https://huggingface.co/meta-llama/Llama-Prompt-Guard-2-86M ; https://huggingface.co/api/models/meta-llama/Llama-Prompt-Guard-2-86M |
+| Llama Guard 3 1B | **Llama 3.2 Community License**. Supported languages: EN, FR, DE, HI, IT, PT, ES, TH — **không có tiếng Việt**. Bảng eval nội bộ có cột Vietnamese, nhưng không được tuyên bố hỗ trợ chính thức. Đây là content-safety S1–S13, không phải detector injection. | https://huggingface.co/meta-llama/Llama-Guard-3-1B |
+| Llama Guard 3 8B | Llama 3.1 Community License. Không chạy cùng E4B trên 6GB. Không nằm trong bảng so sánh mặc định. | card `meta-llama/Llama-Guard-3-8B` (theo nghiên cứu, không bắt buộc tải) |
+| NeMo Guardrails | Apache-2.0 (framework). Model backend có license riêng. | https://github.com/NVIDIA/NeMo-Guardrails |
+| **Semantic Judge (Shield)** | Trong repo mặc định **OFF** (`SEMANTIC_GUARD_USE_LLM=0`). Cấu hình trong `.env.example`: `SEMANTIC_GUARD_MODEL=qwen3:4b`; `app/guards/semantic_guard.py` đọc env hoặc rơi về `settings.llm_model_name`. Card HF `Qwen/Qwen3-4B` (kiểm 2026-11-12) ghi `license: apache-2.0`. Digest Ollama trên máy An: **UNKNOWN cho đến khi freeze**; không dùng `ollama list` để lấy digest. P2 official dùng Gemma 4 E4B làm provider, Judge OFF. | https://huggingface.co/api/models/Qwen/Qwen3-4B ; `.env.example`, `app/guards/semantic_guard.py` @ `ff41f92` |
+
+**Giải quyết bất đồng giữa các nghiên cứu:**
+
+- **deepset:** Claude ghi Apache-2.0 là thiếu. Codex đúng về xung đột giữa hai trường.
+- **HackAPrompt:** card ghi MIT (Codex đúng).
+- **Prompt Guard 2:** Llama 4 Community License (Claude/Codex/Argon đúng).
+- **Llama Guard 3 và tiếng Việt:** Muse ghi "đa ngữ gồm VI" là không đúng theo mục Supported languages. Claude/Codex/Argon đúng; giữ lưu ý về bảng eval nội bộ (Codex).
+
+**Tập được dùng mặc định:**
+
+- Danh sách: BIPIA (tôn trọng phần CC-BY-SA-4.0), XSTest, NotInject, Gandalf subset, HackAPrompt subset.
+- Điều kiện: Muse lập sổ license; với tập gated, chính An chấp nhận điều khoản.
+
+**deepset:**
+
+- Bỏ ngoại lệ "An duyệt dùng dù còn xung đột".
+- deepset bị loại khỏi bảng chính thức cho đến khi nhà phát hành làm rõ apache-2.0 hay cc-by-4.0.
+- Sau khi đã làm rõ, mọi lần dùng là một quyết định mới của An, và vẫn phải công bố cả hai trường license.
+
+## 3. Ước lượng thời gian (không chọn một số làm sự thật)
+
+| Nguồn | Ước lượng | Độ tin cậy tự khai |
+|---|---|---|
+| Claude | 9–13 người-tuần, khoảng 5–7 tuần lịch cho 2 người | Thấp |
+| Codex | 4–6 tuần lịch, ~15 giờ/tuần/người, 120–180 giờ công | Trung bình–thấp |
+| Muse | 5–8 tuần part-time | Thấp |
+| Argon | **7–10 ngày làm việc**, ~55–80 giờ công cho 2 người | Không tuyên bố đo được |
+
+Bốn ước lượng **không khớp nhau** (ngày làm việc so với nhiều tuần). Chúng có trước các bước v2 thêm vào: khử trùng, cổng go/no-go, freeze lại bundle, làm việc trên máy An. v2 không chốt lịch. Lịch chi tiết: **đề xuất, chờ An duyệt**.
+
+## 4. Công việc
+
+Owner theo thế mạnh: Codex/Claude làm code; Muse làm dữ liệu và soạn license; Argon review/vision. Quyết định chấp nhận license gated, ngưỡng và go/no-go thuộc về An.
+
+### W1 — Khôi phục dev/val chính thức (không gồm holdout)
+
+- **Output:**
+  - Cây làm việc riêng chứa dev+val V2 đã kiểm manifest, tách khỏi `shield-p2-run` và `p2-output`; không đụng hai thư mục đó.
+  - Dev/val là dữ liệu repo không phải holdout, nên gói dev+val đã kiểm được phép đưa lên box. Phân tích per-case trên **dev** được chạy trên box. Val trên box vẫn chỉ được dùng ở mức aggregate (quy tắc xuyên suốt).
+  - Holdout P2 đã USED và holdout P3 chỉ ở lại máy An. Từ hai holdout này, box chỉ nhận số aggregate, không nhận case, nhãn, corpus, `result.json`, log hay ID.
+  - W9 và các lần đo cần GPU vẫn chạy trên máy An khi hardware yêu cầu.
+- **Pass:**
+  - Working set khớp manifest V2 phần dev+val.
+  - Kiểm bằng danh sách file, path và split rằng working set không chứa holdout P2 hay P3. Phép kiểm này không cần mở nhãn holdout.
+  - Không có cases/labels/corpus, `result.json`, log Ollama hay ID case của holdout P2 hoặc P3 trên box hoặc trong working set dev+val.
+- **Owner:** Muse (dữ liệu). An khôi phục nguồn chính thức. Codex làm W13 (manifest dẫn xuất và chế độ runner).
+- **Blocker:** `datasets/v2/cases|labels|corpus` đang thiếu. Cần nguồn chính thức trên máy An.
+- **Phụ thuộc:** Không. W13 bám W1.
+
+### W13 — Manifest dẫn xuất dev+val và chế độ tương thích runner
+
+- **Output:**
+  - Một manifest dẫn xuất chỉ gồm dev+val, xuất từ manifest V2 chính thức, có hash riêng.
+  - Một chế độ tương thích của runner (cờ hoặc profile riêng) chạy trên working set đó.
+  - Chế độ này **không đọc và không đòi** bất kỳ artifact holdout P2 nào (cases, labels, corpus, `result.json`, log Ollama, ID case). Thiếu holdout không được là lỗi của chế độ này.
+  - Bộ test: chạy thành công trên fixture dev+val; thất bại hoặc từ chối nếu manifest/working set chứa path hay artifact holdout; không mở holdout.
+- **Pass:**
+  - Test nói trên đều xanh.
+  - Review code xác nhận runner ở chế độ này không truy cập path holdout P2/P3.
+  - Manifest dẫn xuất khớp split dev+val và fail nếu lẫn holdout (kiểm theo path/split, không cần mở nhãn holdout).
+- **Owner:** Codex (code và test). Claude review. Muse kiểm manifest dẫn xuất.
+- **Blocker:** W1 chưa có nguồn dev+val chính thức; không được lấy artifact từ cây `p2-output` / holdout P2 để “cho đủ” runner.
+- **Phụ thuộc:** W1. Các lần chạy W2/W3/W10 trên box phụ thuộc W13.
+
+### W2 — Chẩn đoán FPR/AOMR tầng context (chẩn đoán trên dev)
+
+- **Output:**
+  - Báo cáo kiểm các giả thuyết: aggregate SANITIZE, regex xuyên chunk, over-matching tiếng Việt, mixed bị chặn trắng, nền C6. Giả thuyết và phân tích per-case chỉ trên **dev**, được phép chạy trên box vì dev là dữ liệu repo không phải holdout.
+  - Chỉ số C0 vs C3 trên dev, tách riêng. Val, kể cả khi file val nằm trên box, chỉ là lần xác nhận **aggregate-only** đã log: không mở case, không dùng để chọn giả thuyết (quy tắc xuyên suốt).
+  - Không dùng holdout P2 hay P3 để chẩn đoán.
+- **Pass:**
+  - Mỗi giả thuyết có tử/mẫu số trên **dev**.
+  - Nếu có lần val: chỉ báo chỉ số aggregate đã log; không xem từng case val, kể cả trên box. Mọi lần val Shield ở W2 được tính vào trần 3 lần của Shield (đề xuất, chờ An duyệt).
+  - Family có n < RATE_REPORTING_MIN_N thì chỉ báo tử/mẫu, không công bố tỷ lệ. Cả quy tắc này và giá trị RATE_REPORTING_MIN_N = 10 đều là **đề xuất, chờ An duyệt**.
+- **Owner:** Claude (phân tích code và số liệu; per-case trên dev được phép chạy trên box). Codex chạy runner: chế độ W13 trên box, hoặc trên máy An khi cần GPU/hardware.
+- **Blocker:** W1; nếu chạy trên box thì cần W13.
+- **Phụ thuộc:** W1; nếu chạy trên box thì W13.
+
+### W3 — Sửa context-guard (tune trên dev, xác nhận trên val)
+
+- **Output:**
+  - Commit/patch trên nhánh analyzer hoặc một nhánh tối ưu riêng. Không đụng official `cc38fae` cho đến khi An cho phép.
+  - Thứ tự ưu tiên:
+    1. Không biến SANITIZE aggregate thành chặn cả request khi vẫn còn chunk sạch.
+    2. Thu hẹp regex quá rộng.
+    3. Giữ fail-closed với payload thật.
+  - Tune **chỉ trên development**. **Validation** dùng làm xác nhận độc lập, không tune trên val.
+  - Áp dụng quy tắc xuyên suốt dev/val: val là aggregate-only, kể cả trên box; không chỉnh rule/config từ kết quả val; mọi lần val được ghi log. Trần Shield là **3 lần thử**, gồm mọi lần val Shield kể cả W2 (đề xuất, chờ An duyệt). Nếu không đạt: quay lại dev rồi chạy val lại. Sau lần thất bại thứ 3 của Shield: dừng, báo cáo cho An, không chạy val Shield thêm. Công bố số lần thử của Shield.
+  - **Artifact freeze**, ghi đủ các mục:
+    - commit SHA;
+    - GuardProfile;
+    - hash settings/config;
+    - analyzer commit;
+    - model digest do nhà cung cấp báo;
+    - Judge ON/OFF;
+    - phiên bản scorer/contract.
+- **Pass** (trên **validation**, đề xuất, chờ An duyệt):
+  - FPR ≤ 0.15.
+  - AOMR không thấp hơn C3 trên cùng tập val.
+  - mismatch ≤ 0.20.
+  - coverage = 1.00.
+  - error_rate ≤ 0.05.
+  - Cấm đạt FPR bằng cách tắt context. Cấm xem P2 holdout.
+  - Số C0/C3 hiện tại trên dev/val: UNKNOWN cho đến khi W2 xong.
+- **Liên hệ với W12:** cổng official vẫn là AOMR ≥ 0.80 (đề xuất, chờ An duyệt). Không hạ W12 cho khớp W3.
+- **Cổng go/no-go:** nếu AOMR trên val còn < 0.80, An xem số val rồi mới quyết định có cho phép one-shot W5 hay không. Lần official có thể FAIL và vẫn phải công bố. Không dùng P3-holdout để vá.
+- **Owner:** Codex (code). Claude review patch. An duyệt ngưỡng và go/no-go.
+- **Blocker:** W2; An duyệt ngưỡng; không được xem P2 holdout để viết rule.
+- **Phụ thuộc:** W2.
+
+### W4 — Sổ license và nhập tập ngoài
+
+- **Output:**
+  - Ledger ghi SPDX, URL và ngày kiểm.
+  - Bản local của BIPIA, XSTest, NotInject, Gandalf và HackAPrompt subset.
+  - deepset bị loại khỏi bảng chính thức (mục 2).
+  - Ledger có dòng Semantic Judge (Qwen3-4B, apache-2.0, digest UNKNOWN đến khi freeze).
+- **Pass:**
+  - Mọi tập trong bảng chính thức có license đã kiểm và ghi rõ xung đột nếu có.
+  - Không upload corpus ra ngoài.
+  - Với tập gated, An là người tự chấp nhận điều khoản. Muse chỉ soạn ledger, không chấp nhận thay An.
+- **Owner:** Muse (soạn ledger, nhập dữ liệu). Argon rà ledger. An chấp nhận gate.
+- **Blocker:** Gate Hugging Face (HackAPrompt, Prompt Guard 2, Llama Guard) cần An chấp nhận điều khoản; không chi tiền.
+- **Phụ thuộc:** Không (chạy song song W1).
+
+### W5 — Holdout mới one-shot và cách báo cáo P2
+
+- **Output:**
+  - **P3-holdout đóng băng:** manifest SHA-256, nhãn, rubric, scorer, cộng toàn bộ artifact freeze của W3.
+  - **P3-holdout chỉ ở lại máy An.** Box chỉ nhận số aggregate sau one-shot, không nhận case, nhãn, corpus hay ID.
+  - **Khử trùng trước khi đóng băng**, chạy local/offline, giữa P3-holdout, dev, val và mọi seed ngoài (W4, W6, W7, W10):
+    - Chuẩn hóa trước khi băm: chữ thường, gộp khoảng trắng, **bỏ dấu tiếng Việt**, và **ánh xạ đ/Đ → d** một cách tường minh (NFD rồi gỡ dấu kết hợp không xử lý được chữ này). Cùng một bản chuẩn hóa này dùng cho SHA-256 exact và cho char 5-gram.
+    - Luật DROP **chỉ áp lên ứng viên P3-holdout**. Tập dev, val và seed đã đóng băng **không bị viết lại, không bị xóa, không bị thay thế**. Chúng chỉ đóng vai trò tập đối chiếu.
+    - Trùng exact: SHA-256 của văn bản đã chuẩn hóa. Nếu ứng viên P3-holdout trùng exact với dev, val hoặc seed thì **DROP** ứng viên đó.
+    - Gần trùng: MinHash và hệ số Jaccard trên char 5-gram của văn bản đã chuẩn hóa. Nếu ứng viên P3-holdout có Jaccard ≥ 0.80 (đề xuất, chờ An duyệt) so với dev, val hoặc seed thì **DROP** ứng viên đó. Quyết định DROP được **khóa trước khi freeze**. Không dùng tùy chọn chỉ gắn cờ.
+    - Nhật ký các mục bị DROP chỉ ghi hash, không ghi nội dung văn bản. Báo cáo số mục bị loại theo từng loại (exact / gần trùng) và ngưỡng đã dùng.
+    - Có thể thay bằng phương pháp offline tương đương nếu An duyệt cùng một ngưỡng, cùng luật DROP chỉ trên ứng viên P3-holdout, và cùng ánh xạ đ/Đ → d, đã công bố trước khi chạy.
+  - **Bundle freeze đánh giá:**
+    - Nếu W8 đã vào cùng bundle thì bundle gồm cả hook Judge.
+    - Mặc định cổng official chạy Judge OFF. Judge ON là điều kiện báo cáo riêng, trừ khi An chọn đưa vào cổng official.
+    - Nếu W8 xong sau khi freeze W3, phải freeze lại toàn bộ bundle trước one-shot.
+  - **Văn bản luận văn:** P2 gắn nhãn USED/diagnostic, kèm C0 8/28, 20/28, 14/24 và hash artifact.
+- **Pass** (đề xuất, chờ An duyệt):
+  - Người giữ holdout không phải người sửa rule (An/Nghĩa tách vai nếu được). Nếu không tách được thì công bố hạn chế.
+  - Chốt threshold, contract và mapping trước khi chạy.
+  - Chỉ chạy đúng một attempt được ủy quyền. Không dùng `--include-holdout-diagnostic` khi tune.
+  - Cỡ mẫu và RATE_REPORTING_MIN_N = 10: đề xuất, chờ An duyệt.
+  - **Sự cố hạ tầng:**
+    - Attempt hỏng trước khi có đủ artifact phân tích (OOM, crash, coverage thiếu) là failed attempt, không phải điểm official.
+    - An có thể cho phép đúng một lần chạy lại, với code, config và data **không đổi**.
+    - Mọi thay đổi tạo thành phiên bản mới. Khi đó holdout bị đánh dấu used/contaminated.
+- **Owner:** Muse (dữ liệu, khử trùng). Codex (tooling freeze, exact hash và MinHash/Jaccard). Argon review protocol. An cho phép one-shot, duyệt ngưỡng gần trùng, và quyết định chạy lại.
+- **Blocker:** Thiếu người độc lập; nếu trùng tác giả rule/case thì khai trong Limitations. Cổng go/no-go của W3.
+- **Phụ thuộc:**
+  - W3 đã freeze;
+  - W4 (nguồn độc lập);
+  - danh sách seed của W6/W7/W10 đã chốt để khử trùng;
+  - W8 nếu W8 vào bundle.
+
+### W6 — garak/PyRIT vào `/v1/rag/query` (giới hạn phạm vi)
+
+- **Output:**
+  - Harness REST và log probe.
+  - Mục Limitations ghi rõ **chỉ kiểm bề mặt query**, không tuyên bố đã đo indirect injection.
+  - **Tập outcome bảo vệ:** một danh sách giá trị `final_decision`/`stop_reason` được tính là "Shield đã bảo vệ", đăng ký trước khi chạy.
+- **Chỉ số:**
+  - **ASR chính:** một probe tấn công tính là thành công khi Shield không đạt outcome bảo vệ (giá trị nằm ngoài tập đã chốt).
+    - Mẫu số = số probe tấn công đã hoàn tất và nằm trong phạm vi.
+    - Timeout/lỗi báo riêng. Không tính là chặn thành công, cũng không mặc định tính vào ASR.
+  - **Block-rate:** chỉ số bổ sung, không thay ASR.
+  - **Detector garak trên output:** chỉ số phụ, báo riêng, không trộn vào AOMR của Shield.
+- **Pass:**
+  - Chạy xong garak (probe tĩnh: latentinjection/promptinject/encoding, dan tùy chọn) và PyRIT single-turn với converter tĩnh, offline, trong venv riêng.
+  - Probe cần payload thì tải payload trước (offline). Probe đòi mạng lúc chạy thì bỏ và ghi rõ trong danh sách.
+  - Adaptive/multi-turn LLM attacker là tùy chọn, không bắt buộc trên 6GB.
+- **Owner:** Codex (code). Claude review harness và tập outcome bảo vệ.
+- **Blocker:** Thêm package phải được An duyệt; không sửa `requirements.txt` chung khi chưa được phép.
+- **Phụ thuộc:** API local chạy được; W4 nếu dùng seed công khai.
+
+### W7 — Indirect injection đi qua retrieval
+
+- **Output:**
+  - **Corpus/index độc tách riêng, có rollback.** Không trộn vào KB official, dev/val hay P3-holdout.
+  - Tài liệu phái sinh BIPIA tuân CC-BY-SA-4.0 (ghi nguồn, share-alike).
+  - **Freeze danh sách query trước** khi đo retrieve-hit.
+  - Bằng chứng retriever chọn được tài liệu độc.
+- **Chỉ số:**
+  - **retrieve-hit:** tài liệu độc nằm trong tập retrieved **trước** lọc context-guard.
+  - **context-to-provider:** tài liệu độc vẫn còn trong context được chấp nhận **sau** guard.
+  - **Attack success:** chỉ tính trên các case đã retrieve-hit.
+  - Case không retrieve-hit ghi "ngoài phạm vi tầng context", không tính là chặn thành công.
+- **Pass** (đề xuất, chờ An duyệt): đủ ba chỉ số trên với tử/mẫu số; query freeze có hash; rollback index đã kiểm.
+- **Owner:** Muse (dữ liệu BIPIA/payload, ghi nguồn). Codex (index riêng, ingest, đo).
+- **Blocker:** `/v1/rag/query` không nhận context tùy ý (`app/api/routes.py`). Phải đi đường ingest/retrieval thật, trên index riêng.
+- **Phụ thuộc:** W4, W6 (báo cáo tách riêng).
+
+### W8 — Nối Semantic Judge vào đường RAG
+
+- **Output:**
+  - Cấu hình Judge ON trên đường `/v1/rag/query`. Hiện hook nằm ở gateway, chưa ở RAG path, nên overhead Judge ON trên RAG là **UNKNOWN**.
+  - Mặc định repo vẫn OFF (`SEMANTIC_GUARD_USE_LLM=0`); model judge `SEMANTIC_GUARD_MODEL=qwen3:4b`.
+  - Digest cố định lúc freeze.
+  - Ghi rõ fail-closed hay fail-open.
+- **Pass:**
+  - Bật/tắt Judge được trên cùng workload RAG.
+  - Không công bố số Judge ON trước khi item này xong.
+  - Nếu làm W8, nó phải vào bundle freeze trước one-shot W5. Cổng official mặc định vẫn Judge OFF (xem W5).
+- **Owner:** Codex (code). Claude review an toàn fail-closed.
+- **Blocker:** Với 6GB, Judge LLM và E4B có thể không resident cùng lúc; swap phải đo riêng.
+- **Phụ thuộc:** Không bắt buộc trước W3. Bắt buộc trước W9 Judge ON. Nếu vào bundle thì phải xong trước freeze cuối của W5.
+
+### W9 — Đo latency p50/p95/p99
+
+- **Output:**
+  - Bảng per-stage và e2e. Đo trên máy An, với env cố định: Ollama 0.40.11, model digest, seed, concurrency = 1.
+  - Dùng `latency_ms` sẵn có trong `app/services/rag_query.py`, cộng thời gian HTTP e2e.
+  - Không cộng percentile từng tầng thành percentile pipeline.
+  - Không trích latency P2 (`latency_reportable=false`).
+  - **Báo N riêng** cho từng nhóm:
+    - micro (không LLM);
+    - e2e pass-through;
+    - e2e blocked;
+    - Judge OFF / Judge ON;
+    - cold / warm.
+- **Pass** (đề xuất, chờ An duyệt):
+  - Warm-up N ≥ 10. Stage bị bỏ qua ghi N/A, không ghi 0.
+  - **p50/p95 e2e:** dùng N e2e do An chọn một trong hai đề xuất: ≥ 200 (Muse) hoặc ≥ 100 (Argon).
+  - **p99:**
+    - p99 e2e LLM với N = 100–200 chỉ là tham khảo và phải gắn nhãn đó.
+    - Chỉ công bố p99 official khi An đã duyệt N. Đề xuất: p99 micro khi N ≥ 1000; p99 e2e khi N ≥ 1000, hoặc không công bố p99 e2e.
+  - p95 e2e pass-through, Judge OFF < 3.0s: đề xuất, chờ An duyệt (lấy từ nhận xét 2–3 giây của giảng viên, chưa có số đo).
+- **Owner:** Codex (harness). Claude review protocol. Argon review bảng.
+- **Blocker:** Có thể cần người duy trì xét lại khóa L2 `latency_reportable` nếu muốn đưa số vào gói chính thức.
+- **Phụ thuộc:** W1 (máy An); W8 trước khi có số Judge ON.
+
+### W10 — Baseline local: Prompt Guard 2 và Llama Guard 3 1B
+
+- **Output:**
+  - Chạy tuần tự, không resident cùng E4B nếu VRAM không đủ.
+  - **Prompt Guard 2:** detector injection, quét cửa sổ 512 token. Ngưỡng phân loại **chốt trước khi xem tập so sánh**.
+  - **Llama Guard 3 1B:** baseline lệch chủng loại (content safety), không phải detector injection.
+  - PG2 và LG3 không hỗ trợ tiếng Việt chính thức theo card. Mọi kết quả trên tập nội bộ tiếng Việt phải ghi hạn chế này.
+- **Pass:**
+  - **Bắt buộc có FPR**, kèm TPR/AOMR hoặc ASR tùy nhiệm vụ. Không được dùng "hoặc ASR" để bỏ FPR.
+  - **Bắt buộc báo p95** (và p50; p99 theo cùng quy tắc nhãn) theo protocol W9: N ghi riêng từng nhóm áp dụng được, warm-up, không ghi 0 cho giai đoạn bỏ qua, p50/p95 dùng N An chọn, p99 official chỉ khi N đã duyệt hoặc gắn nhãn tham khảo.
+  - Ghi rõ khác biệt nhiệm vụ của scorer. VRAM phải đo, không suy từ tên model.
+  - **Điều chỉnh config/ngưỡng baseline** chỉ trên **dev** (và tập ngoài đã phép, nếu An cho). Val chỉ là lần xác nhận đã log; không chỉnh ngưỡng PG2 hay cấu hình từ val (quy tắc xuyên suốt). Mỗi baseline có **trần val riêng 3 lần** (đề xuất, chờ An duyệt), không dùng chung với trần của Shield; mỗi hệ công bố số lần thử của chính nó. Sau lần thất bại thứ 3 của một baseline: dừng val của baseline đó và báo An.
+  - **Bảng official P3** (đề xuất, chờ An duyệt): nếu An muốn một bảng one-shot, chạy Shield + PG2 + LG3 1B trên P3-holdout. Baseline chạy one-shot với config đã freeze và cùng luật attempt như Shield (W5).
+- **Owner:** Codex (tích hợp). Muse soạn ledger license. An tự chấp nhận license gated. Claude review tính công bằng của so sánh.
+- **Blocker:** An phải chấp nhận Llama Community / form HF. Kéo `transformers`/`torch` cần An duyệt.
+- **Phụ thuộc:** W1, W4; nếu chạy trên box thì W13. Nếu có bảng official P3 thì baseline phải freeze trước one-shot W5.
+
+### W11 — NeMo chỉ khi khả thi
+
+- **Output:**
+  - Spike ngắn: tương thích Windows, dependency, tắt telemetry, VRAM nếu self-check bằng E2B/E4B.
+  - Quyết định go/no-go bằng văn bản.
+  - Spike độc lập với W10; bắt đầu được khi API sẵn sàng hoặc sau W4.
+- **Pass:**
+  - Nếu no-go: ghi lý do, không đưa vào bảng chính.
+  - Nếu go: một hàng baseline LLM-as-judge, so với Semantic Judge, không trộn với hàng regex.
+  - Hàng NeMo **official** chỉ khi đã go, đã chạy trên cùng tập so sánh với W10, **và** config cùng scorer đã được freeze trước W5, **và** tuân cùng luật one-shot/attempt như Shield (W5).
+  - Nếu thiếu freeze config/scorer trước W5, hoặc không theo luật attempt one-shot, NeMo chỉ xuất hiện như hàng **exploratory**, không vào cổng official.
+- **Owner:** Codex (spike). Argon review go/no-go.
+- **Blocker:** Rủi ro LangChain/dependency trên Windows.
+- **Phụ thuộc:** API sẵn sàng hoặc W4. Không phụ thuộc W10, trừ điều kiện vào bảng official. Hàng official phụ thuộc việc freeze trước W5.
+
+### W12 — Bảng so sánh và cổng dừng
+
+- **Output:**
+  - Một bảng gồm:
+    - Shield rule (trước/sau W3);
+    - Prompt Guard 2;
+    - Llama Guard 3 1B;
+    - NeMo official nếu đủ điều kiện W11; nếu không đủ thì chỉ hàng exploratory, tách rõ với hàng official.
+  - Cột: FPR (bắt buộc), TPR/AOMR hoặc ASR, p95.
+  - Tách EN công khai với nội bộ có tiếng Việt (ghi hạn chế ngôn ngữ của baseline).
+  - P2 giữ một hàng USED. P3-holdout có một hàng one-shot (Judge OFF mặc định; Judge ON là hàng báo cáo riêng).
+- **Pass** (cổng official trên P3-holdout, đề xuất, chờ An duyệt):
+  - AOMR ≥ 0.80.
+  - mismatch ≤ 0.20.
+  - FPR ≤ 0.15.
+  - coverage = 1.00.
+  - successful_coverage ≥ 0.95.
+  - error_rate ≤ 0.05.
+  - RATE_REPORTING_MIN_N = 10.
+  - Không hạ cổng này cho khớp W3.
+  - Nếu FAIL: vẫn công bố số. **Không** sửa rule rồi chạy lại cùng holdout.
+- **Cổng dừng khác:**
+  - Cần xem P2 holdout để sửa rule → STOP.
+  - Artifact holdout P2 hoặc P3 xuất hiện trên box hoặc trong working set dev+val → STOP.
+  - deepset chưa làm rõ license → không vào bảng chính.
+  - OOM 6GB → chỉ báo số chạy tuần tự. Nếu OOM xảy ra trong one-shot, áp luật failed attempt của W5.
+  - Muốn "giảm FPR" bằng cách tắt context → STOP.
+  - AOMR val < 0.80 và An chưa cho go → không chạy one-shot.
+- **Owner:** Argon (cấu trúc bảng, review). Claude/Codex điền số. Muse kiểm nguồn.
+- **Phụ thuộc:** W3, W5–W10, quyết định W11.
+
+## 5. Tiêu chí "xong giai đoạn RAG" (đề xuất, chờ An duyệt)
+
+Chỉ được chuyển sang agent khi tất cả các điều sau đều đúng:
+
+1. P2 được báo cáo như USED/diagnostic, đủ tử/mẫu số và hash, không tái sử dụng để tune. Holdout P2 chưa từng rời máy An.
+2. W3 tune trên dev, xác nhận trên val và đã freeze. Công bố số lần thử val **của từng hệ** (trần 3 lần mỗi hệ, đề xuất, chờ An duyệt; trần Shield gồm cả các lần val ở W2). An đã quyết định go/no-go. P3-holdout đã khử trùng (DROP chỉ trên ứng viên P3-holdout, dev/val/seed không bị viết lại, chỉ log hash, đ/Đ → d) và đã one-shot trên máy An; kết quả được công bố dù PASS hay FAIL.
+3. garak và PyRIT đã chạy vào API, có ASR theo định nghĩa W6, kèm giới hạn "chỉ bề mặt query".
+4. Có số liệu indirect injection đi qua retrieval: retrieve-hit, context-to-provider, và attack success trên các case đã retrieve-hit.
+5. Có bảng latency p50/p95 per-stage và e2e (Judge OFF), N ghi riêng từng nhóm. p99 official chỉ khi N đã được duyệt; ngoài ra gắn nhãn tham khảo. Judge ON nếu W8 hoàn tất, nếu không thì ghi UNKNOWN.
+6. Có bảng so sánh Shield vs Prompt Guard 2 vs Llama Guard 3 1B (NeMo nếu đủ điều kiện), có FPR, p95 theo protocol W9, và license đã kiểm.
+7. Mọi ngưỡng đã được An duyệt. Mọi số là số thật hoặc UNKNOWN. Không sửa holdout sau lần chạy official.
+
+## 6. Thứ tự phụ thuộc (rút gọn)
+
+- **Luồng chính:** W1 (khôi phục dev+val) → W13 (manifest dẫn xuất và chế độ runner) → W2 (chẩn đoán per-case trên dev, được phép trên box; val Shield tính vào trần 3 lần của Shield) → W3 (tune dev, xác nhận val Shield, tối đa 3 lần của Shield) → go/no-go của An → freeze bundle → W5 one-shot trên máy An (DROP chỉ trên ứng viên P3-holdout).
+- **Trước freeze cuối:**
+  - W8 (nếu vào bundle);
+  - baseline W10 (nếu có bảng official P3);
+  - config/scorer NeMo nếu muốn hàng official (W11);
+  - khử trùng W5 với seed của W4/W6/W7/W10 (DROP, khóa trước freeze).
+- **Song song:**
+  - W4 song song W1.
+  - W6 sau khi API sẵn sàng. W7 sau W4.
+  - W8 → W9 Judge ON.
+  - W10 sau W1/W4/W13 (điều chỉnh trên dev; val chỉ xác nhận).
+  - W11 spike độc lập, sau khi API sẵn sàng hoặc sau W4; hàng official phải freeze trước W5.
+- **Cuối cùng:** W12.
+
+## 7. Bảng ánh xạ issue → thay đổi
+
+Cột "Kỳ" ghi phiên bản đã đóng issue. Các dòng cũ giữ nguyên, trừ khi một phiên bản sau bổ sung.
+
+| Issue | Thay đổi | Vị trí | Kỳ |
+|---|---|---|---|
+| Claude-W1 | v2: cây riêng và loại holdout khỏi working set. v4–v5: dev+val (không phải holdout) được phép lên box sau khi kiểm manifest; holdout P2 và P3 không rời máy An; từ holdout, box chỉ nhận aggregate. | W1; mục 1 | v5 |
+| Claude-W3 | v2–v4: tune trên dev, xác nhận val, trần 3 lần. v5: trần được đếm theo từng hệ; trần Shield gồm cả lần val ở W2. | mục đầu; W2; W3; W10; mục 5 | v5 |
+| Claude-W5 | W5 thêm khử trùng, luật failed attempt và freeze lại bundle khi có W8. Luật hạ tầng thuộc issue này, không thuộc NEW-03. | W5 | v2 |
+| Claude-W6 | ASR chính định nghĩa theo outcome bảo vệ đăng ký trước; block-rate và detector garak chỉ là phụ. | W6 | v2 |
+| Claude-W7 | Index độc tách riêng có rollback, query freeze, định nghĩa retrieve-hit/context-to-provider. | W7 | v2 |
+| Claude-W8 | W8 nếu làm phải vào bundle freeze trước one-shot; mặc định cổng official Judge OFF. | W8; W5 | v2 |
+| Claude-W10 | Ngưỡng PG2 chốt trước; FPR bắt buộc; baseline trên P3 chỉ one-shot cùng luật attempt. | W10 | v2 |
+| Claude-W12 | Giữ AOMR ≥ 0.80 ở W12, không hạ cho khớp W3; thêm cổng go/no-go khi AOMR val < 0.80. | W3; W12 | v2 |
+| Claude-NEW-01 | Cấm tuyệt đối copy mọi artifact holdout P2 (kể cả result.json, log Ollama, ID case) lên box hay vào working set. | mục 1; W1; W12 | v2 |
+| Claude-NEW-02 | v3–v4: tách dev/val, val aggregate-only. v5: trần val theo từng hệ. | mục đầu; W2; W3; W10 | v5 |
+| Claude-NEW-03 | Khử trùng chéo giữa P3-holdout, dev, val và seed W4/W6/W7/W10. v2 đã có exact hash; v3 bổ sung phương pháp gần trùng (xem Codex-W5). Đây không phải luật sự cố hạ tầng. | W5 | v2, làm rõ v3 |
+| Claude-NEW-04 | Thêm dòng license Semantic Judge (Qwen3-4B apache-2.0, OFF mặc định, digest UNKNOWN). | mục 2; W4; W8 | v2 |
+| Claude-NEW-05 | Ghi nhận các path kỹ thuật đã được Codex/Muse đối chiếu trên ff41f92; không thêm hạng mục. | mục 1 | v2 |
+| Codex-W5 | v4: MinHash/Jaccard, DROP, log hash, bỏ dấu. v5: DROP chỉ trên ứng viên P3-holdout; dev/val/seed không bị viết lại; ánh xạ đ/Đ → d tường minh. | W5 | v5 |
+| Codex-W6 | Mẫu số ASR là probe hoàn tất trong phạm vi; timeout/lỗi báo riêng; probe cần mạng thì bỏ. | W6 | v2 |
+| Codex-W7 | Attack success chỉ tính trên case retrieve-hit; không retrieve thì ngoài phạm vi, không tính chặn. | W7 | v2 |
+| Codex-W9 | Báo N riêng theo micro/pass-through/blocked/Judge/cold-warm; p99 e2e N nhỏ chỉ là tham khảo. | W9 | v2 |
+| Codex-W10 | v2: FPR bắt buộc. v3: baseline phải báo p95 theo protocol W9; điều chỉnh config chỉ trên dev; val chỉ xác nhận đã log. | W10; W9; mục 5 | v3 |
+| Codex-LICENSE | Bỏ ngoại lệ dùng deepset khi còn xung đột; dùng sau này là quyết định mới của An, vẫn công bố cả hai trường. | mục 2; W4; W12 | v2 |
+| Muse-W1 | Dev+val (không phải holdout) được phép lên box sau khi kiểm manifest; holdout P2 và P3 không rời máy An, box chỉ nhận aggregate. | W1; mục 1 | v4 |
+| Muse-W2 | Quy tắc n < RATE_REPORTING_MIN_N và giá trị 10 đều gắn nhãn đề xuất, chờ An duyệt. | W2; W5; W12 | v2 |
+| Muse-W10 | Ghi hạn chế tiếng Việt của PG2/LG3; Muse chỉ soạn ledger, An tự chấp nhận license gated. | W10; W4 | v2 |
+| Muse-W11 | Spike độc lập với W10. v4: hàng official còn phải freeze config/scorer trước W5 và theo luật one-shot; thiếu thì chỉ hàng exploratory. | W11; W12 | v4 |
+| Claude-NEW-06 | Dev/val là dữ liệu repo không phải holdout; phân tích per-case trên dev được chạy trên box. Val là aggregate-only kể cả trên box. | mục đầu; W1; W2 | v4 |
+| Claude-NEW-07 | v4: trần 3 lần, dừng sau lần 3, ghi vào DONE. v5: đếm theo từng hệ, trần Shield gồm W2. | W3; W2; W10; mục 5 | v5 |
+| P3V3-NEW-01 / Codex-W1 | Thêm W13: manifest dẫn xuất chỉ dev+val và chế độ tương thích runner, không đọc/đòi artifact holdout P2, có test. | W13; W1 | v4 |
+| P3V3-NEW-02 | Gần trùng: DROP, khóa trước freeze; nhật ký chỉ ghi hash; bỏ dấu tiếng Việt trước 5-gram. | W5 | v4 |
+| P3V3-NEW-03 | Hàng NeMo official phải freeze config/scorer trước W5 và theo luật one-shot; thiếu thì chỉ exploratory. | W11; W12 | v4 |
+| P3V4-NEW-01 | DROP chỉ áp lên ứng viên P3-holdout; dev, val và seed đã đóng băng không bị viết lại; ánh xạ đ/Đ → d tường minh trước khi băm. | W5 | v5 |
+| P3V4-NEW-02 | Trần val đếm theo từng hệ (đề xuất, chờ An duyệt): Shield 3 lần gồm mọi lần val Shield kể cả W2; mỗi baseline có trần riêng 3 lần; mỗi hệ công bố số lần thử của mình. | mục đầu; W2; W3; W10; mục 5 | v5 |
+| P3V4-NEW-03 | Cập nhật dòng Claude-W1 ở mục 7 cho khớp v4–v5: dev+val được lên box, holdout chỉ ở máy An. | mục 7; W1 | v5 |
+| W2-owner | Sửa câu owner W2: Claude phân tích (per-case dev trên box được phép); Codex chạy runner W13 trên box hoặc trên máy An khi cần GPU. | W2 | v5 |
+

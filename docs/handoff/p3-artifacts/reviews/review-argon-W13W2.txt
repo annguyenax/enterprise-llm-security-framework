@@ -1,0 +1,48 @@
+# Review W13 (delta 464218b trên parent 0c56e28) & trạng thái W2
+
+- **Reviewer**: Gemini 4 Argon (Medium)
+- **Checkout**: `/workspace/shield-team/enterprise-llm-security-framework`
+- **Branch**: `feat/p3-rag-opt`
+- **Commit review**: `464218bd65191cf1b88ca180ec71e5ab7bd0effd` (parent W13 gốc: `0c56e2816514f551c2b8c4a9b612d1a24f2ff24b`)
+- **Plan đối chiếu**: `PLAN-P3-v6` (`sha256: 45b5530264b4acd13d5792439f3514ac97cc74f8fb86321ade54534d12ce2c0e`)
+
+## Verdict: **PASS**
+
+Delta `464218b` đã đóng đầy đủ cả 3 mục (`P3W13-FIX-01`, `P3W13-FIX-02`, `P3W13-NEW-01`) từ đợt review W13 gốc. Không phát sinh issue mới chặn. Phần W2 hiện chưa thực hiện đúng theo trạng thái blocker W1 (thiếu official dev/val/corpus trên box), không sửa `context-guard` và không chạy validation.
+
+---
+
+## Trạng thái từng ID
+
+### 1. P3W13-FIX-01 (Pin digest + bảng 6 file vào official V2 metadata): **CLOSED / PASS**
+- `scripts/run_v2_evaluation.py` đã định nghĩa hằng số `OFFICIAL_V2_MANIFEST_PATH = ROOT / "datasets/v2/manifests/benchmark-v2-manifest.json"` (dòng 171) và hàm `_official_dev_val_metadata()` (dòng 1018–1028) chỉ đọc metadata của manifest official, kiểm tra trạng thái `final` cùng bảng 9 entry chuẩn (`REQUIRED_FROZEN_PATHS`), và trích xuất đúng 6 entry thuộc `DEV_VAL_FROZEN_PATHS` (`path`, `sha256`, `size_bytes`) mà không mở bất kỳ artifact dữ liệu nào.
+- Trong `derive_dev_val_manifest` (dòng 1038–1040): kiểm tra `source_manifest.resolve() != OFFICIAL_V2_MANIFEST_PATH.resolve()` để từ chối mọi đường dẫn nguồn khác trước khi mở file nguồn, ngay cả khi file đó có trạng thái `final` hoặc trùng nội dung byte; sau đó đọc trực tiếp từ `OFFICIAL_V2_MANIFEST_PATH` qua `_official_dev_val_metadata()`.
+- Trong `verify_dev_val_manifest` (dòng 1073–1077): đối chiếu cả `source_manifest_sha256 == _sha256_bytes(official_bytes)` lẫn toàn bộ bảng 6 file (`path`, `sha256`, `size_bytes`) khớp tuyệt đối với `official_entries` từ `_official_dev_val_metadata()` **trước khi** gọi `_verify_dev_val_artifacts` để băm các file trong working set. Mọi manifest tự tạo có digest giả hoặc bảng 6 file tự nhất quán nhưng khác tập con official V2 đều bị từ chối fail-closed với mã `manifest_source`.
+- Bộ test `tests/test_v2_dev_val_manifest.py` đã kiểm chứng đầy đủ các nhánh từ chối này (bao gồm chặn trước khi `_sha256_file` hoặc `Path.open` được gọi).
+
+### 2. P3W13-FIX-02 (`--benchmark-root` chỉ cho phép với `--benchmark-mode dev-val`): **CLOSED / PASS**
+- Trong `scripts/run_v2_evaluation.py` (`main()`, dòng 4539–4541), ngay sau `parser.parse_args(argv)`, điều kiện `if args.benchmark_root is not None and args.benchmark_mode != "dev-val":` lập tức trả mã lỗi `1` với thông báo `FAIL [cli_benchmark_root]: --benchmark-root requires --benchmark-mode dev-val.` trước khi đi vào nhánh `--holdout-authorization` hay bất kỳ lệnh mở file / dispatch nào.
+- Chặn cả trường hợp `official` ngầm định (default) lẫn `--benchmark-mode official` tường minh, có hoặc không kèm `--holdout-authorization`. Lớp chặn thứ hai trong `_holdout_request_from_args` (`cli_holdout_benchmark`, dòng 4476) vẫn được giữ nguyên.
+- Help string của `--benchmark-root` (dòng 4441) và tài liệu đã cập nhật khớp với hành vi mới; test `test_cli_runner_rejects_official_root_before_any_open_or_dispatch` bao phủ đủ 4 tổ hợp tham số.
+
+### 3. P3W13-NEW-01 (Sửa tài liệu lịch sử commit): **CLOSED / PASS**
+- `docs/evaluation/phase3-w13-dev-val-manifest.md` (dòng 89–90, 114–117, 123–124) đã xóa toàn bộ nội dung sai lệch trước đó về việc commit bị chặn bởi `.git/index.lock` hay các file còn unstaged.
+- Tài liệu hiện ghi nhận chính xác commit W13 gốc là `0c56e2816514f551c2b8c4a9b612d1a24f2ff24b`, nêu rõ bản cập nhật giải quyết `P3W13-FIX-01`, `P3W13-FIX-02`, `P3W13-NEW-01`, cập nhật số lượng test trong `test_v2_dev_val_manifest.py` lên **79 passed, 0 failed** (tổng cộng 79 + 138 = 217 passed, 0 failed theo báo cáo synthetic test của coordinator), và mô tả đúng cơ chế pin vào manifest official tại mục Limits.
+
+---
+
+## Issue mới
+- **Không có** (`NONE` — không có issue chặn hay lỗi hồi quy mới).
+
+---
+
+## Xác nhận tuân thủ & bảo toàn hợp đồng Official 9-file / Holdout
+1. **Không đọc dữ liệu cấm**: Trong quá trình review, chỉ đọc code/diff/docs và metadata `datasets/v2/manifests/benchmark-v2-manifest.json` (hash/size). Tuyệt đối không mở hoặc đọc `cases/holdout.jsonl`, `labels/holdout.jsonl`, `result.json`, log Ollama, hay bất kỳ ID/nội dung case holdout nào; không đụng `/workspace/repo`, không sửa code, không chạy validation, không bypass và không nâng cấp Ollama.
+2. **Official 9-file verifier & Holdout loader không bị nới**: Hàm `verify_frozen_manifest` (dòng 872–930) và luồng `load_authorized_holdout_benchmark` / `run_holdout_evaluation` giữ nguyên hợp đồng 9 file `REQUIRED_FROZEN_PATHS` với `manifest_status == "final"`. Chế độ `dev-val` tách biệt hoàn toàn, cấm mọi đường dẫn/tên file chứa `holdout`, `result.json`, `ollama`, symlink, cũng như từ chối `design/authoring-provenance.jsonl` ngay ở bước quét tên file trước khi mở.
+
+---
+
+## Ghi chú không chặn (Non-blocking notes)
+1. **Phạm vi chặn `--benchmark-root` ở tầng API Python**: `P3W13-FIX-02` khóa `--benchmark-root` tại tầng CLI (`main()`), trong khi các hàm nội bộ như `run_evaluation(..., benchmark_root=...)` và `preflight(..., benchmark_root=...)` vẫn nhận tham số `benchmark_root` ở mode `official` để phục vụ bộ test regression dùng fixture tạm. Ở đường gọi này, `verify_frozen_manifest` vẫn bắt buộc đủ 9 file freeze chuẩn nên không tạo rủi ro lọt dữ liệu.
+2. **Yêu cầu hiện diện file metadata official khi verify `dev-val`**: Vì `verify_dev_val_manifest` luôn gọi `_official_dev_val_metadata()`, file metadata `datasets/v2/manifests/benchmark-v2-manifest.json` (chỉ file JSON metadata, không cần các artifact dữ liệu official/holdout) phải luôn đọc được trong repo tại thời điểm chạy `dev-val`. Nếu thiếu hoặc lỗi, hàm sẽ fail-closed an toàn với mã `manifest_unreadable` hoặc `manifest_not_final`.
+3. **Trạng thái W2**: Ghi nhận W2 chưa triển khai do đang chờ W1 cung cấp official `dev`/`val`/`corpus` trên box; không có thay đổi nào chạm vào `context-guard`.

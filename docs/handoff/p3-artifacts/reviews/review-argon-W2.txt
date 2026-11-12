@@ -1,0 +1,60 @@
+# Review W2 (`f47dfec`) + W2b (`db791b4`) trên parent `464218b`
+
+- **Reviewer**: Gemini 4 Argon (Medium)
+- **Checkout**: `/workspace/shield-team/enterprise-llm-security-framework`
+- **Branch local**: `feat-p3-rag-opt` (đổi tên local từ `feat/p3-rag-opt` do quy tắc runner)
+- **Chuỗi commit đối chiếu**:
+  - Parent: `464218bd65191cf1b88ca180ec71e5ab7bd0effd`
+  - W2: `f47dfecc1ad125390db6114ff8f4944e35aa11ed` (tác giả: Claude — không tính Claude là reviewer W2; Claude chỉ review chéo W2b)
+  - W2b: `db791b4e236d850d627ed433adbbc4c605df5477` (tác giả: Codex)
+
+## Verdict: **PASS** (cho toàn bộ phạm vi W2 + W2b)
+
+Cả hai bản vá W2 (`f47dfec`) và W2b (`db791b4`) đều giải quyết đúng nguyên nhân gốc gây leo thang giả (false escalation) ở tầng RAG Context Guard và bước giới hạn ngân sách ký tự (context budget), giữ nguyên hợp đồng bảo mật fail-closed và không làm suy giảm khả năng chặn tấn công.
+
+---
+
+## Trạng thái theo ID
+
+- `P3W2-FIX`: **NONE** (Không có)
+- `P3W2-BLOCK`: **NONE** (Không có)
+- `P3W2-NEW`: **NONE** (Không có)
+- `P3W2B-FIX`: **NONE** (Không có)
+- `P3W2B-BLOCK`: **NONE** (Không có)
+- `P3W2B-NEW`: **NONE** (Không có)
+
+---
+
+## Đánh giá chi tiết
+
+### 1. Phạm vi W2 (`f47dfecc1ad125390db6114ff8f4944e35aa11ed`)
+- **Không fold `LOG_ONLY` của lớp context vào `final_decision`**: Hàm `_context_fold_severity` (`app/services/rag_query.py:146-155`) chuyển `Decision.LOG_ONLY` thành `Decision.ALLOW` khi fold kết quả của `rag_context_guard` (từng chunk) và `aggregate_context_guard` vào `final_decision` (dòng 1118, 1158–1165). Quyết định `LOG_ONLY` vẫn được bảo toàn nguyên vẹn trong `stage_results` và sự kiện audit đúng tính chất telemetry cảnh báo. Input Guard và Output Guard giữ nguyên cơ chế fold hiện hành.
+- **Loại bỏ chunk neighbor `SANITIZE` có độ liên quan thấp (`_SANITIZE_PRIMARY_RELEVANCE_RATIO = 0.5`)**: Hàm `_primary_relevance_chunk_ids` (`app/services/rag_query.py:158-179`) so sánh trị tuyệt đối `retrieval_score` trong cùng một truy vấn (tương thích cả điểm âm của SQLite `bm25()` lẫn điểm dương). Khi điểm không thể so sánh an toàn (NaN/Inf,混 dấu, hoặc toàn `0.0`), mọi chunk đều được giữ làm primary để bảo toàn hành vi cũ. Các chunk nhận `Decision.SANITIZE` nhưng không thuộc tập primary bị loại sớm (dòng 777–795) với `accepted=False`, `reason_code="context_guard_sanitize_low_relevance_excluded"`, không đi tới bước aggregate hay provider và không fold vào `final_decision`. Nếu toàn bộ context bị loại (`not passed_pairs`), hệ thống vẫn fail-closed với `Decision.BLOCK` (`STOP_ALL_CONTEXT_BLOCKED`).
+
+### 2. Phạm vi W2b (`db791b4e236d850d627ed433adbbc4c605df5477`)
+- **Tách biệt giới hạn ngân sách (resource containment) khỏi quyết định bảo mật `SANITIZE`**: Tại bước `_bound_chunks_for_aggregate` (`app/services/rag_query.py:845-877`), khi chunk bị cắt ngắn (`aggregate_budget_truncated`) hoặc bị loại do vượt ngân sách (`aggregate_budget_exceeded`), pipeline giữ nguyên quyết định bảo mật gốc của per-chunk guard (`context_outcomes[chunk_id][2]`) thay vì ghi đè thành `Decision.SANITIZE`.
+- **Bảo toàn quyết định `SANITIZE` thực sự**: Nếu một chunk được chấp nhận có quyết định gốc là `Decision.SANITIZE` từ `rag_context_guard` và sau đó bị cắt ngắn bởi ngân sách ký tự, quyết định `Decision.SANITIZE` gốc vẫn được giữ và fold vào `final_decision` chính xác. Các chunk bị loại hoàn toàn (hoặc bị sanitize thành chuỗi rỗng nên rơi vào `excluded_by_budget`) có `accepted=False` nên không gửi tới provider và không fold.
+- **Audit stage `context_budget` trung lập**: Ghi nhận `StageResult(stage="context_budget", decision=None, reason_code=..., detail=f"chunk_id=...")` cho cả hai nhánh cắt ngắn và vượt ngân sách, đảm bảo đầy đủ dấu vết trong `stage_results` và audit log mà không làm lệch `final_decision` hay lộ nội dung văn bản.
+
+---
+
+## Các xác nhận bắt buộc
+
+1. **Xác nhận không tắt lớp bảo vệ context**:
+   - Không có thay đổi nào vô hiệu hóa `rag_context_guard` hay `aggregate_context_guard` trong `GuardProfile` hoặc trong luồng xử lý. Mọi chunk đi tới provider đều được kiểm tra qua per-chunk guard (khi bật) và chuỗi ghép sau khi áp dụng ngân sách vẫn được kiểm tra qua aggregate guard (fail-closed khi gặp `BLOCK` hoặc `SANITIZE` ở mức aggregate).
+2. **Xác nhận không đọc holdout / dữ liệu cấm**:
+   - Quá trình review chỉ kiểm tra git commit/diff trên `/workspace/shield-team/enterprise-llm-security-framework` và tài liệu báo cáo trong `/workspace/deliverables/shield-phase3-rag-opt-20261111`. Tuyệt đối không truy cập, không mở hay đọc `val`, `holdout`, `cases/validation.jsonl`, `/workspace/work/W1`, `/workspace/work/W2`, không đụng `/workspace/repo`, không dùng flag bypass, không nâng hoặc chạy Ollama, không sửa code/push/merge.
+3. **Xác nhận không đánh đổi AOMR lấy FPR**:
+   - Đối chiếu chuỗi số liệu `development` / in-sample / `MOCK` (chấm qua `_metrics_from_records`):
+     - **C0**: `464218b` (AOMR `4/14`, mismatch `10/14`, FPR `7/12`, cov `30/30`) → `f47dfec` (AOMR `8/14`, mismatch `6/14`, FPR `4/12`, cov `30/30`) → `db791b4` (AOMR `8/14`, mismatch `6/14`, FPR `1/12`, cov `30/30`).
+     - **C3**: AOMR giữ nguyên `5/14` qua cả ba commit (`464218b` → `f47dfec` → `db791b4`); FPR từ `4/12` (đến W2) giảm xuống `1/12` (sau W2b), coverage `26/26`.
+   - Việc giảm FPR từ `7/12` xuống `1/12` trên C0 (và `4/12` xuống `1/12` trên C3) đạt được nhờ loại bỏ các quyết định `SANITIZE` / `LOG_ONLY` gán sai trên các truy vấn lành tính, trong khi AOMR trên C0 tăng từ `4/14` lên `8/14` ở W2 và giữ nguyên `8/14` ở W2b (C3 giữ nguyên `5/14`). Không có bất kỳ sự nới lỏng chặn tấn công nào để đổi lấy FPR.
+   - Bộ test regression mở rộng đạt `147 related + 79 W13` ở W2 và `160 related + 79 W13` ở W2b (passed theo báo cáo coordinator).
+
+---
+
+## Ghi chú không chặn (Non-blocking notes)
+
+1. **Ngưỡng `0.5` (`_SANITIZE_PRIMARY_RELEVANCE_RATIO`) là heuristic trên tập dev**: Tỷ lệ độ lớn điểm `0.5` hoạt động tốt với phân phối điểm SQLite BM25 trên tập development hiện tại, nhưng về bản chất vẫn là ngưỡng heuristic in-sample, chưa phải hằng số bất biến cho mọi cơ chế chấm điểm hoặc phân phối dữ liệu khác.
+2. **Case `V2-DEV-0011` còn là mismatch nhãn / retrieval (FP duy nhất còn lại trong `1/12`)**: Trên `V2-DEV-0011`, truy vấn lành tính có nhãn kỳ vọng `no_hits` nhưng bộ truy hồi SQLite BM25 trả về các chunk khớp từ khóa nên pipeline trả lời `ALLOW` (`answered`). Việc giữ nguyên kết quả này và không chỉnh sửa bộ truy hồi hay thêm rule đặc thù để ép số FPR về `0/12` là hoàn toàn đúng nguyên tắc chống overfit.
+3. **Phạm vi diễn giải số liệu & mã lý do ngân sách**: Toàn bộ các số AOMR/FPR nêu trên thuộc chế độ chẩn đoán `development` / in-sample / `MOCK` (không dùng official analyzer do chạy trên tập derived `dev-val`), do đó chỉ dùng để xác nhận hướng sửa lỗi pipeline chứ không thay thế kết quả đánh giá validation/holdout chính thức. Ngoài ra, chunk bị sanitize thành rỗng đi vào `_bound_chunks_for_aggregate` vẫn nhận mã `aggregate_budget_exceeded` như hành vi sẵn có trước đây — điều này không ảnh hưởng tới tính đúng đắn của quyết định hay bảo mật, có thể cân nhắc tách mã telemetry riêng ở các pha sau nếu cần.

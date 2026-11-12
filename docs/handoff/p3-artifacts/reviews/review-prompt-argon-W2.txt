@@ -1,0 +1,28 @@
+Review W2 + W2b một lần trên checkout local (coordinator tự dispatch). Tự ghi kết quả vào:
+/workspace/deliverables/shield-phase3-rag-opt-20261111/review-argon-W2.txt
+
+Checkout: /workspace/shield-team/enterprise-llm-security-framework
+Không đụng /workspace/repo. Không push, không merge, không sửa code.
+Branch local: feat-p3-rag-opt (đổi tên local từ feat/p3-rag-opt vì runner cấm '/'; không phải thay đổi remote).
+Không tính Claude là reviewer W2: Claude là tác giả W2 (f47dfec). Claude chỉ review chéo W2b.
+
+Commits (parent → W2 → W2b):
+- 464218bd65191cf1b88ca180ec71e5ab7bd0effd
+- W2  f47dfecc1ad125390db6114ff8f4944e35aa11ed  (Claude). Patch: prompts/w2-f47dfec.patch
+- W2b db791b4e236d850d627ed433adbbc4c605df5477  (Codex). Patch: prompts/w2b-db791b4.patch
+Xem git show từng SHA, hoặc git diff 464218b..db791b4.
+
+W2: không fold context LOG_ONLY vào final_decision; loại SANITIZE neighbor thấp điểm (ngưỡng 0.5); không tắt lớp context.
+W2b: cắt budget không bị gán SANITIZE rồi fold; giữ quyết định bảo mật gốc của chunk; audit stage context_budget trung lập. V2-DEV-0011 (retrieval trả hits vs nhãn no_hits) không sửa, không làm đẹp số.
+
+Số development / in-sample / MOCK (không Ollama; official analyzer không dùng vì derived-dev-val; chấm bằng _metrics_from_records):
+C0 464218b: AOMR 4/14, mismatch 10/14, FPR 7/12, cov 30/30.
+C0 f47dfec: AOMR 8/14, mismatch 6/14, FPR 4/12, cov 30/30.
+C0 db791b4: AOMR 8/14, mismatch 6/14, FPR 1/12, cov 30/30; còn FP 0011.
+C3 không đổi AOMR 5/14 qua cả ba; FPR 4/12 đến W2, sau W2b 1/12, cov 26/26.
+Tests coordinator: W2 147 related + 79 W13; W2b 160 related + 79 W13, passed.
+Review đã có (không chặn): W2 Codex/Muse PASS; W2b Claude/Muse PASS; không P3W2/P3W2B-FIX/BLOCK/NEW.
+
+Cấm: val, holdout, cases/validation.jsonl, /workspace/work/W1, /workspace/work/W2, flag bypass, nâng Ollama.
+
+Trong review-argon-W2.txt ghi: Verdict PASS hoặc FIX cho phạm vi W2+W2b; trạng thái theo ID (P3W2-FIX/BLOCK/NEW và P3W2B-FIX/BLOCK/NEW nếu có); xác nhận không tắt context / không đọc holdout / không đổi AOMR lấy FPR; ghi chú không chặn (ngưỡng 0.5 heuristic dev; 0011 còn là mismatch nhãn/retrieval).

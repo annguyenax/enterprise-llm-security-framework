@@ -1,0 +1,27 @@
+# Review prompt — Argon W14 (chưa dispatch)
+
+Commit cần review: `796ae25f9779cba30c9be60f35af3e67a74d0450` trên nhánh `feat-p3-rag-opt`.
+Parent: `bbb78f3318c09f44847d952027e1fe895ccb5d98`.
+Không push, không chạy val, không mở holdout, không dùng `--holdout-authorization`, không đọc nội dung cases/labels validation hay holdout.
+
+## Mục tiêu W14
+Gỡ P3VAL1-BLK-01/02: có đường chạy validation thật với provider Ollama và chấm bằng analyzer official, chỉ trên `--benchmark-mode dev-val` + `--split validation` và working set 6 file + manifest dẫn xuất (`25ba6502…`), tuyệt đối không đọc/glob/hash holdout.
+
+## Việc cần kiểm
+1. Mode dev-val không mở/hash/glob holdout; manifest trỏ holdout thì fail-closed trước khi mở.
+2. Official/holdout mode vẫn đòi authorization; `VerifiedHoldoutAuthorization` không bị nới; `VerifiedDevValOllamaCapability` không mở được holdout; boolean/fabricated không unlock Ollama holdout.
+3. Ollama chỉ khi dev-val + validation; development+ollama và official+ollama không auth vẫn fail. Trộn holdout-authorization với dev-val/root/split fail trước khi mở dataset.
+4. Analyzer dev-val không gọi `verify_frozen_manifest` (sẽ hash holdout). Đường official analyzer còn nguyên.
+5. Output gắn split=validation, mode=dev-val, campaign/run_id và val cap. Ledger append-only, trần 3 kể cả FAIL, chặn lượt 4; MOCK không tiêu thụ cap sản xuất.
+6. Ngưỡng APPROVAL-v6: FPR ≤0.15, AOMR ≥ C3 cùng val, mismatch ≤0.20, coverage 1.00, error_rate ≤0.05. AOMR <0.80 là cờ An quyết, không hạ 0.80.
+7. FIX sau Claude: `_ollama_provider_spec` vẫn kiểm `llm_provider` và `_validate_ollama_preclaim_environment`; analyzer CLI in `FAIL [{code}]` cho `RunnerError`.
+
+## Test gợi ý (synthetic only)
+Trong venv checkout: `python -m pytest -q` trên
+`tests/test_w14_dev_val_execution.py tests/test_v2_dev_val_manifest.py tests/test_p2_authorized_ollama_runner.py tests/test_v2_holdout_authorization.py tests/test_v2_analyzer_rescore.py tests/test_p2_ollama_settings.py`.
+Coordinator đã được **650 passed**. Không chạy full suite nếu checkout có `datasets/v2` holdout (P3W14-NEW-03: một số test cũ ngoài bộ này còn gọi official verifier).
+
+## Không làm
+Không commit thêm, không stash/checkout, không chạy Ollama live, không CopyFromBox, không sửa rule theo case.
+
+Viết kết luận PASS/FAIL, ngắn, kèm bằng chứng holdout-safety.

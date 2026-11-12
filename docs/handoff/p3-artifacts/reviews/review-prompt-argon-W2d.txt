@@ -1,0 +1,23 @@
+Review W2d trên checkout local (coordinator tự dispatch). Tự ghi kết quả vào:
+/workspace/deliverables/shield-phase3-rag-opt-20261111/review-argon-W2d.txt
+
+Checkout: /workspace/shield-team/enterprise-llm-security-framework
+Không đụng /workspace/repo. Không push, không merge, không sửa code.
+Branch local: feat-p3-rag-opt.
+Commit W2d H1: 40e44619646733f1ef5f1c57974e34b2ead07db7
+Parent: 62e9295d15d7f7e1f856350b5967af39ccf00de5
+Diff: prompts/w2d-40e4461.patch
+Báo cáo thí nghiệm: w2d/w2d-results.md ; patch không ship: w2d/h2.patch, w2d/h1-h2.patch
+
+An (10:36 12/11/2026 Asia/Saigon, widget t102u): "thử cach nào tối ưu là đc". Vẫn không chạy val.
+
+W2d đo 3 hướng (nguyên tắc chung, không sửa theo case):
+- H1 (đã commit): nếu context-guard BLOCK gỡ evidence không kém mọi chunk còn sống thì fail-closed cả truy vấn. C0 MOCK in-sample AOMR 8/14→10/14 (đổi 0015, 0016), FPR giữ 1/12. Official runner xác nhận cùng số với replay.
+- H2 (không ship): chọn term theo trọng số/IDF, cap 12; C0 AOMR không tăng (0014 vẫn miss).
+- H1+H2 (không ship): C0 giống H1, thêm đổi decision C1 0013 (vẫn FN).
+Tests coordinator trên H1: 207 related + 79 W13 passed.
+Claude/Muse PASS, không P3W2D-FIX/BLOCK/NEW. Ghi chú không chặn: overfit n_M=14; exception-as-BLOCK cũng kích H1; tie điểm fail-closed.
+
+Cấm: val, holdout, cases/validation.jsonl, /workspace/work/W1, /workspace/work/W2, tắt lớp, bypass, nâng Ollama.
+
+Trong review-argon-W2d.txt ghi: Verdict PASS hoặc FIX; trạng thái theo ID (P3W2D-FIX/BLOCK/NEW); xác nhận không tắt lớp / FPR không tăng / không overfit từng case; ghi chú không chặn.

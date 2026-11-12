@@ -1,0 +1,31 @@
+# Review prompt — Argon W15 (chưa dispatch)
+
+Commit cần review: `e604aed6cec9d8a348baaacfb3341356b2697614` trên nhánh `feat-p3-rag-opt`.
+Parent: `796ae25f9779cba30c9be60f35af3e67a74d0450`.
+Không push, không chạy val, không mở holdout, không dùng `--holdout-authorization`, không đọc nội dung cases/labels validation hay holdout, không chạy gì trên máy An, không sửa ledger cũ P3VAL1.
+
+## Mục tiêu W15
+Writer ledger và receipt phải ghi đúng từng byte canonical LF trên Windows, để không lặp sự cố VAL1 (ledger CRLF 1860 byte, receipt LF 1859 byte, `read_claims` reject trước inference). Không nới `read_claims`, không auto-repair ledger.
+
+## Việc cần kiểm
+1. `claim_validation_slot` dùng `O_BINARY` khi flag có, hoặc open binary + ghi bytes; disk bytes khớp `canonical(record)` (UTF-8, compact, một LF cuối, không CR).
+2. `read_claims` không bị nới; không có đường auto-repair/rollback ledger. Ledger CRLF cũ vẫn fail closed, bytes giữ nguyên.
+3. Có test tái hiện lỗi writer kiểu 796ae25 dưới monkeypatch chuyển newline kiểu Windows (`read_claims` FAIL), và test writer mới PASS dưới cùng monkeypatch.
+4. Các writer khác trên đường official dev-val (receipt, result/manifest, analysis, evidence jsonl; freeze nếu runner ghi) đã được rà rủi ro CRLF.
+5. Self-check chính thức: `python -m scripts.v2_validation_ledger --self-check` ghi/đọc ledger tạm, không nhận path ledger sản xuất, không tiêu cap; FAIL nếu môi trường dịch newline.
+6. Không đổi holdout/official gate, cap 3, Judge, guard.
+
+## Test gợi ý (synthetic only)
+Trong venv checkout: `python -m pytest -q` trên
+`tests/test_w15_canonical_io.py tests/test_w14_dev_val_execution.py tests/test_v2_dev_val_manifest.py tests/test_p2_authorized_ollama_runner.py tests/test_v2_holdout_authorization.py tests/test_v2_analyzer_rescore.py tests/test_p2_ollama_settings.py`.
+Coordinator đã được **657 passed** (7 W15 + hồi quy). Thêm `python -m scripts.v2_validation_ledger --self-check` (PASS, exit 0). Không chạy full suite nếu checkout có `datasets/v2` holdout (P3W14-NEW-03).
+
+## Ghi chú không chặn code
+Claude PASS-WITH-FIXES: FIX-01 sẽ là thẻ preflight bắt buộc trong `VAL2-RUNBOOK.md` (self-check trước khi tạo/claim ledger sản xuất), không đổi runner. FIX-02 chỉ tài liệu: audit logger text mode có thể ra CRLF nhưng không phải official evidence. NEW-01 không nhúng self-check vào official claim path trong W15. Muse PASS.
+
+An 13:00, widget `t102s563`: lượt hỏng P3VAL1 không tính vào cap, còn 3/3. Ledger cũ giữ làm bằng chứng. Đây không phải lý do đổi trần 3 trong code.
+
+## Không làm
+Không commit thêm, không stash/checkout, không chạy Ollama live, không CopyFromBox, không sửa rule theo case, không đụng `D:\DoAnThucTap\p3-val1-ledger.jsonl`.
+
+Viết kết luận PASS/FAIL, ngắn, kèm bằng chứng canonical LF và holdout-safety.

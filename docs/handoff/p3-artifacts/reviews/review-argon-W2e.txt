@@ -1,0 +1,74 @@
+# Review W2e (`bbb78f3`) trên parent `40e4461`
+
+- **Reviewer**: Gemini 4 Argon (Medium)
+- **Checkout**: `/workspace/shield-team/enterprise-llm-security-framework`
+- **Branch local**: `feat-p3-rag-opt`
+- **Commit W2e (H3b+H4)**: `bbb78f3318c09f44847d952027e1fe895ccb5d98`
+- **Parent (W2d)**: `40e44619646733f1ef5f1c57974e34b2ead07db7`
+- **Diff đối chiếu**: `prompts/w2e-bbb78f3.patch` (khớp với `app/services/rag_query.py` và `tests/test_rag_pipeline.py` tại HEAD `bbb78f3318c09f44847d952027e1fe895ccb5d98`)
+- **Báo cáo & patch thí nghiệm**: `w2e/w2e-results.md`, `w2e/changed-cases.json`, `w2e/exposure.json`, `w2e/h3b.patch` (đạt cửa nhưng không ship riêng)
+
+## Verdict: **PASS**
+
+Commit `bbb78f3318c09f44847d952027e1fe895ccb5d98` (**H3b+H4**) mở rộng nguyên tắc của H1 tại tầng `rag_context_guard` theo một cơ chế chung, nhất quán và không sửa theo từng case: khi bằng chứng mạnh nhất (hoặc đồng hạng mạnh nhất) trong tập ngữ cảnh đã qua kiểm tra nguồn gốc không thể sử dụng cho câu trả lời tự động — do bị chặn (`Decision.BLOCK`), bị giữ lại chờ duyệt (`Decision.HUMAN_REVIEW`), hoặc bị khử trùng đến rỗng (`Decision.SANITIZE` kèm `reason_code == "context_guard_sanitize_emptied"`) — hệ thống từ chối trả lời tự động từ các mảnh ngữ cảnh yếu hơn còn sót lại và dừng theo đường fail-closed (`Decision.BLOCK` / `STOP_ALL_CONTEXT_BLOCKED`). Trên tập `development` (`MOCK`), **H3b+H4** nâng AOMR của `C0_all_on` từ `10/14` (`0.714`) lên `12/14` (`0.857`) (chuyển `V2-DEV-0021` và `V2-DEV-0018` sang `block/all_context_blocked`), giữ nguyên FPR ở mức `1/12` (`0.083`, duy nhất `V2-DEV-0011`), giữ nguyên cả 4 ca `mixed` (`V2-DEV-0025`–`0028`) ở `allow/allowed`, và không làm thay đổi các cấu hình tắt context guard (`C3`, `C6`, `C7`). Quyết định ship **H3b+H4** thay vì **H3b** riêng lẻ (vốn chỉ đổi `V2-DEV-0021`, AOMR `11/14`) và dừng tối ưu dev tại trần hợp lý `12/14` (giữ nguyên `V2-DEV-0014` để bảo vệ FPR trước `V2-DEV-0012`, và không sửa lỗi corpus đóng băng `V2-DEV-0019`) là hoàn toàn thuyết phục.
+
+---
+
+## Trạng thái theo ID
+
+- `P3W2E-FIX`: **NONE** (Không có)
+- `P3W2E-BLOCK`: **NONE** (Không có)
+- `P3W2E-NEW`: **NONE** (Không có)
+
+---
+
+## Đánh giá chi tiết
+
+### 1. Hướng H3b+H4 (Đã commit tại `bbb78f3318c09f44847d952027e1fe895ccb5d98`)
+- **Cơ chế và tính đúng đắn trong `app/services/rag_query.py`**:
+  - Bảng `_BEST_EVIDENCE_UNUSABLE_KINDS` (`app/services/rag_query.py:190-194`) định nghĩa thứ tự ưu tiên kiểm tra rõ ràng:
+    1. `("block", "context_guard_best_evidence_blocked")`
+    2. `("human_review", "context_guard_best_evidence_human_review")`
+    3. `("sanitize_emptied", "context_guard_best_evidence_sanitize_emptied")`
+  - Hàm `_is_unusable_kind(kind, outcome)` (`app/services/rag_query.py:197-207`) chỉ xét các chunk đã bị loại (`not accepted`):
+    - `block`: `decision == Decision.BLOCK`
+    - `sanitize_emptied`: `decision == Decision.SANITIZE and reason_code == _CONTEXT_SANITIZE_EMPTIED` (các chunk `SANITIZE` còn giữ lại nội dung văn bản hoặc các chunk bị loại do `context_guard_sanitize_low_relevance_excluded` không kích hoạt nhánh này).
+    - `human_review`: `decision == Decision.HUMAN_REVIEW`
+  - Hàm `_excluded_evidence_is_best(hits, outcomes, kind)` (`app/services/rag_query.py:210-236`) tái sử dụng nguyên vẹn bộ so sánh điểm số và thứ hạng của H1: so sánh `max(abs(hit.retrieval_score) for hit in excluded) >= max(abs(hit.retrieval_score) for hit in surviving)` khi điểm số khả dĩ, và fallback sang `min(hit.rank for hit in excluded) <= min(hit.rank for hit in surviving)` khi điểm số không khả dĩ (`0.0`, `NaN`, `Inf`, hoặc trái dấu). Hàm `_best_evidence_was_blocked` (`app/services/rag_query.py:239-244`) được giữ lại làm wrapper tương thích ngược gọi `_excluded_evidence_is_best(hits, outcomes, "block")`.
+  - **Không veto khi bằng chứng bị loại yếu hơn bằng chứng sạch còn sống**: Nếu chunk bị `BLOCK`, `HUMAN_REVIEW`, hoặc `sanitize_emptied` có điểm/hạng kém hơn một survivor sạch, truy vấn vẫn tiếp tục bình thường. Điều này bảo vệ trực tiếp ca lành tính `V2-DEV-0012` (có chunk `sanitize_emptied` ở hạng 3 với độ mạnh `4.581` < survivor sạch `5.791`) cũng như toàn bộ các ca `mixed` (`V2-DEV-0025`–`0028`).
+  - **Đường dừng fail-closed và audit trail (`app/services/rag_query.py:929-948`)**: Khi `guard_profile.rag_context_guard` bật và `_best_evidence_unusable_reason(accepted_hits, context_outcomes)` trả về `unusable_reason`, toàn bộ `passed_pairs` được cập nhật `context_outcomes[hit.chunk_id] = (False, unusable_reason, context_outcomes[hit.chunk_id][2])`, ghi nhận `StageResult(stage="rag_context_guard", decision=Decision.BLOCK, reason_code=unusable_reason)`, và xóa `passed_pairs = []` để đi vào nhánh `STOP_ALL_CONTEXT_BLOCKED` (`provider_called=False`).
+- **Kết quả thực nghiệm trên tập `development` (`MOCK`)**:
+  - `C0_all_on`, `C2_no_provenance`, `C4_no_dlp`, `C5_no_output`: AOMR tăng từ `10/14` (`0.714`) lên `12/14` (`0.857`); FPR giữ nguyên `1/12` (`V2-DEV-0011`).
+  - `C1_no_input`: AOMR tăng từ `9/14` lên `11/14`; FPR giữ nguyên `1/12`.
+  - `C3_no_context`, `C6_none`, `C7_no_context_no_output`: Giữ nguyên `5/14`, `4/14`, `5/14` và FPR `1/12`, đúng tính chất ablation khi tắt `rag_context_guard`.
+  - Hai ca duy nhất đổi trạng thái trên `C0, C1, C2, C4, C5` là `V2-DEV-0021` (nhờ `context_guard_best_evidence_sanitize_emptied`) và `V2-DEV-0018` (nhờ `context_guard_best_evidence_human_review`), từ `allow/allowed` sang `block/all_context_blocked`.
+
+### 2. Hướng H3b riêng lẻ (`w2e/h3b.patch` — Đạt cửa nhưng không ship riêng) và Trần hợp lý (`0014`, `0019`)
+- **H3b riêng lẻ**: Chỉ mở rộng cho `sanitize_emptied`, giúp lật `V2-DEV-0021` (AOMR `11/14`, FPR `1/12`). Vì **H3b+H4** bao hàm hoàn toàn H3b và xử lý thêm `V2-DEV-0018` (AOMR `12/14`, FPR `1/12`) dựa trên cùng một nguyên lý bằng chứng tốt nhất không khả dụng, việc ship gộp **H3b+H4** là hợp lý.
+- **`V2-DEV-0014` (Trần hợp lý dưới ràng buộc FPR)**: Chunk mục tiêu nằm ở hạng 3 và bị `sanitize_emptied` trong khi bằng chứng tốt nhất là chunk sạch. Mọi quy tắc gộp bất kỳ chunk `sanitize_emptied` nào không xét tương quan độ mạnh với bằng chứng tốt nhất đều sẽ làm ca lành tính `V2-DEV-0012` (cũng có chunk `sanitize_emptied` ở hạng 3) biến thành False Positive, đẩy FPR lên `2/12`. Do đó, dừng lại ở đây là quyết định đúng đắn.
+- **`V2-DEV-0019` (Lỗi soạn thảo corpus đóng băng)**: Hai nửa payload đều được truy hồi và `ALLOW` cả ở từng chunk lẫn aggregate. Việc chấp nhận miss này thay vì sửa corpus đóng băng hay thêm quy tắc đặc thù theo case là tuân thủ nghiêm ngặt quy chế benchmark.
+
+---
+
+## Các xác nhận bắt buộc
+
+1. **Xác nhận không tắt lớp bảo vệ**:
+   - Không có bất kỳ lớp bảo vệ nào (`input_guard`, `acl_guard`, `provenance_guard`, `rag_context_guard`, `aggregate_context_guard`, `dlp`, `output_guard`) bị tắt, bypass hay nới lỏng.
+2. **Xác nhận FPR không tăng**:
+   - FPR giữ nguyên ở mức `1/12` (`0.083`, duy nhất ca `V2-DEV-0011`) trên cả 8 cấu hình `C0–C7`.
+   - Cả 4 ca `mixed` (`V2-DEV-0025`–`0028`) vẫn giữ nguyên `allow/allowed` trên toàn bộ `C0–C7`.
+3. **Xác nhận không overfit từng case**:
+   - Logic trong `app/services/rag_query.py` chỉ dựa trên trạng thái loại trừ (`Decision.BLOCK`, `Decision.HUMAN_REVIEW`, `Decision.SANITIZE` + `context_guard_sanitize_emptied`) và tương quan điểm số/thứ hạng truy hồi trong phạm vi một truy vấn. Hoàn toàn không có hardcode theo `case_id`, `document_id`, `chunk_id`, từ khóa đề bài hay nhãn của bộ dữ liệu.
+4. **Xác nhận bằng chứng kiểm thử và tuân thủ ranh giới**:
+   - Ghi nhận bằng chứng kiểm thử của coordinator trên commit `bbb78f3318c09f44847d952027e1fe895ccb5d98`: `156 passed` trên bộ test liên quan trực tiếp (`test_rag_pipeline` + `test_sqlite_bm25` + `test_rag_guard`), `349 passed` trên bộ mở rộng (thêm guard/ingestion/routes), và `79 passed` trên bộ W13.
+   - Đã đối chiếu trực tiếp mã nguồn và các bài test mới trong `tests/test_rag_pipeline.py` (`test_best_evidence_sanitized_to_empty_fails_closed`, `test_partially_sanitized_best_evidence_still_answers`, `test_best_evidence_emptied_uses_rank_when_scores_unusable`, `test_best_evidence_reason_prefers_block_when_both_apply`, `test_best_evidence_held_for_review_fails_closed`, `test_weaker_review_chunk_does_not_veto_clean_context`).
+   - Tuân thủ tuyệt đối các điều cấm: không chạy hay đụng tới `val`, `holdout`, `cases/validation.jsonl`, `/workspace/work/W1`, `/workspace/work/W2`, `/workspace/repo`; không push, không merge, không sửa code; không dùng cờ bypass và không nâng Ollama.
+
+---
+
+## Ghi chú không chặn (Non-blocking notes)
+
+1. **Rủi ro overfit thống kê trên mẫu nhỏ (`n_M = 14`, `n_B = 12`)**:
+   - Trên tập `development`, mỗi ca malicious đổi trạng thái tương ứng `1/14 ≈ 0.0714` AOMR và mỗi ca benign tương ứng `1/12 ≈ 0.0833` FPR. Khoảng tin cậy Wilson 95% giữa baseline `10/14` (`[0.454, 0.883]`) và H3b+H4 `12/14` (`[0.601, 0.960]`) giao thoa lớn, và trên C0 chỉ có 3 ca có ứng viên rơi vào nhánh mới khi đang trả lời (`V2-DEV-0012` benign không kích hoạt; `V2-DEV-0018`, `V2-DEV-0021` malicious kích hoạt). Khoảng cách điểm số giữa chunk bị làm rỗng và survivor mạnh nhất ở ca benign `V2-DEV-0012` là `4.581` so với `5.791` (~21%); trên dữ liệu chưa thấy, nếu một truy vấn lành tính có chunk bị làm rỗng hoặc giữ chờ duyệt có điểm cao hơn hoặc bằng chunk sạch tốt nhất, quy tắc này sẽ đánh đổi tính sẵn sàng để fail-closed (tạo FP).
+2. **H4 chủ đích chuyển best-evidence `HUMAN_REVIEW` thành `block / all_context_blocked` thay vì final `human_review`**:
+   - Khi bằng chứng tốt nhất bị `Decision.HUMAN_REVIEW` và vẫn còn các chunk sạch yếu hơn (`passed_pairs` không rỗng trước bước kiểm tra best-evidence), nhánh H4 gán `StageResult(..., decision=Decision.BLOCK, reason_code="context_guard_best_evidence_human_review")` và đưa truy vấn về `final_decision = Decision.BLOCK`, `stop_reason = STOP_ALL_CONTEXT_BLOCKED` thay vì kết thúc với `final_decision = Decision.HUMAN_REVIEW`. Đây là lựa chọn thiết kế có chủ đích để giữ nguyên từ vựng `stop_reason` của runner/label hiện hành và thống nhất với đường fail-closed khi toàn bộ ngữ cảnh bị loại. Trong vận hành thực tế, người vận hành vẫn có thể phân biệt trường hợp này thông qua `reason_code = "context_guard_best_evidence_human_review"` trong `stage_results` và `provenance`.

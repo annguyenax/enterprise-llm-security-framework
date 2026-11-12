@@ -1,0 +1,17 @@
+VERDICT: PASS
+W1: PASS — Đủ output, tiêu chí pass, owner, blocker và phụ thuộc, đảm bảo khôi phục dev/val khớp manifest mà không trộn holdout P2 vào tập tune.
+W2: PASS — Đủ cấu trúc và ràng buộc chẩn đoán tầng context chỉ trên dev+val, có quy ước tử/mẫu số và ngưỡng cỡ mẫu tối thiểu chờ duyệt.
+W3: PASS — Đủ output, owner, blocker, phụ thuộc và các ngưỡng pass trên dev+val đều gắn nhãn "đề xuất, chờ An duyệt", cấm tắt context hoặc xem holdout P2.
+W4: PASS — Đủ cấu trúc, phản ánh đúng kết quả kiểm tra license và giữ quyết định loại deepset khỏi bảng chính cho đến khi làm rõ xung đột.
+W5: PASS — Đủ quy trình đóng băng P3-holdout one-shot với ngưỡng chờ An duyệt và cách báo cáo P2 đúng chuẩn USED/diagnostic kèm tử/mẫu số và hash.
+W6: PASS — Đủ output, owner, blocker, phụ thuộc và giữ đúng giới hạn garak/PyRIT chỉ kiểm bề mặt `/v1/rag/query` chứ không đo indirect injection.
+W7: PASS — Đủ cấu trúc kiểm chứng indirect injection đi qua đường ingest/retrieval thật và tách rõ tỷ lệ retrieve-hit với hiệu quả chặn tầng context.
+W8: PASS — Đủ output, owner, blocker, phụ thuộc và ghi nhận đúng trạng thái Judge trên đường RAG hiện chưa nối nên overhead Judge ON là UNKNOWN.
+W9: PASS — Đủ quy trình đo latency p50/p95/p99 tách bạch các chế độ, không dùng lại latency P2 và mọi ngưỡng số/cỡ mẫu đều gắn nhãn chờ An duyệt.
+W10: PASS — Đủ cấu trúc chạy baseline tuần tự trên 6GB VRAM, nêu đúng giới hạn cửa sổ 512 token của Prompt Guard 2 và sự lệch chủng loại cũng như thiếu hỗ trợ tiếng Việt chính thức của Llama Guard 3 1B.
+W11: PASS — Đủ tiêu chí spike ngắn hạn với quyết định go/no-go rõ ràng, owner và rủi ro phụ thuộc trên Windows trước khi đưa NeMo vào bảng so sánh.
+W12: PASS — Đủ cấu trúc bảng tổng hợp, owner, phụ thuộc, các cổng dừng/blocker và ngưỡng cổng official trên P3-holdout có nhãn "đề xuất, chờ An duyệt" kèm nguyên tắc không tune lại sau one-shot.
+DONE: PASS — Bảy điều kiện kết thúc giai đoạn RAG đầy đủ, bảo toàn các ràng buộc về P2 USED, P3 one-shot, giới hạn bề mặt query, retrieval thật, trạng thái Judge UNKNOWN nếu chưa nối và đều gắn nhãn "đề xuất, chờ An duyệt".
+LICENSE: PASS — Bảng license phản ánh chính xác kết quả kiểm tra card/API, ghi rõ xung đột của deepset, điều kiện CC-BY-SA-4.0 từng phần của BIPIA, cơ chế gated và việc thiếu tiếng Việt trong Supported languages của các model Llama.
+TIME: PASS — Trình bày minh bạch cả bốn ước lượng kèm độ tin cậy tự khai, không biến một con số đơn lẻ thành sự thật và để lịch trình chi tiết ở trạng thái "đề xuất, chờ An duyệt".
+NEW: NONE
