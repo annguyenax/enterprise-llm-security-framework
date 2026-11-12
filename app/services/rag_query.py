@@ -183,6 +183,34 @@ def _primary_relevance_chunk_ids(hits: list[RetrievalHit]) -> set[str]:
     }
 
 
+def _best_evidence_was_blocked(
+    hits: list[RetrievalHit],
+    outcomes: dict[str, tuple[bool, str, Decision]],
+) -> bool:
+    """Whether a BLOCK removed evidence at least as strong as every survivor.
+
+    Scores are compared within one query, using the same negative-BM25 /
+    positive-similarity convention as the sanitize relevance policy. Exact
+    top-score ties count as best evidence too. With unusable scores, retrieval
+    rank is the fallback; incidental lower-ranked BLOCKs do not stop a query.
+    SANITIZE and HUMAN_REVIEW exclusions do not trigger this policy.
+    """
+    blocked = [hit for hit in hits if outcomes[hit.chunk_id][2] == Decision.BLOCK]
+    surviving = [hit for hit in hits if outcomes[hit.chunk_id][0]]
+    if not blocked or not surviving:
+        return False  # The existing empty-context fail-closed path handles no survivors.
+    scores = [hit.retrieval_score for hit in hits]
+    comparable = all(
+        isinstance(score, (int, float)) and not isinstance(score, bool) and math.isfinite(score)
+        for score in scores
+    ) and (all(score <= 0 for score in scores) or all(score >= 0 for score in scores))
+    if comparable and any(score != 0 for score in scores):
+        return max(abs(hit.retrieval_score) for hit in blocked) >= max(
+            abs(hit.retrieval_score) for hit in surviving
+        )
+    return min(hit.rank for hit in blocked) <= min(hit.rank for hit in surviving)
+
+
 def _now_ms() -> float:
     return time.perf_counter() * 1000.0
 
@@ -846,6 +874,23 @@ def run_rag_query_uncommitted(
                 True, "rag_context_guard_disabled_ablation", Decision.ALLOW,
             )
             passed_pairs.append((hit, candidate))
+
+    if guard_profile.rag_context_guard and _best_evidence_was_blocked(accepted_hits, context_outcomes):
+        # Security policy: answering from leftovers after the best evidence
+        # was blocked as unsafe is not safe. Clean but weaker neighbours are
+        # not an adequate substitute for the query's strongest evidence.
+        # This is BLOCK-only and relevance-dependent, not an any-BLOCK veto.
+        for hit, _chunk in passed_pairs:
+            context_outcomes[hit.chunk_id] = (
+                False, "context_guard_best_evidence_blocked", context_outcomes[hit.chunk_id][2],
+            )
+        stage_results.append(
+            StageResult(
+                stage="rag_context_guard", decision=Decision.BLOCK,
+                reason_code="context_guard_best_evidence_blocked",
+            )
+        )
+        passed_pairs = []
 
     if not passed_pairs:
         provenance_summaries = _summaries_from_provenance(provenance_decisions, context_outcomes, False)

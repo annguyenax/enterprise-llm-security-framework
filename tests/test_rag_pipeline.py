@@ -41,6 +41,7 @@ from app.services.rag_query import (
     STOP_OUTPUT_BLOCKED,
     STOP_RESPONSE_CONSTRUCTION_FAILED,
     STOP_TOP_K_REJECTED,
+    _best_evidence_was_blocked,
     _bound_chunks_for_aggregate,
     _primary_relevance_chunk_ids,
     audit_top_k_rejected,
@@ -239,7 +240,8 @@ def test_mixed_context_keeps_benign_and_drops_malicious():
     retriever = _StubRetriever(
         [
             _hit(chunk_id="benign", text="Standard shipping takes 3-5 business days."),
-            _hit(chunk_id="malicious", document_id="d2", text=_MALICIOUS_TEXT),
+            _hit(chunk_id="malicious", document_id="d2", text=_MALICIOUS_TEXT,
+                 rank=2, retrieval_score=-0.2),
         ]
     )
     result = _run(retriever)
@@ -264,7 +266,8 @@ def test_rejected_chunks_never_reach_provider():
     retriever = _StubRetriever(
         [
             _hit(chunk_id="benign", text="Standard shipping takes 3-5 business days."),
-            _hit(chunk_id="malicious", document_id="d2", text=_MALICIOUS_TEXT),
+            _hit(chunk_id="malicious", document_id="d2", text=_MALICIOUS_TEXT,
+                 rank=2, retrieval_score=-0.2),
         ]
     )
     _run(retriever, provider=provider)
@@ -272,6 +275,57 @@ def test_rejected_chunks_never_reach_provider():
     doc_ids = [c.doc_id for c in provider.received_context_chunks]
     assert "d2" not in doc_ids  # the malicious hit's document must never reach the provider
     assert len(provider.received_context_chunks) == 1
+
+
+@pytest.mark.parametrize("blocked_score,clean_score", [(-4.0, -1.0), (-4.0, -4.0), (4.0, 1.0)])
+def test_best_blocked_evidence_fails_closed_with_clean_leftovers(blocked_score, clean_score):
+    provider = _ScriptedProvider("Unused answer.")
+    result = _run(_StubRetriever([
+        _hit(chunk_id="unsafe", text=_MALICIOUS_TEXT, retrieval_score=blocked_score),
+        _hit(chunk_id="clean", document_id="clean-doc", rank=2, retrieval_score=clean_score),
+    ]), provider=provider)
+    assert result.final_decision == Decision.BLOCK
+    assert result.stop_reason == STOP_ALL_CONTEXT_BLOCKED
+    assert result.provider_called is False
+    assert provider.received_request is None
+    assert result.accepted_context_count == 0
+    assert result.rejected_context_count == 2
+    reasons = {p.chunk_id: p.reason_code for p in result.provenance}
+    assert reasons["unsafe"] == "context_guard_block"
+    assert reasons["clean"] == "context_guard_best_evidence_blocked"
+    assert all(p.status == "rejected" for p in result.provenance)
+
+
+@pytest.mark.parametrize("score", [0.0, float("nan"), float("inf")])
+@pytest.mark.parametrize("blocked_rank,expected", [(1, True), (3, False)])
+def test_best_blocked_evidence_uses_rank_when_scores_unusable(score, blocked_rank, expected):
+    hits = [_hit(chunk_id="unsafe", rank=blocked_rank, retrieval_score=score),
+            _hit(chunk_id="clean", rank=2, retrieval_score=score)]
+    outcomes = {"unsafe": (False, "context_guard_block", Decision.BLOCK),
+                "clean": (True, "context_guard_allow", Decision.ALLOW)}
+    assert _best_evidence_was_blocked(hits, outcomes) is expected
+
+
+@pytest.mark.parametrize("decision", [Decision.SANITIZE, Decision.HUMAN_REVIEW])
+def test_best_non_block_exclusion_does_not_veto_clean_context(decision):
+    hits = [_hit(chunk_id="excluded", retrieval_score=-10.0),
+            _hit(chunk_id="clean", rank=2, retrieval_score=-1.0)]
+    outcomes = {"excluded": (False, "context_guard_excluded", decision),
+                "clean": (True, "context_guard_allow", Decision.ALLOW)}
+    assert _best_evidence_was_blocked(hits, outcomes) is False
+
+
+def test_lower_scored_block_does_not_veto_provider_call():
+    provider = _ScriptedProvider("Safe answer.")
+    result = _run(_StubRetriever([
+        _hit(chunk_id="clean", retrieval_score=-5.0),
+        _hit(chunk_id="unsafe", document_id="unsafe-doc", text=_MALICIOUS_TEXT,
+             rank=2, retrieval_score=-1.0),
+    ]), provider=provider)
+    assert result.final_decision == Decision.ALLOW
+    assert result.stop_reason == STOP_ALLOWED
+    assert result.provider_called is True
+    assert [c.doc_id for c in provider.received_context_chunks] == ["d1"]
 
 
 def test_vietnamese_benign_context_passes_end_to_end():
