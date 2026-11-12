@@ -12,6 +12,8 @@ import importlib.util
 import json
 import sys
 import uuid
+
+from v2_synthetic_support import synthetic_benchmark
 from pathlib import Path
 
 import pytest
@@ -1173,7 +1175,7 @@ def test_analyzer_rejects_existing_analysis_directory(analyzer, tmp_path, attemp
     )
     hooks = _clean_repo_hooks(analyzer, parsed.execution_branch, parsed.execution_commit)
     monkeypatch.setattr(
-        runner, "verify_frozen_manifest",
+        analyzer.runner, "verify_frozen_manifest",
         lambda *a, **k: runner.ManifestIdentity(
             sha256=parsed.benchmark_manifest_sha256, status="final", file_count=9
         ),
@@ -1475,7 +1477,7 @@ def test_holdout_identity_keys_introduce_no_metric(analyzer):
 # Synthetic end-to-end: analyze_holdout_results -> _build_analysis -> publish
 #
 # The frozen holdout case/label files are NEVER opened. The synthetic
-# benchmark content is the DEVELOPMENT split (safe to read), returned by a
+# benchmark content is an invented in-memory development inventory, returned by a
 # monkeypatched `load_authorized_holdout_benchmark`, while the artifacts are
 # labelled with the holdout split and holdout schemas. This exercises the real
 # analysis builder and the real atomic publication path without any holdout
@@ -1630,13 +1632,12 @@ def _synthetic_holdout_matrix(runner, analyzer, attempt_root, parsed, benchmark,
 
 
 @pytest.fixture()
-def synthetic_holdout_attempt(tmp_path, runner, analyzer, authorization_payload):
+def synthetic_holdout_attempt(tmp_path, runner, analyzer, authorization_payload, monkeypatch):
     """A complete synthetic authorized holdout attempt, ready to analyze."""
     benchmark_root = runner.ROOT / "datasets" / "v2"
-    real_manifest = runner.verify_frozen_manifest(benchmark_root)
-    # Synthetic benchmark CONTENT is the development split; the holdout files
-    # are never opened.
-    benchmark = runner.load_split_benchmark(benchmark_root, "development")
+    real_manifest = runner.ManifestIdentity("a" * 64, "final", 9)
+    benchmark = synthetic_benchmark(runner, analyzer)
+    monkeypatch.setattr(analyzer.runner, "verify_frozen_manifest", lambda _root: real_manifest)
 
     attempt_root = tmp_path / "p12e4-attempt-1"
     authorization_payload["output_root"] = str(attempt_root)
@@ -1999,16 +2000,8 @@ def _guard_against_opening_real_holdout(monkeypatch):
             resolved = self.resolve()
         except OSError:
             resolved = self
-        if resolved in forbidden:
-            # Byte-hashing the frozen holdout files is legitimate and required
-            # by `verify_frozen_manifest`; Phase 12E.3 closure recorded them as
-            # "byte-hashed, not parsed". Anything that could READ CONTENT for
-            # parsing (text mode) is what must never happen in a test.
-            mode = kwargs.get("mode", args[0] if args else "r")
-            if "b" not in str(mode):
-                raise AssertionError(
-                    "test attempted to parse a real holdout artifact (mode=%r)" % (mode,)
-                )
+        if resolved.is_relative_to(ROOT / "datasets/v2") and resolved.suffix in {".jsonl", ".json"}:
+            raise AssertionError("real benchmark contents and hashing are forbidden in synthetic tests")
         return real_open(self, *args, **kwargs)
 
     monkeypatch.setattr(Path, "open", guarded)
@@ -2310,14 +2303,15 @@ def test_valid_runtime_settings_pass_the_safety_gate(runner):
 # ===========================================================================
 
 
-def _mutated_holdout_attempt(runner, analyzer, tmp_path, authorization_payload, mutate):
+def _mutated_holdout_attempt(runner, analyzer, tmp_path, authorization_payload, mutate, monkeypatch):
     """Build a complete synthetic attempt, apply `mutate`, and re-hash so the
     artifacts stay internally consistent."""
     import hashlib
 
     benchmark_root = runner.ROOT / "datasets" / "v2"
-    real_manifest = runner.verify_frozen_manifest(benchmark_root)
-    benchmark = runner.load_split_benchmark(benchmark_root, "development")
+    real_manifest = runner.ManifestIdentity("a" * 64, "final", 9)
+    benchmark = synthetic_benchmark(runner, analyzer)
+    monkeypatch.setattr(analyzer.runner, "verify_frozen_manifest", lambda _root: real_manifest)
 
     attempt_root = tmp_path / "mut-attempt"
     authorization_payload["output_root"] = str(attempt_root)
@@ -2403,7 +2397,7 @@ def test_stage_a_rejects_every_identity_mutation_before_loader(
     """Codex finding: provider_behavior_hash and experiment_id mutations used to
     reach the loader. Every identity below must now be rejected in Stage A."""
     auth_path, manifests, benchmark, repository = _mutated_holdout_attempt(
-        runner, analyzer, tmp_path, authorization_payload, mutate
+        runner, analyzer, tmp_path, authorization_payload, mutate, monkeypatch
     )
     loader_calls = []
 

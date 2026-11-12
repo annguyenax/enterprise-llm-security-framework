@@ -317,6 +317,16 @@ def test_production_credentials_rejected_for_ollama(lab, monkeypatch, credential
     assert not lab.root.exists()
 
 
+def test_ollama_provider_spec_keeps_settings_and_preclaim_checks(lab, monkeypatch):
+    context = _preflight(lab, provider_id="ollama")
+    bad_settings = dataclasses.replace(context.settings, llm_provider="mock")
+    with pytest.raises(runner.IntegrityError, match="Ollama settings are required"):
+        runner._ollama_provider_spec(bad_settings, holdout_capability=context.holdout_capability)
+    monkeypatch.setenv(runner.PRODUCTION_CREDENTIAL_ENV_VARS[0], "test-only-placeholder")
+    with pytest.raises(runner.IntegrityError, match="credentials"):
+        runner._ollama_provider_spec(context.settings, holdout_capability=context.holdout_capability)
+
+
 @pytest.mark.parametrize("url", ["http://localhost:11434", "http://127.0.0.1:80", "https://127.0.0.1:11434",
     "http://user@127.0.0.1:11434", "http://127.0.0.1:11434?x=1", "http://127.0.0.1:11434#fragment",
     "http://127.0.0.1:11434/", "http://192.0.2.1:11434"])

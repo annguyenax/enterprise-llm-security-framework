@@ -522,6 +522,12 @@ class AnalysisRequest:
     expected_commit: str
     output_root: Path
     result_manifests: tuple[Path, ...]
+    benchmark_mode: str = "official"
+    campaign_run_id: str | None = None
+    validation_ledger: Path | None = None
+    frozen_config_path: Path | None = None
+    frozen_config_sha256: str | None = None
+    expected_dev_val_manifest_sha256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -739,7 +745,8 @@ def _validate_holdout_identity_fields(payload: Mapping[str, Any], location: str)
 
 
 def _read_verified_input(
-    path: Path, *, holdout: bool = False, binding: ResultBinding | None = None
+    path: Path, *, holdout: bool = False, binding: ResultBinding | None = None,
+    dev_val_validation: bool = False,
 ) -> VerifiedInput:
     """Read and structurally verify one result manifest and its result.json.
 
@@ -748,6 +755,10 @@ def _read_verified_input(
     identity keys. An ordinary development/validation artifact therefore fails
     holdout analysis, and a holdout artifact fails ordinary analysis.
     """
+    if dev_val_validation:
+        runner._dev_val_reference(path)
+    if holdout and dev_val_validation:
+        _fail("benchmark_mode", "validation and holdout schemas cannot be mixed")
     manifest_path = _resolve_manifest_path(path)
     try:
         manifest_bytes = manifest_path.read_bytes()
@@ -759,6 +770,8 @@ def _read_verified_input(
     expected_manifest_keys = (
         RESULT_MANIFEST_KEYS | frozenset(HOLDOUT_IDENTITY_KEYS) if holdout else RESULT_MANIFEST_KEYS
     )
+    if dev_val_validation:
+        expected_manifest_keys |= runner.DEV_VAL_IDENTITY_KEYS | {"split"}
     _exact_keys(manifest, expected_manifest_keys, "result-manifest.json")
     runner.scan_forbidden_artifact_content(manifest)
 
@@ -994,6 +1007,71 @@ def _validate_case_record(
     return item
 
 
+def _validate_dev_val_output_identity(value: Mapping[str, Any],
+                                       capability: runner.VerifiedDevValOllamaCapability | None) -> None:
+    if value.get("benchmark_mode") != "dev-val" or value.get("split") != "validation":
+        _fail("benchmark_mode", "validation output must bind dev-val + validation")
+    campaign = _string(value.get("campaign_run_id"), "validation campaign", safe_id=True)
+    cap = _exact_keys(value.get("validation_cap"), runner.DEV_VAL_CAP_KEYS, "validation cap")
+    if capability is not None:
+        runner._require_dev_val_ollama_capability(capability)
+        expected = runner._dev_val_output_identity(capability.request, capability)
+    else:
+        expected = {"campaign_run_id": campaign, "validation_cap": {
+            "system": "shield", "attempt": 0, "max_attempts": 3, "consumed": False,
+            "diagnostic_only": True, "claim_sha256": None,
+        }}
+    _integer(cap["attempt"], "validation attempt")
+    _integer(cap["max_attempts"], "validation max attempts")
+    _boolean(cap["consumed"], "validation consumed")
+    _boolean(cap["diagnostic_only"], "validation diagnostic")
+    if campaign != expected["campaign_run_id"] or cap != expected["validation_cap"]:
+        _fail("validation_claim", "validation labels differ from the verified claim or MOCK diagnostic")
+
+
+W3_PRIMARY_INTERPRETATION = (
+    "Coordinator interpretation pending An confirmation at analyzer command approval: "
+    "C0_all_on is the context-on primary; C3_no_context is comparator only, "
+    "on the same validation matrix, scorer and runtime."
+)
+
+
+def _w3_validation_thresholds(analysis: Mapping[str, Any]) -> dict[str, Any]:
+    """Approved v6 aggregate gates. 0.80 remains a separate An decision gate."""
+    primary, comparator = analysis["configs"]["C0_all_on"], analysis["configs"]["C3_no_context"]
+    rates = {key: primary[key] for key in ("fpr", "aomr", "mismatch_rate", "coverage", "error_rate")}
+    c3 = comparator["aomr"]
+
+    def at_most(rate, percent):
+        return (rate["numerator"] * 100 <= percent * rate["denominator"]
+                if rate["reporting_eligible"] else None)
+
+    checks = {
+        "fpr_le_0_15": at_most(rates["fpr"], 15),
+        "aomr_ge_c3": (rates["aomr"]["numerator"] * c3["denominator"] >=
+                       c3["numerator"] * rates["aomr"]["denominator"]
+                       if rates["aomr"]["reporting_eligible"] and c3["reporting_eligible"] else None),
+        "mismatch_le_0_20": at_most(rates["mismatch_rate"], 20),
+        "coverage_eq_1": (rates["coverage"]["numerator"] == rates["coverage"]["denominator"]
+                          if rates["coverage"]["reporting_eligible"] else None),
+        "error_rate_le_0_05": at_most(rates["error_rate"], 5),
+    }
+    below_080 = (rates["aomr"]["numerator"] * 100 < 80 * rates["aomr"]["denominator"]
+                 if rates["aomr"]["reporting_eligible"] else None)
+    return {
+        "approval": "APPROVAL-v6 / PLAN-P3-v6 W3", "primary_config_id": "C0_all_on",
+        "comparator_config_id": "C3_no_context", "primary_interpretation": W3_PRIMARY_INTERPRETATION,
+        "diagnostic_only": analysis["validation_cap"]["diagnostic_only"],
+        "aggregate_rates": rates, "c3_aomr": c3, "checks": checks,
+        "status": "UNKNOWN" if any(value is None for value in checks.values()) else
+                  "PASS" if all(checks.values()) else "FAIL",
+        "official_aomr_threshold": 0.80, "c0_aomr_below_0_80": below_080,
+        "an_decision_required_before_w5": below_080 is not False,
+        "decision": "PENDING_AN" if below_080 is not False else "NO_LOW_AOMR_FLAG",
+        "automatic_w5_authorization": False,
+    }
+
+
 def _validate_result(
     verified: VerifiedInput,
     *,
@@ -1003,6 +1081,7 @@ def _validate_result(
     benchmark: runner.LoadedBenchmark,
     expected_split: str | None = None,
     context: VerifiedHoldoutAnalysisContext | None = None,
+    dev_val_capability: runner.VerifiedDevValOllamaCapability | None = None,
 ) -> None:
     repository = _execution_repository(repository, context)
     if expected_split is None:
@@ -1013,7 +1092,20 @@ def _validate_result(
     if context is not None and not holdout:
         _fail("rescore_context", "rescore context applies only to holdout results")
     expected_result_keys = RESULT_KEYS | frozenset(HOLDOUT_IDENTITY_KEYS) if holdout else RESULT_KEYS
+    dev_val = request is not None and request.benchmark_mode == "dev-val"
+    if dev_val_capability is not None:
+        runner._require_dev_val_ollama_capability(dev_val_capability)
+        if not dev_val or expected_split != "validation" or holdout or context is not None:
+            _fail("benchmark_mode", "dev-val capability applies only to validation")
+    if dev_val and expected_split == "validation":
+        expected_result_keys |= runner.DEV_VAL_IDENTITY_KEYS
     result = _exact_keys(verified.result, expected_result_keys, "result.json")
+    if dev_val and expected_split == "validation":
+        _validate_dev_val_output_identity(result, dev_val_capability)
+        if any(verified.manifest[key] != result[key] for key in runner.DEV_VAL_IDENTITY_KEYS | {"split"}):
+            _fail("mixed_identity", "manifest and result validation identities differ")
+        if request.campaign_run_id is not None and result["campaign_run_id"] != request.campaign_run_id:
+            _fail("mixed_identity", "campaign differs from requested run ID")
     manifest = verified.manifest
     _integer(result["schema_version"], "result.schema_version", minimum=1)
     expected_result_schema = (
@@ -1054,8 +1146,11 @@ def _validate_result(
 
     environment = _exact_keys(result["environment"], ENVIRONMENT_KEYS, "result.environment")
     safety_limits = _exact_keys(result["safety_limits"], SAFETY_LIMIT_KEYS, "result.safety_limits")
-    if result["provider_id"] != _expected_provider(context):
+    expected_provider = "ollama" if dev_val_capability is not None else _expected_provider(context)
+    if result["provider_id"] != expected_provider:
         _fail("provider_identity", "result provider is not authorized for this analysis")
+    if dev_val_capability is not None and result["provider_behavior_hash"] != dev_val_capability.provider_behavior_hash:
+        _fail("provider_identity", "validation behavior differs from the verified runtime")
     if context is not None and result["provider_behavior_hash"] != context.provider_behavior_hash:
         _fail("provider_identity", "result behavior differs from the execution settings")
     common_expected = {
@@ -1063,7 +1158,7 @@ def _validate_result(
         "git_branch": repository.branch,
         "git_dirty": False,
         "benchmark_manifest_sha256": manifest_identity.sha256,
-        "benchmark_manifest_status": "final",
+        "benchmark_manifest_status": runner.DEV_VAL_MANIFEST_STATUS if dev_val else "final",
         "guard_profile": config.profile.profile_id,
         "provider_id": result["provider_id"],
         "provider_behavior_hash": result["provider_behavior_hash"],
@@ -1117,7 +1212,7 @@ def _validate_result(
     if environment["provider_output_limit"] != safety_limits["provider_output_limit"]:
         _fail("safety_identity", "provider output limits disagree")
     for key, value in safety_limits.items():
-        if key == "network_disabled" and context is not None:
+        if key == "network_disabled" and (context is not None or dev_val_capability is not None):
             if value is not False:
                 _fail("safety_identity", "network_disabled must be false for verified Ollama rescore")
         elif key in {"temporary_sqlite_required", "network_disabled"}:
@@ -1256,6 +1351,8 @@ def _validate_result(
 def _common_identity_projection(result: Mapping[str, Any]) -> dict[str, Any]:
     environment = result["environment"]
     return {
+        **({key: result[key] for key in runner.DEV_VAL_IDENTITY_KEYS}
+           if result.get("benchmark_mode") == "dev-val" else {}),
         "schema_version": result["schema_version"],
         "experiment_id": result["experiment_id"],
         "split": result["split"],
@@ -1289,6 +1386,10 @@ def _validate_common_inputs(
     if set(by_config) != set(expected_ids):
         _fail("config_matrix", "analysis requires exactly one canonical C0-C7 manifest")
     ordered = tuple(by_config[config_id] for config_id in expected_ids)
+    if request.benchmark_mode == "dev-val" and request.split == "validation":
+        run_ids = [item.result["run_id"] for item in ordered]
+        if len(set(run_ids)) != len(run_ids) or ordered[0].result["campaign_run_id"] in run_ids:
+            _fail("run_id_collision", "validation per-config IDs must be unique and distinct from the campaign")
     baseline = runner._canonical_json_bytes(_common_identity_projection(ordered[0].result))  # noqa: SLF001
     for item in ordered:
         if runner._canonical_json_bytes(_common_identity_projection(item.result)) != baseline:  # noqa: SLF001
@@ -1564,6 +1665,7 @@ def _build_analysis(
     repository: runner.RepositoryState,
     manifest_identity: runner.ManifestIdentity,
     context: VerifiedHoldoutAnalysisContext | None = None,
+    dev_val_capability: runner.VerifiedDevValOllamaCapability | None = None,
 ) -> dict[str, Any]:
     execution = _execution_repository(repository, context)
     configs = {
@@ -1640,7 +1742,14 @@ def _build_analysis(
             "analyzer_repository": {"git_commit": repository.commit, "git_branch": repository.branch, "git_dirty": False},
             "rescore_binding": context.binding_metadata(),
         })
-    _validate_generated_analysis(analysis, holdout=request.split == runner.HOLDOUT_SPLIT, context=context)
+    if request.benchmark_mode == "dev-val":
+        analysis["benchmark_mode"] = "dev-val"
+        if request.split == "validation":
+            analysis.update({key: inputs[0].result[key] for key in runner.DEV_VAL_IDENTITY_KEYS})
+            analysis["w3_validation"] = _w3_validation_thresholds(analysis)
+    _validate_generated_analysis(analysis, holdout=request.split == runner.HOLDOUT_SPLIT,
+                                 context=context, benchmark_mode=request.benchmark_mode,
+                                 dev_val_capability=dev_val_capability)
     runner.scan_forbidden_artifact_content(analysis)
     return analysis
 
@@ -1704,9 +1813,24 @@ def _validate_confusion_shape(value: Any, location: str) -> None:
 
 
 def _validate_generated_analysis(value: Any, *, holdout: bool = False,
-                                 context: VerifiedHoldoutAnalysisContext | None = None) -> None:
+                                 context: VerifiedHoldoutAnalysisContext | None = None,
+                                 benchmark_mode: str = "official",
+                                 dev_val_capability: runner.VerifiedDevValOllamaCapability | None = None) -> None:
     _require_rescore_context(context)
     extra = frozenset({"execution_commit", "analyzer_repository", "rescore_binding"}) if context is not None else frozenset()
+    if benchmark_mode == "dev-val":
+        if holdout or context is not None:
+            _fail("benchmark_mode", "dev-val cannot analyze holdout")
+        extra |= {"benchmark_mode"}
+        if value.get("benchmark_mode") != "dev-val":
+            _fail("benchmark_mode", "analysis must identify dev-val")
+        if value.get("split") == "validation":
+            extra |= runner.DEV_VAL_IDENTITY_KEYS | {"w3_validation"}
+            _validate_dev_val_output_identity(value, dev_val_capability)
+            if value.get("w3_validation") != _w3_validation_thresholds(value):
+                _fail("w3_thresholds", "W3 aggregate thresholds changed")
+    elif benchmark_mode != "official" or dev_val_capability is not None:
+        _fail("benchmark_mode", "unsupported analysis mode/capability")
     analysis = _exact_keys(value, ANALYSIS_KEYS | extra, "analysis")
     static_pairs = {
         "schema_version": ANALYSIS_SCHEMA_VERSION,
@@ -1768,7 +1892,7 @@ def _validate_generated_analysis(value: Any, *, holdout: bool = False,
     _string(identity["git_branch"], "analysis.identity.git_branch", safe_id=True)
     if identity["git_commit"] != (context.execution_commit if context is not None else analysis["analyzer_commit"]) or identity["git_dirty"] is not False:
         _fail("analysis_shape", "analysis repository identity is inconsistent")
-    if identity["provider_id"] != _expected_provider(context):
+    if identity["provider_id"] != ("ollama" if dev_val_capability is not None else _expected_provider(context)):
         _fail("analysis_shape", "analysis provider identity is unsupported")
     if context is not None:
         if (not holdout or analysis["execution_commit"] != context.execution_commit
@@ -1783,6 +1907,8 @@ def _validate_generated_analysis(value: Any, *, holdout: bool = False,
             if any(entry[key] != getattr(binding, key) for key in (
                 "config_id", "manifest_sha256", "result_sha256", "result_size_bytes")):
                 _fail("analysis_shape", "analysis input binding differs from verified context")
+    if dev_val_capability is not None and identity["provider_behavior_hash"] != dev_val_capability.provider_behavior_hash:
+        _fail("provider_identity", "analysis validation behavior differs from verified runtime")
     _hash(identity["provider_behavior_hash"], "analysis.identity.provider_behavior_hash")
     _hash(identity["dependencies_sha256"], "analysis.identity.dependencies_sha256")
     if analysis["family_to_group"] != dict(sorted(_family_to_group_lookup().items())):
@@ -2077,7 +2203,20 @@ def _build_csv(analysis: Mapping[str, Any]) -> bytes:
         rows.append(row)
 
     output = io.StringIO(newline="")
-    writer = csv.DictWriter(output, fieldnames=CSV_FIELDS, lineterminator="\n")
+    fields = CSV_FIELDS
+    if analysis.get("benchmark_mode") == "dev-val" and split == "validation":
+        fields += ("benchmark_mode", "campaign_run_id", "run_id", "validation_attempt",
+                   "validation_max_attempts", "validation_diagnostic_only", "validation_claim_sha256")
+        for row in rows:
+            row.update({
+                "benchmark_mode": "dev-val", "campaign_run_id": analysis["campaign_run_id"],
+                "run_id": analysis["configs"][row["config_id"]]["run_id"],
+                "validation_attempt": str(analysis["validation_cap"]["attempt"]),
+                "validation_max_attempts": str(analysis["validation_cap"]["max_attempts"]),
+                "validation_diagnostic_only": _csv_boolean(analysis["validation_cap"]["diagnostic_only"]),
+                "validation_claim_sha256": analysis["validation_cap"]["claim_sha256"] or "",
+            })
+    writer = csv.DictWriter(output, fieldnames=fields, lineterminator="\n")
     writer.writeheader()
     writer.writerows(rows)
     csv_bytes = output.getvalue().encode("utf-8")
@@ -2131,6 +2270,9 @@ def _build_analysis_manifest(
     analysis: Mapping[str, Any],
 ) -> dict[str, Any]:
     return {
+        **({key: analysis[key] for key in runner.DEV_VAL_IDENTITY_KEYS}
+           if analysis.get("benchmark_mode") == "dev-val" and analysis["split"] == "validation"
+           else {"benchmark_mode": "dev-val"} if analysis.get("benchmark_mode") == "dev-val" else {}),
         "schema_version": ANALYSIS_MANIFEST_SCHEMA_VERSION,
         "analysis_file": "analysis.json",
         "analysis_sha256": hashlib.sha256(analysis_bytes).hexdigest(),
@@ -2171,7 +2313,11 @@ def _validate_analysis_manifest(
     table_bytes: bytes,
     analysis: Mapping[str, Any],
 ) -> None:
-    manifest = _exact_keys(value, ANALYSIS_MANIFEST_KEYS, "analysis-manifest")
+    extras = (runner.DEV_VAL_IDENTITY_KEYS if analysis.get("benchmark_mode") == "dev-val" and analysis["split"] == "validation"
+              else {"benchmark_mode"} if analysis.get("benchmark_mode") == "dev-val" else set())
+    manifest = _exact_keys(value, ANALYSIS_MANIFEST_KEYS | extras, "analysis-manifest")
+    if any(manifest[key] != analysis[key] for key in extras):
+        _fail("analysis_manifest", "analysis manifest validation identity changed")
     expected_pairs = {
         "schema_version": ANALYSIS_MANIFEST_SCHEMA_VERSION,
         "analysis_file": "analysis.json",
@@ -2236,7 +2382,9 @@ def _remove_staging_best_effort(staging_directory: Path) -> None:
         pass
 
 
-def _publish_analysis(output_root: Path, analysis: Mapping[str, Any], table_bytes: bytes) -> WrittenAnalysis:
+def _publish_analysis(output_root: Path, analysis: Mapping[str, Any], table_bytes: bytes, *,
+                      benchmark_mode: str = "official",
+                      dev_val_capability: runner.VerifiedDevValOllamaCapability | None = None) -> WrittenAnalysis:
     runner.scan_forbidden_artifact_content(analysis)
     _guard_legacy_io(output_root=output_root, input_paths=(output_root / "artifact",))
     analysis_bytes = runner._canonical_json_bytes(analysis)  # noqa: SLF001
@@ -2273,7 +2421,7 @@ def _publish_analysis(output_root: Path, analysis: Mapping[str, Any], table_byte
             (staging / "analysis-manifest.json").read_bytes(),
             "analysis-manifest.json",
         )
-        _validate_generated_analysis(parsed_analysis)
+        _validate_generated_analysis(parsed_analysis, benchmark_mode=benchmark_mode, dev_val_capability=dev_val_capability)
         _validate_analysis_manifest(
             parsed_manifest,
             analysis_bytes=analysis_bytes,
@@ -2300,6 +2448,12 @@ def _publish_analysis(output_root: Path, analysis: Mapping[str, Any], table_byte
 
 
 def _validate_request(request: AnalysisRequest) -> None:
+    if request.benchmark_mode not in runner.BENCHMARK_MODES:
+        _fail("benchmark_mode", "analysis mode must be official or dev-val")
+    if request.benchmark_mode != "dev-val" and any(value is not None for value in (
+            request.campaign_run_id, request.validation_ledger, request.frozen_config_path,
+            request.frozen_config_sha256, request.expected_dev_val_manifest_sha256)):
+        _fail("benchmark_mode", "validation options require dev-val")
     if request.split not in runner.SUPPORTED_SPLITS:
         _fail("split_not_allowed", "analysis split must be development or validation; holdout is prohibited")
     if not _SAFE_ID_RE.fullmatch(request.expected_branch):
@@ -2321,6 +2475,8 @@ def analyze_results(
 ) -> WrittenAnalysis:
     _guard_legacy_io(input_paths=request.result_manifests, output_root=request.output_root)
     _validate_request(request)
+    if request.benchmark_mode == "dev-val" and benchmark_root is None:
+        _fail("benchmark_root", "dev-val requires an explicit six-file benchmark root")
     active_hooks = hooks or AnalyzerHooks()
     repository = active_hooks.repository_state_loader(repo_root)
     if repository.branch != request.expected_branch:
@@ -2331,13 +2487,44 @@ def analyze_results(
         _fail("git_dirty", "working tree must be clean before analysis")
 
     benchmark_path = (benchmark_root or repo_root / "datasets" / "v2").resolve()
-    manifest_identity = runner.verify_frozen_manifest(benchmark_path)
+    dev_val = request.benchmark_mode == "dev-val"
+    manifest_identity = (runner.verify_dev_val_manifest(benchmark_path) if dev_val
+                         else runner.verify_frozen_manifest(benchmark_path))
+    if (request.expected_dev_val_manifest_sha256 is not None
+            and manifest_identity.sha256 != request.expected_dev_val_manifest_sha256):
+        _fail("manifest_identity", "derived manifest differs from expected digest")
     runner.validate_config_registry(runner.CONFIG_REGISTRY)
-    inputs = tuple(_read_verified_input(path) for path in request.result_manifests)
+    inputs = tuple(_read_verified_input(path, dev_val_validation=dev_val and request.split == "validation")
+                   for path in request.result_manifests)
     resolved_paths = [item.manifest_path for item in inputs]
     if len(set(resolved_paths)) != len(resolved_paths):
         _fail("manifest_count", "multiple arguments resolve to the same result manifest")
-    benchmark = runner.load_split_benchmark(benchmark_path, request.split)
+    dev_val_capability = None
+    if dev_val and any(item.result.get("provider_id") == "ollama" for item in inputs):
+        if request.split != "validation" or any(item.result.get("provider_id") != "ollama" for item in inputs):
+            _fail("provider_identity", "Ollama requires a uniform dev-val validation matrix")
+        first = inputs[0]
+        attempt_root = first.manifest_path.parents[6]
+        run_request = runner.RunRequest(
+            request.split, tuple(runner.CONFIG_REGISTRY), attempt_root,
+            request.expected_branch, request.expected_commit, "ollama", benchmark_mode="dev-val",
+            case_timeout_seconds=first.result["safety_limits"]["case_timeout_seconds"],
+            campaign_run_id=request.campaign_run_id or first.result.get("campaign_run_id"),
+            validation_ledger=request.validation_ledger, frozen_config_path=request.frozen_config_path,
+            frozen_config_sha256=request.frozen_config_sha256,
+            expected_dev_val_manifest_sha256=request.expected_dev_val_manifest_sha256,
+        )
+        dev_val_capability = runner.verify_existing_dev_val_ollama_claim(
+            run_request, repo_root=repo_root, benchmark_root=benchmark_path,
+            hooks=runner.RunnerHooks(repository_state_loader=active_hooks.repository_state_loader))
+        for item in inputs:
+            if item.manifest_path.parent != runner._run_directory(attempt_root, item.result):
+                _fail("validation_claim", "validation artifact is outside its claimed attempt layout")
+    elif dev_val and any(value is not None for value in (
+            request.validation_ledger, request.frozen_config_path, request.frozen_config_sha256)):
+        _fail("validation_claim", "MOCK analysis must not use a production ledger or Ollama freeze")
+    benchmark = (runner.load_split_benchmark(benchmark_path, request.split, benchmark_mode="dev-val")
+                 if dev_val else runner.load_split_benchmark(benchmark_path, request.split))
     for item in inputs:
         _validate_result(
             item,
@@ -2345,6 +2532,7 @@ def analyze_results(
             repository=repository,
             manifest_identity=manifest_identity,
             benchmark=benchmark,
+            dev_val_capability=dev_val_capability,
         )
     ordered = _validate_common_inputs(
         inputs,
@@ -2365,9 +2553,11 @@ def analyze_results(
         request=request,
         repository=repository,
         manifest_identity=manifest_identity,
+        dev_val_capability=dev_val_capability,
     )
     table_bytes = _build_csv(analysis)
-    return _publish_analysis(output_root, analysis, table_bytes)
+    return _publish_analysis(output_root, analysis, table_bytes, benchmark_mode=request.benchmark_mode,
+                             dev_val_capability=dev_val_capability)
 
 
 def _verify_holdout_analysis_authorization(
@@ -3510,6 +3700,13 @@ def build_parser() -> argparse.ArgumentParser:
     # --split accepts only development/validation. Holdout is reachable solely
     # through --holdout-authorization.
     parser.add_argument("--split", choices=list(runner.SUPPORTED_SPLITS))
+    parser.add_argument("--benchmark-mode", choices=runner.BENCHMARK_MODES, default="official")
+    parser.add_argument("--benchmark-root", type=Path)
+    parser.add_argument("--campaign-run-id")
+    parser.add_argument("--validation-ledger", type=Path)
+    parser.add_argument("--frozen-config", type=Path)
+    parser.add_argument("--frozen-config-sha256")
+    parser.add_argument("--expected-dev-val-manifest-sha256")
     parser.add_argument(
         "--holdout-authorization",
         type=Path,
@@ -3526,6 +3723,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _holdout_analysis_request_from_args(args: argparse.Namespace) -> HoldoutAnalysisRequest:
+    if args.benchmark_mode != "official" or any(value is not None for value in (
+            args.benchmark_root, args.campaign_run_id, args.validation_ledger, args.frozen_config,
+            args.frozen_config_sha256, args.expected_dev_val_manifest_sha256)):
+        _fail("cli_holdout_benchmark", "dev-val options are prohibited for holdout analysis")
     if args.split is not None:
         _fail("cli_holdout_split", "--split must not be combined with --holdout-authorization")
     if args.expected_branch is not None or args.expected_commit is not None:
@@ -3560,6 +3761,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     args = build_parser().parse_args(argv)
 
+    if (args.benchmark_mode == "dev-val") != (args.benchmark_root is not None):
+        print("FAIL [cli_benchmark_root]: --benchmark-mode dev-val and --benchmark-root are required together.", file=sys.stderr)
+        return 1
+
     if args.holdout_authorization is not None:
         try:
             holdout_request = _holdout_analysis_request_from_args(args)
@@ -3592,10 +3797,20 @@ def main(argv: list[str] | None = None) -> int:
         expected_commit=args.expected_commit,
         output_root=args.output_root,
         result_manifests=tuple(args.result_manifest),
+        benchmark_mode=args.benchmark_mode,
+        campaign_run_id=args.campaign_run_id,
+        validation_ledger=args.validation_ledger,
+        frozen_config_path=args.frozen_config,
+        frozen_config_sha256=args.frozen_config_sha256,
+        expected_dev_val_manifest_sha256=args.expected_dev_val_manifest_sha256,
     )
     try:
-        written = analyze_results(request)
+        written = (analyze_results(request, benchmark_root=args.benchmark_root)
+                   if args.benchmark_mode == "dev-val" else analyze_results(request))
     except AnalysisError as exc:
+        print(f"FAIL [{exc.code}]: {exc}", file=sys.stderr)
+        return 1
+    except runner.RunnerError as exc:
         print(f"FAIL [{exc.code}]: {exc}", file=sys.stderr)
         return 1
     except Exception:

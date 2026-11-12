@@ -50,6 +50,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from scripts import v2_validation_ledger as validation_ledger
+
 from app.core.config import (
     DLP_MAX_INSPECT_CHARS_HARD_LIMIT,
     RAG_MAX_AGGREGATE_CONTEXT_CHARS_HARD_LIMIT,
@@ -659,6 +661,11 @@ class RunRequest:
     provider_id: str = SUPPORTED_PROVIDER_ID
     case_timeout_seconds: float = 30.0
     benchmark_mode: str = "official"
+    campaign_run_id: str | None = None
+    validation_ledger: Path | None = None
+    frozen_config_path: Path | None = None
+    frozen_config_sha256: str | None = None
+    expected_dev_val_manifest_sha256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -707,6 +714,8 @@ class PreflightContext:
     case_timeout_seconds: float = 30.0
     holdout_capability: VerifiedHoldoutAuthorization | None = None
     ollama_runtime: Mapping[str, Any] | None = None
+    dev_val_capability: VerifiedDevValOllamaCapability | None = None
+    validation_identity: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -762,6 +771,186 @@ class RunnerHooks:
     allow_test_provider: bool = False
     worker_entrypoint: Callable[[Connection, Mapping[str, Any]], None] | None = None
     worker_lifecycle_observer: Callable[[str, int], None] | None = None
+
+
+DEV_VAL_IDENTITY_KEYS = frozenset({"benchmark_mode", "campaign_run_id", "validation_cap"})
+DEV_VAL_CAP_KEYS = frozenset({"system", "attempt", "max_attempts", "consumed", "diagnostic_only", "claim_sha256"})
+
+
+@dataclass(frozen=True)
+class VerifiedDevValOllamaCapability:
+    """Distinct from holdout authorization; only the dev-val verifier issues it."""
+
+    request: RunRequest
+    repository: RepositoryState
+    manifest: ManifestIdentity
+    benchmark_root: Path
+    attempt_root: Path
+    provider_behavior_hash: str
+    receipt_sha256: str
+    attempt: int
+
+    def is_valid(self) -> bool:
+        return _dev_val_capability_is_valid(self)
+
+
+def _dev_val_reference(path: Path) -> Path:
+    """Reject protected names and link traversal before opening references."""
+    path = path.absolute()
+    for part in (path, *path.parents):
+        if ("holdout" in part.name.casefold() or part.is_symlink()
+                or getattr(part, "is_junction", lambda: False)()):
+            raise IntegrityError("dev_val_reference", "dev-val reference contains holdout or links")
+    return path
+
+
+def _validation_path_hash(path: Path) -> str:
+    return _sha256_bytes(str(path.resolve()).encode("utf-8"))
+
+
+def _dev_val_claim_identity(request: RunRequest, repository: RepositoryState,
+                            manifest: ManifestIdentity, benchmark_root: Path,
+                            settings: Settings) -> dict[str, Any]:
+    descriptor = _ollama_behavior_descriptor(settings)
+    return {
+        "campaign_run_id": request.campaign_run_id,
+        "execution_branch": repository.branch, "execution_commit": repository.commit,
+        "benchmark_manifest_sha256": manifest.sha256,
+        "provider_behavior_hash": _sha256_bytes(_canonical_json_bytes(descriptor)),
+        "runtime_settings_sha256": _sha256_bytes(_canonical_json_bytes(_worker_runtime_settings_payload(settings))),
+        "freeze_sha256": request.frozen_config_sha256,
+        "config_hashes": {key: CONFIG_REGISTRY[key].config_hash for key in request.config_ids},
+        "output_root_sha256": _validation_path_hash(request.output_root),
+        "benchmark_root_sha256": _validation_path_hash(benchmark_root),
+        "validation_ledger_path_sha256": _validation_path_hash(request.validation_ledger),
+        "case_timeout_seconds": request.case_timeout_seconds,
+    }
+
+
+def _verify_dev_val_claim_inputs(request: RunRequest, *, repo_root: Path,
+                                 benchmark_root: Path, hooks: RunnerHooks) -> tuple[RepositoryState, ManifestIdentity, dict[str, Any]]:
+    if (not isinstance(request, RunRequest) or request.benchmark_mode != "dev-val"
+            or request.split != "validation" or request.provider_id != "ollama"):
+        raise IntegrityError("dev_val_capability", "Ollama validation requires dev-val + validation")
+    if tuple(request.config_ids) != tuple(CONFIG_REGISTRY):
+        raise IntegrityError("config_selection", "real validation requires the full C0-C7 matrix in order")
+    if request.campaign_run_id is None or request.validation_ledger is None:
+        raise IntegrityError("validation_claim", "real validation requires campaign run ID and a Shield ledger")
+    _validate_run_id(request.campaign_run_id)
+    for reference in (benchmark_root, request.output_root, request.validation_ledger):
+        _dev_val_reference(reference)
+    if request.frozen_config_path is None:
+        raise IntegrityError("freeze_reference", "real validation requires a separate approved freeze")
+    _dev_val_reference(request.frozen_config_path)
+    if (_is_within(request.validation_ledger.resolve(), repo_root.resolve())
+            or _is_within(request.validation_ledger.resolve(), benchmark_root.resolve())
+            or _is_within(request.validation_ledger.resolve(), request.output_root.resolve())):
+        raise IntegrityError("validation_ledger", "ledger must remain outside checkout, benchmark and attempt output")
+    repository = hooks.repository_state_loader(repo_root)
+    if (repository.dirty or repository.branch != request.expected_branch
+            or repository.commit != request.expected_commit):
+        raise IntegrityError("dev_val_identity", "validation requires the expected clean repository")
+    manifest = verify_dev_val_manifest(benchmark_root)
+    if request.expected_dev_val_manifest_sha256 is not None and manifest.sha256 != request.expected_dev_val_manifest_sha256:
+        raise IntegrityError("manifest_identity", "derived manifest differs from expected digest")
+    settings = load_settings()
+    validate_holdout_runtime_safety(settings, case_timeout_seconds=request.case_timeout_seconds)
+    _validate_ollama_preclaim_environment(settings)
+    if os.getenv("SEMANTIC_GUARD_USE_LLM", "0").strip().lower() not in {"0", "false", "no", "off", ""}:
+        raise IntegrityError("validation_judge", "validation requires Judge OFF")
+    runtime = _load_evaluation_ollama_freeze(request, repository.commit, settings)
+    frozen = json.loads(request.frozen_config_path.read_bytes())
+    identity = _dev_val_claim_identity(request, repository, manifest, benchmark_root, settings)
+    for name, expected in (("benchmark_mode", "dev-val"), ("split", "validation"),
+                           ("run_id", request.campaign_run_id),
+                           ("provider_behavior_hash", identity["provider_behavior_hash"]),
+                           ("runtime_settings_sha256", identity["runtime_settings_sha256"]),
+                           ("validation_ledger_path_sha256", identity["validation_ledger_path_sha256"]),
+                           ("benchmark_manifest_sha256", manifest.sha256)):
+        if _freeze_field(frozen, name) != expected:
+            raise IntegrityError("freeze_identity", f"validation freeze {name} differs from effective identity")
+    if runtime["run_id"] != request.campaign_run_id:
+        raise IntegrityError("freeze_identity", "validation freeze must bind the campaign run ID")
+    return repository, manifest, identity
+
+
+def _build_dev_val_capability_system() -> tuple[Any, Any, Any]:
+    issued: dict[int, str] = {}
+    keepalive: list[VerifiedDevValOllamaCapability] = []
+
+    def valid(capability: Any) -> bool:
+        return (type(capability) is VerifiedDevValOllamaCapability
+                and issued.get(id(capability)) == repr(capability))
+
+    def verify_existing_dev_val_ollama_claim(request: RunRequest, *, repo_root: Path,
+                                             benchmark_root: Path, hooks: RunnerHooks | None = None) -> VerifiedDevValOllamaCapability:
+        repository, manifest, identity = _verify_dev_val_claim_inputs(
+            request, repo_root=repo_root, benchmark_root=benchmark_root, hooks=hooks or RunnerHooks())
+        receipt_path = _dev_val_reference(request.output_root / "dev-val-start-receipt.json")
+        try:
+            raw = receipt_path.read_bytes()
+            receipt = json.loads(raw)
+            claims = validation_ledger.read_claims(request.validation_ledger)
+        except (OSError, ValueError, validation_ledger.ValidationLedgerError) as exc:
+            raise IntegrityError("validation_claim", "validation receipt/ledger is unavailable or malformed") from exc
+        if (not isinstance(receipt, dict) or raw != _canonical_json_bytes(receipt)
+                or receipt not in claims or any(receipt.get(key) != value for key, value in identity.items())):
+            raise IntegrityError("validation_claim", "validation receipt differs from the durable claim")
+        capability = VerifiedDevValOllamaCapability(
+            request, repository, manifest, benchmark_root.resolve(), request.output_root.resolve(),
+            identity["provider_behavior_hash"], _sha256_bytes(raw), receipt["attempt"])
+        keepalive.append(capability)
+        issued[id(capability)] = repr(capability)
+        return capability
+
+    def verify_dev_val_ollama_claim(request: RunRequest, *, repo_root: Path,
+                                    benchmark_root: Path, hooks: RunnerHooks | None = None) -> VerifiedDevValOllamaCapability:
+        _, _, identity = _verify_dev_val_claim_inputs(
+            request, repo_root=repo_root, benchmark_root=benchmark_root, hooks=hooks or RunnerHooks())
+        output = _validate_output_root(request.output_root, repo_root, benchmark_root)
+        if output.exists() or not output.parent.is_dir():
+            raise IntegrityError("validation_claim", "validation output must be new with an existing parent")
+        identity["started_at_utc"] = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        try:
+            receipt = validation_ledger.claim_validation_slot(request.validation_ledger, identity)
+        except (OSError, validation_ledger.ValidationLedgerError) as exc:
+            raise IntegrityError("validation_cap", str(exc)) from exc
+        # Never roll a claim back, even if mkdir, receipt, workers or inference fail.
+        output.mkdir(exist_ok=False)
+        with (output / "dev-val-start-receipt.json").open("xb") as handle:
+            handle.write(_canonical_json_bytes(receipt))
+            handle.flush()
+            os.fsync(handle.fileno())
+        _fsync_directory_best_effort(output)
+        return verify_existing_dev_val_ollama_claim(request, repo_root=repo_root,
+                                                   benchmark_root=benchmark_root, hooks=hooks)
+
+    return verify_dev_val_ollama_claim, verify_existing_dev_val_ollama_claim, valid
+
+
+(verify_dev_val_ollama_claim, verify_existing_dev_val_ollama_claim,
+ _dev_val_capability_is_valid) = _build_dev_val_capability_system()
+del _build_dev_val_capability_system
+
+
+def _require_dev_val_ollama_capability(capability: VerifiedDevValOllamaCapability | None) -> None:
+    if not _dev_val_capability_is_valid(capability):
+        raise IntegrityError("dev_val_capability", "Ollama validation requires a verified dev-val capability")
+    path = _dev_val_reference(capability.attempt_root / "dev-val-start-receipt.json")
+    if _sha256_file(path) != capability.receipt_sha256:
+        raise IntegrityError("validation_claim", "validation start receipt changed")
+
+
+def _dev_val_output_identity(request: RunRequest, capability: VerifiedDevValOllamaCapability | None) -> dict[str, Any]:
+    return {
+        "benchmark_mode": "dev-val", "campaign_run_id": request.campaign_run_id,
+        "validation_cap": {
+            "system": "shield", "attempt": capability.attempt if capability else 0,
+            "max_attempts": validation_ledger.MAX_VALIDATION_ATTEMPTS, "consumed": capability is not None,
+            "diagnostic_only": capability is None,
+            "claim_sha256": capability.receipt_sha256 if capability else None,
+        },
+    }
 
 
 def _canonical_json_bytes(value: Any) -> bytes:
@@ -1126,13 +1315,19 @@ def _validate_ollama_preclaim_environment(active_settings: Settings) -> None:
         raise IntegrityError("ollama_endpoint", "only http://127.0.0.1:11434/api/chat is permitted")
 
 
-def _ollama_provider_spec(active_settings: Settings, *,
-                          holdout_capability: VerifiedHoldoutAuthorization) -> ProviderSpec:
-    _require_ollama_capability(holdout_capability)
-    from app.services.providers.ollama import OllamaLLMProvider
+def _require_evaluation_ollama_capability(
+    holdout_capability: VerifiedHoldoutAuthorization | None = None,
+    dev_val_capability: VerifiedDevValOllamaCapability | None = None,
+) -> None:
+    if dev_val_capability is not None:
+        if holdout_capability is not None:
+            raise IntegrityError("dev_val_capability", "validation and holdout capabilities cannot be mixed")
+        _require_dev_val_ollama_capability(dev_val_capability)
+    else:
+        _require_ollama_capability(holdout_capability)
 
-    if active_settings.llm_provider != "ollama":
-        raise IntegrityError("provider_identity", "Ollama settings are required")
+
+def _ollama_behavior_descriptor(active_settings: Settings) -> dict[str, Any]:
     _validate_ollama_preclaim_environment(active_settings)
     descriptor = {
         "provider_id": "ollama",
@@ -1155,6 +1350,44 @@ def _ollama_provider_spec(active_settings: Settings, *,
                          "http_statuses": [500],
                          "connection_errors": ["connection_refused", "connection_reset", "timeout"]},
     }
+    return descriptor
+
+
+def _ollama_provider_spec(active_settings: Settings, *,
+                          holdout_capability: VerifiedHoldoutAuthorization | None = None,
+                          dev_val_capability: VerifiedDevValOllamaCapability | None = None) -> ProviderSpec:
+    _require_evaluation_ollama_capability(holdout_capability, dev_val_capability)
+    from app.services.providers.ollama import OllamaLLMProvider
+
+    if active_settings.llm_provider != "ollama":
+        raise IntegrityError("provider_identity", "Ollama settings are required")
+    _validate_ollama_preclaim_environment(active_settings)
+
+    # Keep this literal assignment for the historical execution-pinned rescore
+    # reader, which extracts it from Git with AST and evaluates only the dict.
+    descriptor = {
+        "provider_id": "ollama",
+        "implementation": "app.services.providers.ollama.OllamaLLMProvider",
+        "implementation_sha256": _sha256_file(ROOT / "app/services/providers/ollama.py"),
+        "model_tag": active_settings.llm_model_name,
+        "model_digest_expected": active_settings.ollama_model_digest,
+        "model_quantization_expected": active_settings.ollama_model_quantization,
+        "ollama_version_expected": active_settings.ollama_expected_version,
+        "options": {name: getattr(active_settings, "ollama_" + name)
+                    for name in ("temperature", "seed", "num_ctx", "num_predict")},
+        "think": active_settings.ollama_think,
+        "repeat_count": active_settings.llm_repeat_count,
+        "endpoint": OLLAMA_EVALUATION_BASE_URL + "/api/chat",
+        "network": "http_loopback",
+        "timeout_seconds": active_settings.llm_provider_timeout_seconds,
+        "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
+        "retry_policy": {"max_retries": active_settings.ollama_max_retries,
+                         "backoff_seconds": [0.5, 1.0][:active_settings.ollama_max_retries],
+                         "http_statuses": [500],
+                         "connection_errors": ["connection_refused", "connection_reset", "timeout"]},
+    }
+    if dev_val_capability is not None and dev_val_capability.provider_behavior_hash != _sha256_bytes(_canonical_json_bytes(descriptor)):
+        raise IntegrityError("dev_val_capability", "provider settings differ from validation claim")
     return ProviderSpec(
         provider_id="ollama", offline=False, test_only=False,
         behavior_descriptor=descriptor,
@@ -1188,6 +1421,11 @@ def _freeze_field(record: Any, name: str, *, required: bool = True) -> Any:
 
 def _load_ollama_freeze(request: HoldoutRunRequest, authorization: HoldoutAuthorization,
                         active_settings: Settings) -> dict[str, Any]:
+    return _load_evaluation_ollama_freeze(request, authorization.execution_commit, active_settings)
+
+
+def _load_evaluation_ollama_freeze(request: HoldoutRunRequest | RunRequest, execution_commit: str,
+                                    active_settings: Settings) -> dict[str, Any]:
     path, expected_hash = request.frozen_config_path, request.frozen_config_sha256
     if path is None or not isinstance(expected_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
         raise IntegrityError("freeze_reference", "Ollama requires an explicitly approved freeze path and SHA-256")
@@ -1200,7 +1438,7 @@ def _load_ollama_freeze(request: HoldoutRunRequest, authorization: HoldoutAuthor
         raise IntegrityError("freeze_config", "freeze configuration is unavailable or invalid") from exc
     if not isinstance(frozen, dict):
         raise IntegrityError("freeze_config", "freeze configuration must be an object")
-    for name, expected in (("execution_commit", authorization.execution_commit), ("provider_id", "ollama")):
+    for name, expected in (("execution_commit", execution_commit), ("provider_id", "ollama")):
         if _freeze_field(frozen, name) != expected:
             raise IntegrityError("freeze_identity", f"freeze {name} differs from authorization")
     run_id = _freeze_field(frozen, "run_id")
@@ -1317,10 +1555,11 @@ def default_provider_spec(
     active_settings: Settings | WorkerRuntimeSettings,
     *,
     holdout_capability: VerifiedHoldoutAuthorization | None = None,
+    dev_val_capability: VerifiedDevValOllamaCapability | None = None,
 ) -> ProviderSpec:
     if provider_id == "ollama":
-        _require_ollama_capability(holdout_capability)
-        return _ollama_provider_spec(active_settings, holdout_capability=holdout_capability)
+        _require_evaluation_ollama_capability(holdout_capability, dev_val_capability)
+        return _ollama_provider_spec(active_settings, holdout_capability=holdout_capability, dev_val_capability=dev_val_capability)
     if provider_id != SUPPORTED_PROVIDER_ID:
         raise IntegrityError("provider_not_allowed", "only the offline mock provider is approved")
     source_hash = _sha256_bytes(inspect.getsource(MockLLMProvider.generate).encode("utf-8"))
@@ -1342,13 +1581,14 @@ def default_provider_spec(
 
 
 def _validate_provider(spec: ProviderSpec, *, allow_test_provider: bool,
-                       holdout_capability: VerifiedHoldoutAuthorization | None = None) -> None:
+                       holdout_capability: VerifiedHoldoutAuthorization | None = None,
+                       dev_val_capability: VerifiedDevValOllamaCapability | None = None) -> None:
     _safe_location(spec.provider_id)
     if spec.provider_id == "ollama":
-        _require_ollama_capability(holdout_capability)
+        _require_evaluation_ollama_capability(holdout_capability, dev_val_capability)
         if spec.offline or spec.test_only:
             raise IntegrityError("provider_identity", "Ollama must be an HTTP loopback provider")
-        expected = _ollama_provider_spec(load_settings(), holdout_capability=holdout_capability)
+        expected = _ollama_provider_spec(load_settings(), holdout_capability=holdout_capability, dev_val_capability=dev_val_capability)
         if spec.behavior_descriptor != expected.behavior_descriptor:
             raise IntegrityError("provider_identity", "Ollama descriptor differs from effective settings")
     elif not spec.offline:
@@ -1368,10 +1608,11 @@ def _validate_provider(spec: ProviderSpec, *, allow_test_provider: bool,
 
 
 def _validate_provider_environment(spec: ProviderSpec, *,
-                                   holdout_capability: VerifiedHoldoutAuthorization | None = None) -> None:
+                                   holdout_capability: VerifiedHoldoutAuthorization | None = None,
+                       dev_val_capability: VerifiedDevValOllamaCapability | None = None) -> None:
     configured = os.getenv("LLM_PROVIDER", SUPPORTED_PROVIDER_ID).strip().lower()
     if spec.provider_id == "ollama":
-        _require_ollama_capability(holdout_capability)
+        _require_evaluation_ollama_capability(holdout_capability, dev_val_capability)
         if configured != "ollama":
             raise IntegrityError("external_provider_environment", "authorized Ollama requires explicit LLM_PROVIDER=ollama")
     elif configured != SUPPORTED_PROVIDER_ID:
@@ -2347,8 +2588,22 @@ def preflight(
     active_hooks = hooks or RunnerHooks()
     benchmark_path = (benchmark_root or repo_root / "datasets" / "v2").resolve()
 
-    if request.provider_id == "ollama":
-        raise IntegrityError("provider_not_allowed", "Ollama requires verified holdout authorization")
+    if request.provider_id == "ollama" and (request.benchmark_mode != "dev-val" or request.split != "validation"):
+        raise IntegrityError("provider_not_allowed", "Ollama requires verified holdout authorization or dev-val validation")
+    if request.benchmark_mode == "dev-val" and benchmark_root is None:
+        raise IntegrityError("benchmark_root", "dev-val requires an explicit six-file benchmark root")
+    if request.benchmark_mode != "dev-val" and any(value is not None for value in (
+            request.campaign_run_id, request.validation_ledger, request.expected_dev_val_manifest_sha256,
+            request.frozen_config_path, request.frozen_config_sha256)):
+        raise IntegrityError("benchmark_mode", "validation options require dev-val")
+    if request.benchmark_mode == "dev-val" and request.provider_id != "ollama" and any(value is not None for value in (
+            request.validation_ledger, request.frozen_config_path, request.frozen_config_sha256)):
+        raise IntegrityError("validation_claim", "MOCK must not use a production ledger or Ollama freeze")
+    if request.benchmark_mode == "dev-val" and request.split == "validation":
+        request = dataclasses.replace(request, campaign_run_id=request.campaign_run_id or
+                                      (_new_run_id("dev-val-mock") if request.provider_id != "ollama" else None))
+        if request.campaign_run_id is not None:
+            _validate_run_id(request.campaign_run_id)
     if request.split not in SUPPORTED_SPLITS:
         raise IntegrityError(
             "split_not_allowed",
@@ -2376,11 +2631,9 @@ def preflight(
     manifest = _verify_benchmark_manifest(benchmark_path, request.benchmark_mode)
     validate_config_registry(CONFIG_REGISTRY)
 
+    if request.expected_dev_val_manifest_sha256 is not None and manifest.sha256 != request.expected_dev_val_manifest_sha256:
+        raise IntegrityError("manifest_identity", "derived manifest differs from expected digest")
     active_settings = load_settings()
-    provider = active_hooks.provider_spec_loader(request.provider_id, active_settings)
-    _validate_provider(provider, allow_test_provider=active_hooks.allow_test_provider)
-    _validate_provider_environment(provider)
-
     safety_limits = _settings_safety_limits(active_settings, request.case_timeout_seconds)
     benchmark = (
         load_split_benchmark(benchmark_path, request.split, benchmark_mode="dev-val")
@@ -2390,6 +2643,26 @@ def preflight(
     expected_ids, expected_scope_ids = _expected_case_sets(benchmark, request.config_ids)
     dependencies = _dependency_inventory()
     dependencies_hash = _sha256_bytes(_canonical_json_bytes(list(dependencies)))
+    dev_val_capability, ollama_runtime = None, None
+    if request.provider_id == "ollama":
+        dev_val_capability = verify_dev_val_ollama_claim(
+            request, repo_root=repo_root, benchmark_root=benchmark_path, hooks=active_hooks)
+        provider = default_provider_spec("ollama", active_settings, dev_val_capability=dev_val_capability)
+        _validate_provider(provider, allow_test_provider=False, dev_val_capability=dev_val_capability)
+        _validate_provider_environment(provider, dev_val_capability=dev_val_capability)
+        safety_limits["network_disabled"] = False
+        ollama_runtime = {
+            "run_id": request.campaign_run_id, "execution_commit": repository.commit,
+            "provider_id": "ollama", "provider_behavior_hash": provider.behavior_hash,
+            "expected": dict(provider.behavior_descriptor),
+            "freeze_reference": {"path": str(request.frozen_config_path.resolve()), "sha256": request.frozen_config_sha256},
+            **_dev_val_output_identity(request, dev_val_capability),
+        }
+        _write_ollama_runtime(dev_val_capability.attempt_root, ollama_runtime)
+    else:
+        provider = active_hooks.provider_spec_loader(request.provider_id, active_settings)
+        _validate_provider(provider, allow_test_provider=active_hooks.allow_test_provider)
+        _validate_provider_environment(provider)
     experiment_id = _experiment_id(
         repository,
         manifest,
@@ -2416,6 +2689,10 @@ def preflight(
         split=request.split,
         case_timeout_seconds=request.case_timeout_seconds,
         holdout_capability=None,
+        dev_val_capability=dev_val_capability,
+        ollama_runtime=ollama_runtime,
+        validation_identity=(_dev_val_output_identity(request, dev_val_capability)
+                             if request.benchmark_mode == "dev-val" and request.split == "validation" else None),
     )
 
 
@@ -3040,6 +3317,43 @@ def _verify_ollama_worker_evidence(payload: Mapping[str, Any], active_settings: 
     return capability
 
 
+def _dev_val_request_payload(request: RunRequest) -> dict[str, Any]:
+    return {item.name: (str(value.resolve()) if isinstance(value, Path) else list(value) if isinstance(value, tuple) else value)
+            for item in dataclasses.fields(request) for value in (getattr(request, item.name),)}
+
+
+def _verify_dev_val_worker_evidence(payload: Mapping[str, Any], repo_root: Path) -> VerifiedDevValOllamaCapability:
+    if "holdout_evidence" in payload:
+        raise IntegrityError("worker_authorization", "validation and holdout evidence cannot be mixed")
+    evidence = payload.get("dev_val_evidence")
+    fields = {"request", "benchmark_root", "receipt_sha256", "run_id", "attempt_root",
+              "execution_commit", "case_timeout_seconds"}
+    if not isinstance(evidence, dict) or set(evidence) != fields:
+        raise IntegrityError("worker_authorization", "validation evidence is malformed")
+    raw_request = evidence["request"]
+    if not isinstance(raw_request, dict) or set(raw_request) != {item.name for item in dataclasses.fields(RunRequest)}:
+        raise IntegrityError("worker_authorization", "validation request evidence is malformed")
+    values = dict(raw_request)
+    for name in ("output_root", "validation_ledger", "frozen_config_path"):
+        if not isinstance(values[name], str) or not Path(values[name]).is_absolute():
+            raise IntegrityError("worker_authorization", "validation references must be absolute")
+        values[name] = Path(values[name])
+    if not isinstance(values["config_ids"], list):
+        raise IntegrityError("worker_authorization", "validation configuration evidence is malformed")
+    values["config_ids"] = tuple(values["config_ids"])
+    request = RunRequest(**values)
+    capability = verify_existing_dev_val_ollama_claim(
+        request, repo_root=repo_root, benchmark_root=Path(evidence["benchmark_root"]))
+    if (evidence["receipt_sha256"] != capability.receipt_sha256
+            or evidence["run_id"] != request.campaign_run_id
+            or evidence["attempt_root"] != str(capability.attempt_root)
+            or evidence["execution_commit"] != capability.repository.commit
+            or evidence["case_timeout_seconds"] != request.case_timeout_seconds
+            or payload["provider_behavior_hash"] != capability.provider_behavior_hash):
+        raise IntegrityError("worker_authorization", "validation evidence differs from parent claim")
+    return capability
+
+
 def _validate_worker_init_payload(
     payload: Mapping[str, Any],
 ) -> tuple[
@@ -3068,6 +3382,8 @@ def _validate_worker_init_payload(
     }
     if isinstance(payload, dict) and "holdout_evidence" in payload:
         expected_fields.add("holdout_evidence")
+    if isinstance(payload, dict) and "dev_val_evidence" in payload:
+        expected_fields.add("dev_val_evidence")
     if not isinstance(payload, dict) or set(payload) != expected_fields:
         raise IntegrityError("worker_init", "worker initialization payload is malformed")
     if payload["protocol_version"] != WORKER_PROTOCOL_VERSION:
@@ -3108,12 +3424,18 @@ def _validate_worker_init_payload(
     if payload["provider_id"] == "ollama":
         if not isinstance(runtime_settings, Settings) or runtime_settings.llm_provider != "ollama":
             raise IntegrityError("worker_provider", "Ollama runtime settings are missing")
-        capability = _verify_ollama_worker_evidence(payload, runtime_settings, repo_root)
-        provider_spec = default_provider_spec("ollama", runtime_settings, holdout_capability=capability)
-        _validate_provider(provider_spec, allow_test_provider=False, holdout_capability=capability)
-        _validate_provider_environment(provider_spec, holdout_capability=capability)
+        if "dev_val_evidence" in payload:
+            capability = _verify_dev_val_worker_evidence(payload, repo_root)
+            capability_options = {"dev_val_capability": capability}
+        else:
+            capability = _verify_ollama_worker_evidence(payload, runtime_settings, repo_root)
+            capability_options = {"holdout_capability": capability}
+        provider_spec = default_provider_spec("ollama", runtime_settings, **capability_options)
+        _validate_provider(provider_spec, allow_test_provider=False, **capability_options)
+        _validate_provider_environment(provider_spec, **capability_options)
     else:
-        if payload["provider_id"] != SUPPORTED_PROVIDER_ID or "holdout_evidence" in payload or isinstance(runtime_settings, Settings):
+        if (payload["provider_id"] != SUPPORTED_PROVIDER_ID or "holdout_evidence" in payload
+                or "dev_val_evidence" in payload or isinstance(runtime_settings, Settings)):
             raise IntegrityError("worker_provider", "worker provider is not approved")
         provider_spec = default_provider_spec(SUPPORTED_PROVIDER_ID, runtime_settings)
         _validate_provider(provider_spec, allow_test_provider=False)
@@ -3221,7 +3543,7 @@ def _case_worker_main(connection: Connection, init_payload: Mapping[str, Any]) -
                 task_provider = provider_spec
                 if provider_spec.provider_id == "ollama":
                     deadline = task["deadline_monotonic"]
-                    evidence = init_payload["holdout_evidence"]
+                    evidence = init_payload.get("dev_val_evidence", init_payload.get("holdout_evidence"))
                     if (type(deadline) not in {int, float} or not math.isfinite(deadline)
                             or deadline > time.monotonic() + evidence["case_timeout_seconds"]):
                         connection.send({"kind": "fatal", "error_category": "worker_deadline"})
@@ -3754,8 +4076,9 @@ def _build_worker_init_payload(
     ingestion_statuses: Mapping[str, str],
 ) -> dict[str, Any]:
     if context.provider.provider_id == "ollama":
-        _require_ollama_capability(context.holdout_capability)
-        if context.ollama_runtime is None or context.split != HOLDOUT_SPLIT or context.provider.test_only:
+        _require_evaluation_ollama_capability(context.holdout_capability, context.dev_val_capability)
+        expected_split = "validation" if context.dev_val_capability is not None else HOLDOUT_SPLIT
+        if context.ollama_runtime is None or context.split != expected_split or context.provider.test_only:
             raise IntegrityError("worker_provider", "authorized Ollama runtime identity is missing")
     elif context.provider.provider_id != SUPPORTED_PROVIDER_ID or context.provider.test_only:
         raise IntegrityError("worker_provider", "process-isolated evaluation provider is not approved")
@@ -3780,7 +4103,18 @@ def _build_worker_init_payload(
         "ingestion_statuses": dict(ingestion_statuses),
         "corpus_by_id": corpus_identity,
     }
-    if context.provider.provider_id == "ollama":
+    if context.provider.provider_id == "ollama" and context.dev_val_capability is not None:
+        capability = context.dev_val_capability
+        payload["dev_val_evidence"] = {
+            "request": _dev_val_request_payload(capability.request),
+            "benchmark_root": str(capability.benchmark_root),
+            "receipt_sha256": capability.receipt_sha256,
+            "run_id": capability.request.campaign_run_id,
+            "attempt_root": str(capability.attempt_root),
+            "execution_commit": capability.repository.commit,
+            "case_timeout_seconds": context.case_timeout_seconds,
+        }
+    elif context.provider.provider_id == "ollama":
         capability = context.holdout_capability
         runtime = context.ollama_runtime
         payload["holdout_evidence"] = {
@@ -4025,6 +4359,7 @@ def _execute_config(
         "timeout_case_count": status_summary["timeout_case_count"],
         "skipped_case_count": 0,
         "cases": records,
+        **(dict(context.validation_identity) if context.validation_identity is not None else {}),
         "aggregate": {
             "n_end_to_end": sum(
                 record["evaluation_scope"] == "end_to_end" for record in records
@@ -4138,6 +4473,9 @@ def _publish_artifact(output_root: Path, artifact: dict[str, Any]) -> WrittenRun
         ],
         "expected_case_set_sha256": artifact["expected_case_set_sha256"],
     }
+    if artifact.get("benchmark_mode") == "dev-val":
+        result_manifest.update({key: artifact[key] for key in DEV_VAL_IDENTITY_KEYS})
+        result_manifest["split"] = artifact["split"]
     scan_forbidden_artifact_content(result_manifest)
     manifest_bytes = _canonical_json_bytes(result_manifest)
 
@@ -4215,14 +4553,17 @@ def run_evaluation(
         _validate_run_id(run_id)
         if run_id in run_ids:
             raise IntegrityError("run_id_collision", "run identifiers must be unique")
+        if context.validation_identity is not None and run_id == context.validation_identity["campaign_run_id"]:
+            raise IntegrityError("run_id_collision", "per-config run ID must differ from the campaign ID")
         run_ids.add(run_id)
-        artifact = _execute_config(
-            context,
-            CONFIG_REGISTRY[config_id],
-            repo_root=repo_root,
-            hooks=active_hooks,
-            run_id=run_id,
-        )
+        try:
+            artifact = _execute_config(
+                context, CONFIG_REGISTRY[config_id], repo_root=repo_root,
+                hooks=active_hooks, run_id=run_id,
+            )
+        finally:
+            if context.ollama_runtime is not None:
+                _write_ollama_runtime(context.dev_val_capability.attempt_root, context.ollama_runtime)
         scan_forbidden_artifact_content(artifact)
         artifacts.append(artifact)
 
@@ -4462,6 +4803,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--provider", default=None, choices=sorted(AUTHORIZED_HOLDOUT_PROVIDER_IDS))
     parser.add_argument("--frozen-config", type=Path)
     parser.add_argument("--frozen-config-sha256")
+    parser.add_argument("--campaign-run-id")
+    parser.add_argument("--validation-ledger", type=Path)
+    parser.add_argument("--expected-dev-val-manifest-sha256")
     parser.add_argument("--case-timeout-seconds", type=float, default=30.0)
     return parser
 
@@ -4477,6 +4821,9 @@ def _holdout_request_from_args(
         raise IntegrityError(
             "cli_holdout_benchmark", "benchmark mode/root overrides are prohibited for authorized holdout"
         )
+    if any(value is not None for value in (args.campaign_run_id, args.validation_ledger,
+                                           args.expected_dev_val_manifest_sha256)):
+        raise IntegrityError("cli_holdout_benchmark", "dev-val options are prohibited for holdout")
     if args.split is not None:
         raise IntegrityError(
             "cli_holdout_split", "--split must not be combined with --holdout-authorization"
@@ -4555,10 +4902,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {item.config_id}: {item.run_status} ({item.run_id})")
         return 0
 
-    if args.provider == "ollama":
+    if args.benchmark_mode == "dev-val" and args.benchmark_root is None:
+        print("FAIL [cli_benchmark_root]: dev-val requires --benchmark-root.", file=sys.stderr)
+        return 1
+    if args.provider == "ollama" and (args.benchmark_mode != "dev-val" or args.split != "validation"):
         print("FAIL [provider_not_allowed]: Ollama requires holdout authorization.", file=sys.stderr)
         return 1
-    if args.frozen_config is not None or args.frozen_config_sha256 is not None:
+    if (args.frozen_config is not None or args.frozen_config_sha256 is not None) and not (
+            args.benchmark_mode == "dev-val" and args.split == "validation" and args.provider == "ollama"):
         print("FAIL [freeze_reference]: freeze is only supported for authorized Ollama.", file=sys.stderr)
         return 1
     if args.split is None:
@@ -4587,9 +4938,15 @@ def main(argv: list[str] | None = None) -> int:
         provider_id=args.provider or SUPPORTED_PROVIDER_ID,
         case_timeout_seconds=args.case_timeout_seconds,
         benchmark_mode=args.benchmark_mode,
+        campaign_run_id=args.campaign_run_id,
+        validation_ledger=args.validation_ledger,
+        frozen_config_path=args.frozen_config,
+        frozen_config_sha256=args.frozen_config_sha256,
+        expected_dev_val_manifest_sha256=args.expected_dev_val_manifest_sha256,
     )
     try:
-        written = run_evaluation(request, benchmark_root=args.benchmark_root)
+        written = (run_evaluation(request, benchmark_root=args.benchmark_root)
+                   if args.benchmark_root is not None else run_evaluation(request))
     except RunnerError as exc:
         print(f"FAIL [{exc.code}]: {exc}", file=sys.stderr)
         return 1
