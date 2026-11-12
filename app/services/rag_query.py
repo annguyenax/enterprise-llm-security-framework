@@ -846,15 +846,35 @@ def run_rag_query_uncommitted(
         passed_pairs, settings.rag_max_aggregate_context_chars,
     )
     original_text_by_chunk_id = {hit.chunk_id: chunk.text for hit, chunk in passed_pairs}
+    # Budget clipping is always-on resource containment, not a security
+    # SANITIZE. Preserve the per-chunk guard's actual decision for the final
+    # fold (including a real SANITIZE), while recording budget effects in
+    # provenance and neutral audit stages. Fully excluded chunks never fold.
     for included_hit, bounded_chunk in bounded_pairs:
         if bounded_chunk.text != original_text_by_chunk_id[included_hit.chunk_id]:
             context_outcomes[included_hit.chunk_id] = (
                 True,
                 "aggregate_budget_truncated",
-                Decision.SANITIZE,
+                context_outcomes[included_hit.chunk_id][2],
+            )
+            stage_results.append(
+                StageResult(
+                    stage="context_budget", decision=None,
+                    reason_code="aggregate_budget_truncated",
+                    detail=f"chunk_id={included_hit.chunk_id}",
+                )
             )
     for excluded_hit in excluded_by_budget:
-        context_outcomes[excluded_hit.chunk_id] = (False, "aggregate_budget_exceeded", Decision.SANITIZE)
+        context_outcomes[excluded_hit.chunk_id] = (
+            False, "aggregate_budget_exceeded", context_outcomes[excluded_hit.chunk_id][2],
+        )
+        stage_results.append(
+            StageResult(
+                stage="context_budget", decision=None,
+                reason_code="aggregate_budget_exceeded",
+                detail=f"chunk_id={excluded_hit.chunk_id}",
+            )
+        )
 
     if not guard_profile.aggregate_context_guard:
         stage_results.append(
