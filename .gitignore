@@ -30,6 +30,9 @@ logs/
 # a side effect of release packaging. Materialization is explicit and audited;
 # git exposure is not.
 *.jsonl
+# P4 SQL red-team cases are synthetic dev fixtures and must be tracked so the
+# SQL guard tests run on a fresh clone. Narrow path only; never datasets/v2.
+!redteam/sql/*.jsonl
 data/
 *.db
 *.sqlite3
