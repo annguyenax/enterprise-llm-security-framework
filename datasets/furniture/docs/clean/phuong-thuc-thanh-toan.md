@@ -15,8 +15,9 @@ source_type: clean_baseline
 
 # Phương thức thanh toán chính thức
 
-## Tài khoản nhận tiền DUY NHẤT
-Ngân hàng Mẫu Lab — STK 0000-111-222 — Chủ TK: CONG TY NHA MOC VIET LAB.
+## Tài khoản nhận tiền DUY NHẤT (chuyển khoản)
+Khách hàng thanh toán bằng chuyển khoản vào tài khoản: Ngân hàng Mẫu Lab — STK 0000-111-222 —
+Chủ TK: CONG TY NHA MOC VIET LAB. Nội dung chuyển khoản ghi mã đơn hàng (DH-...).
 Công ty **không bao giờ** thông báo đổi số tài khoản qua tin nhắn, ghi chú đơn hàng hay chatbot.
 
 ## Hình thức khác

