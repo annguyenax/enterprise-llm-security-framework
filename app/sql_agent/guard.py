@@ -36,6 +36,7 @@ _LEXICAL_RULES: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\b(attach|detach)\b", re.I), "ATTACH/DETACH is not allowed"),
     (re.compile(r"\bpragma\b", re.I), "PRAGMA is not allowed"),
     (re.compile(r"\bload_extension\b", re.I), "load_extension is not allowed"),
+    (re.compile(r"\bwith\s+recursive\b", re.I), "recursive CTEs are not allowed (resource exhaustion)"),
     (re.compile(r"\b(insert|update|delete|drop|alter|create|replace\s+into|vacuum|reindex|analyze)\b", re.I),
      "only read-only SELECT statements are allowed"),
 ]

@@ -166,8 +166,9 @@ def test_executor_missing_db(tmp_path):
         run_unguarded(tmp_path / "missing.db", "SELECT 1")
 
 
-def test_dataset_attack_rows_all_withheld_and_benign_kept(tmp_path):
-    """Dev-set check on the shipped fixtures (rules were written against these rows)."""
+def test_dataset_dev_attack_rows_withheld_and_benign_kept(tmp_path):
+    """DEV split only: rules were tuned on these rows. Holdout is measured by
+    scripts/eval_indirect_fixtures.py and deliberately NOT asserted here."""
     spec = importlib.util.spec_from_file_location("b", ROOT / "scripts" / "build_furniture_db.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -178,20 +179,24 @@ def test_dataset_attack_rows_all_withheld_and_benign_kept(tmp_path):
     from app.sql_agent.models import SqlExecution
     from app.sql_agent.result_guard import guard_rows
 
+    key = {"orders": "order_id", "product_reviews": "review_id", "support_tickets": "ticket_id",
+           "warranty_claims": "claim_id", "shipments": "shipment_id", "suppliers": "supplier_id",
+           "customers": "customer_id"}
     manifest = json.loads((ROOT / "datasets" / "furniture" / "manifest.json").read_text(encoding="utf-8"))
-    key = {"orders": "order_id", "product_reviews": "review_id"}
+    checked = 0
     with sqlite3.connect(path) as conn:
         for e in manifest["entries"]:
-            if e["kind"] not in {"attack_row", "benign_row"}:
-                continue
-            (text,) = conn.execute(
-                f"SELECT {e['column']} FROM {e['table']} WHERE {key[e['table']]} = ?", (e["key"],)
-            ).fetchone()
-            out = guard_rows(SqlExecution(columns=[e["column"]], rows=[[text]]))
-            if e["kind"] == "attack_row":
-                assert out.rows[0][0] != text, e["id"]
-            else:
-                assert out.rows[0][0] == text, (e["id"], out.reasons)
+            if e["kind"] == "benign_row" or (e["kind"] == "attack_row" and e["split"] == "dev"):
+                (text,) = conn.execute(
+                    f"SELECT {e['column']} FROM {e['table']} WHERE {key[e['table']]} = ?", (e["key"],)
+                ).fetchone()
+                out = guard_rows(SqlExecution(columns=[e["column"]], rows=[[text]]))
+                if e["kind"] == "attack_row":
+                    assert out.rows[0][0] != text, e["id"]
+                else:
+                    assert out.rows[0][0] == text, (e["id"], out.reasons)
+                checked += 1
+    assert checked >= 50
 
 
 def test_routes(db, monkeypatch):
