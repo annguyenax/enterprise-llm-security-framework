@@ -1,0 +1,48 @@
+
+=== 1. Python compile ===
+  [PASS] compile: 1 file(s)
+
+=== 2. Focused test suite ===
+  [PASS] focused_tests: 404 passed, 1 skipped, 1 warning in 29.26s
+
+=== 3. Full repository suite (khong --ignore) ===
+  [PASS] full_suite: 1708 passed, 4 skipped, 1 warning in 372.17s (0:06:12)
+
+=== 4. Benchmark v2: validator / determinism / manifest ===
+  [PASS] validator: OK: 172 documents, 120 cases across 3 splits, all checks passed (guard-independent; see --diagnose-current-guards for an optional, non-gating guard-agreement report).
+  [PASS] determinism: Determinism check passed: two in-memory builds are byte-identical.
+  [PASS] manifest: OK: 9 file(s) verified against the frozen FINAL manifest, no drift detected.
+  [PASS] frozen_artifacts: 9 file byte-identical (status=final)
+
+=== 5. Git hygiene + scope invariants ===
+  [PASS] git_diff_check: khong co whitespace error
+  [PASS] scope_invariants: khong dung vao: requirements.txt, redteam/, reports/evaluation/, report-latex-template/
+  [PASS] no_temp_dirs: sach
+  [PASS] no_tracked_db: khong co db duoc track
+
+=============== EVIDENCE BLOCK (copy vao prompt audit) ===============
+
+## Verification Evidence
+- branch: feat/claude-provider-sql-guard
+- base_commit: ec68cf343472ad0d100ccaf9c8edd0e3f6fa50cc
+- focused_tests: 404 passed, 1 skipped, 1 warning in 29.26s
+- full_suite: 1708 passed, 4 skipped, 1 warning in 372.17s (0:06:12)
+- compile: PASS (1 file(s))
+- validator: PASS (OK: 172 documents, 120 cases across 3 splits, all checks passed (guard-independent; see --diagnose-current-guards for an optional, non-gating guard-agreement report).)
+- determinism: PASS (Determinism check passed: two in-memory builds are byte-identical.)
+- manifest: PASS (OK: 9 file(s) verified against the frozen FINAL manifest, no drift detected.)
+- frozen_artifacts: PASS (9 file byte-identical (status=final))
+- git_diff_check: PASS (khong co whitespace error)
+- scope_invariants: PASS (khong dung vao: requirements.txt, redteam/, reports/evaluation/, report-latex-template/)
+- no_temp_dirs: PASS (sach)
+- no_tracked_db: PASS (khong co db duoc track)
+
+### Modified (tracked)
+M	scripts/seed_enterprise_knowledge_base.py
+
+### Untracked
+(none)
+
+=====================================================================
+
+KET QUA: TAT CA PASS - san sang gui audit.

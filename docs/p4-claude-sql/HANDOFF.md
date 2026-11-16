@@ -203,6 +203,6 @@ phương pháp/claim) và người duy trì quyết định. Holdout P2SQL độ
   chạy trên máy của mình**, ngẫu nhiên, n=3/ô — không phải số liệu báo cáo.
 
 ## Verify tại HEAD
-Xem `evidence/verify_phase-HEAD.txt` (được tạo bằng `scripts/p4_verify_only.bat` sau commit sửa audit
-vòng 2; dòng `base_commit` trong file ghi commit được kiểm). Các commit sau `184df3d` chỉ thay đổi
+`evidence/verify_phase-HEAD.txt`: `base_commit: ec68cf3`, **TAT CA PASS**, full_suite
+`1708 passed, 4 skipped`. Commit chứa file bằng chứng này chỉ thêm file bằng chứng và sửa đoạn này trong HANDOFF. Các commit sau `184df3d` chỉ thay đổi
 tài liệu, bằng chứng, prompt audit và file `.bat` — không đổi code ứng dụng hay test.
