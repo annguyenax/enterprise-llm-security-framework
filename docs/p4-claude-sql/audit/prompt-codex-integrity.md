@@ -19,3 +19,5 @@ Check and cite file:line / command output:
 
 Output (English, concise): table ID | Severity (Critical/Major/Minor/Info) | file:line | finding | evidence | fix.
 End with `VERDICT: PASS` or `VERDICT: REVISE`.
+
+7. Re-audit: for each finding in `docs/p4-claude-sql/audit/codex-integrity-round1.md`, state RESOLVED / NOT RESOLVED with evidence.
