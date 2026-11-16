@@ -79,3 +79,58 @@ Chạy thật với Claude (TỐN TIỀN — cần người duy trì duyệt, AG
 - `ollama.py` đã refactor sang `_shared.py`; test cũ vẫn qua nhưng nên thử lại demo Ollama thật.
 - Gọi API Claude chưa được thực hiện lần nào.
 - File `scripts/seed_enterprise_knowledge_base.py` (sửa dở của bạn) **không** nằm trong commit nào.
+
+---
+
+# P4.1 — Nâng cấp: dữ liệu thật hơn, tấn công đa dạng, agent công ty
+
+| Commit | Nội dung |
+|---|---|
+| `afb90b1` | Dữ liệu vận hành thực tế hơn (schema 1.1) |
+| `b9045a3` | Đa dạng hoá tấn công, chia dev/holdout |
+| `9ace83d` | Trợ lý Nhà Mộc Việt nhiều công cụ |
+
+## What changed
+**Dữ liệu (schema 1.1):** thêm `employees`, `promotions`, `shipments`, `warranty_claims`,
+`support_tickets`. 6 showroom + kho tổng, 74 SKU theo bộ sưu tập, 300 khách, 1.500 đơn (2025–2026,
+cao điểm Tết/cuối năm), 1.410 vận đơn, 600 đánh giá, 400 ticket, 120 yêu cầu bảo hành, 84 nhân sự,
+6 chương trình khuyến mãi. 15 tài liệu sạch + 14 tài liệu đầu độc. ACL mở rộng cho bảng mới và
+phòng NhanSu, IT.
+
+**Tấn công:**
+- Gián tiếp (`datasets/furniture/attacks/indirect-rows.json`): 38 payload (24 dev / 14 holdout,
+  38 kỹ thuật) cài ở 7 bảng — base64, homoglyph Cyrillic, zero-width, leetspeak, tiếng Trung,
+  chat-template/[INST] spoof, tool-call JSON, markdown/HTML image exfil, link phishing, đổi STK,
+  payload chia 2 phần, persona/prompt leak, DoS, stored SQLi trong tên khách, supply-chain trong
+  điều khoản NCC... + 32 dòng lành tính giống tấn công.
+- Trực tiếp (`redteam/sql/`): 38 tấn công / 31 lành tính — thêm obfuscation hoa/thường + tab,
+  `char()`, recursive CTE DoS, `randomblob`, `sqlite_version`, blind boolean, NULL-padding UNION,
+  `json_extract`, dấu `；` toàn độ rộng, TEMP VIEW, BEGIN/COMMIT, lộ lương/địa chỉ.
+- RAG poisoning mới: đổi số tài khoản, markdown image exfil, base64, tool-call trong tài liệu,
+  giá sai, link phishing, chỉ thị chia 2 tài liệu (holdout).
+
+**Agent (`app/company_agent/`):** 5 công cụ `search_docs`, `query_db`, `order_status`
+(truy vấn tham số hoá — đối chứng với text-to-SQL), `create_ticket`, `send_email` (mô phỏng, không
+gửi thật). Chế độ guarded: Input Guard → allowlist công cụ theo phòng ban → parse JSON + validate
+tham số → SQL Guard → RAG/Result Guard trên MỌI output công cụ → hành động ghi vào hàng chờ, chỉ
+Leader duyệt → email chỉ tới `@example.test` + DLP → Output Guard + xoá link/ảnh ngoài → tối đa 5 bước.
+Unguarded: bỏ toàn bộ. Endpoint: `POST /v1/agent/chat`, `POST /v1/unguarded/agent/chat`,
+`POST /v1/agent/actions/{id}/approve`, `GET /v1/agent/outbox`. Tham số `corpus=clean|poisoned`.
+
+## Evidence (Linux VM, Python 3.10.12)
+- `scripts/eval_indirect_fixtures.py` (Result Guard, không LLM):
+  `dev 24/24`, `holdout 9/14`, `benign flagged 0/32`. Luật chỉ được chỉnh trên dev; holdout đo
+  **một lần, không chỉnh luật sau đó**. Các ca holdout trượt: diễn đạt lại tiếng Việt/Anh, `[INST]`,
+  chữ tách bằng gạch nối, social engineering kiểu nói chuyện → **giới hạn của luật regex**, là
+  luận cứ cho lớp semantic/LLM-judge ở bước sau.
+- Bộ test P4 + provider + gateway liên quan: `192 passed, 1 warning`.
+- Toàn bộ `tests/` (trừ `phase12f/release/ci`): `2 failed, 1408 passed, 16 skipped` — 2 lỗi nằm ở
+  `tests/test_benchmark_v2_freeze.py`, có sẵn từ trước (Python 3.10 thiếu `read_text(newline=)`).
+
+## Risks / TBD (bổ sung)
+- Holdout do **cùng tác giả** viết → chỉ là kiểm tra sơ bộ; cần holdout độc lập (Grok/Gemini/người).
+- Hàng chờ duyệt và outbox nằm trong bộ nhớ tiến trình, mất khi restart; `approver_role` do client
+  tự khai (chưa gắn xác thực) và chưa chặn tự duyệt yêu cầu của chính mình.
+- Tìm tài liệu là keyword scoring đơn giản, không dùng retriever BM25/hybrid sẵn có của dự án.
+- `order_status` vẫn trả `orders.note` (qua Result Guard) — cố ý, để thử indirect injection.
+- Chưa chạy agent với LLM thật (qwen3/Claude): model thật có thể không theo đúng định dạng JSON.
