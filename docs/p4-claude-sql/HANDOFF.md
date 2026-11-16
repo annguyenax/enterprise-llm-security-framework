@@ -172,3 +172,17 @@ cho lần chạy (không sửa biến môi trường của người dùng).
 ## Cách chạy lại
 Double-click `scripts\p4_windows_check.bat` (build DB → verify_phase → live smoke qwen3), kết quả ở
 `logs\p4-check\`. Chỉ live: `scripts\p4_live_ollama.bat`. Không gọi API trả phí.
+
+## Kết quả cuối (Windows, commit `184df3d`)
+`verify_phase.ps1`: **TAT CA PASS** — compile, focused_tests (404 passed), full_suite
+(**1708 passed, 4 skipped**), validator, determinism, manifest, frozen_artifacts (9 file
+byte-identical), git_diff_check, scope_invariants, no_temp_dirs, no_tracked_db.
+
+Hai việc dọn dẹp để đạt kết quả này:
+- `.pytest-tmp` (thuộc `MSI\CodexSandboxOffline`) được người duy trì xoá bằng `scripts/p4_cleanup_admin.bat`.
+- Sửa lỗi có sẵn trong `verify_phase.ps1` (commit `184df3d`): khi chỉ có đúng 1 file `.py` thay đổi,
+  PowerShell splat chuỗi thành từng ký tự → `py_compile` nhận `'s'` và báo FAIL giả. Đã tái hiện trên
+  Windows (exit 1 → exit 0 sau khi bọc `@(...)`).
+
+Việc tiếp theo theo quy trình: audit độc lập (Grok chat mới: kỹ thuật/bảo mật; Gemini:
+phương pháp/claim) và người duy trì quyết định. Holdout P2SQL độc lập vẫn là TBD.
