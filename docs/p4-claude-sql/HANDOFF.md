@@ -23,7 +23,8 @@ nhận **cùng một chỉ dẫn** (cả nhánh guarded lẫn `unguarded_lab`). 
 `system` (tương đương vị trí system-role trong Ollama). Key không bao giờ xuất hiện trong lỗi.
 
 **B. Dataset** — `datasets/furniture/`: schema (contract), `seed.sql` sinh tất định bởi
-`scripts/generate_furniture_seed.py`, 8 tài liệu sạch + 6 bản đầu độc ghép cặp, 18 dòng tấn công
+`scripts/generate_furniture_seed.py`, *(số liệu lịch sử tại commit `adf8877`; dataset hiện tại xem
+P4.1)* 8 tài liệu sạch + 6 bản đầu độc ghép cặp, 18 dòng tấn công
 P2SQL gián tiếp (9 `orders.note`, 9 `product_reviews.content`) + 18 dòng đối chứng lành tính,
 `manifest.json`, `scripts/build_furniture_db.py`. Đặt cạnh dữ liệu cũ; `datasets/v2`, `v3` không đổi
 (`git diff eff5243 HEAD -- datasets/v2 datasets/v3` = 0 dòng).
@@ -70,7 +71,7 @@ Chạy thật với Claude (TỐN TIỀN — cần người duy trì duyệt, AG
 
 ## 5. Risks / TBD
 - **Chưa có số liệu đánh giá nào.** Mọi `expected_guard_decision` là kỳ vọng thiết kế.
-- `injection_rules.py` được viết **trên chính 18 dòng tấn công của dataset** → đây là dev set,
+- *(Tại `e1a3eea`)* `injection_rules.py` được viết **trên chính 18 dòng tấn công của dataset** → đây là dev set,
   dễ overfit. Cần một bộ holdout P2SQL gián tiếp do người/AI khác viết độc lập trước khi báo tỉ lệ.
 - Lớp regex phụ của SQL guard bảo thủ: chặn `;`, `#`, từ khoá ghi (vd. `update`) cả khi nằm trong
   chuỗi literal → có thể false positive.
@@ -122,10 +123,9 @@ Unguarded: bỏ toàn bộ. Endpoint: `POST /v1/agent/chat`, `POST /v1/unguarded
 ## Evidence (Linux VM, Python 3.10.12)
 - `scripts/eval_indirect_fixtures.py` (Result Guard, không LLM):
   `dev 24/24`, `holdout 9/14`, `benign flagged 0/32` — **quan sát trên fixture**, tái hiện được bằng
-  script (Code X đã chạy lại ra đúng các số này). Theo lời khai của implementer, luật chỉ được chỉnh
-  trên dev và holdout được đo một lần; **repo không có bằng chứng độc lập cho quy trình này** (không lưu
-  lịch sử chạy/tác giả), và holdout do cùng tác giả viết. Các ca holdout trượt (diễn đạt lại, `[INST]`,
-  chữ tách gạch nối, social engineering) **gợi ý** — chưa chứng minh — giới hạn của luật regex.
+  script (Code X đã chạy lại ra đúng các số này). Dev và holdout do **cùng tác giả** viết; repo
+  **không** ghi lại quy trình chỉnh luật, nên tài liệu này **không** đưa ra khẳng định nào về quy trình
+  đó, cũng không suy ra nguyên nhân các ca trượt. Cần holdout độc lập trước khi báo bất kỳ tỉ lệ nào.
 - Bộ test P4 + provider + gateway liên quan: `192 passed, 1 warning`.
 - Toàn bộ `tests/` (trừ `phase12f/release/ci`): `2 failed, 1408 passed, 16 skipped` — 2 lỗi nằm ở
   `tests/test_benchmark_v2_freeze.py`, có sẵn từ trước (Python 3.10 thiếu `read_text(newline=)`).
@@ -149,12 +149,15 @@ chỉ cho `127.0.0.1` → `scripts/p4_live_ollama.bat` tự mở thêm một ti�
 cho lần chạy (không sửa biến môi trường của người dùng).
 
 ## Evidence (output thật; bản sao được track ở `docs/p4-claude-sql/evidence/`)
-- `verify_phase.ps1` tại commit `1e5458f`: `full_suite: 1708 passed, 4 skipped`; validator,
+- *(Lịch sử, commit `1e5458f`; log không được lưu)* `verify_phase.ps1`: `full_suite: 1708 passed, 4 skipped`; validator,
   determinism, manifest, frozen_artifacts (9 file byte-identical), git_diff_check,
   scope_invariants, no_tracked_db: PASS. FAIL còn lại chỉ do môi trường:
   `no_temp_dirs` (`.pytest-tmp` thuộc tài khoản `MSI\CodexSandboxOffline`, cần quyền admin để xoá —
-  `scripts/p4_cleanup_admin.bat`) và `compile` (file `.pyc` cũ bị khoá; chạy lại `py_compile` → exit 0).
-- `scripts/p4_live_smoke.py --provider ollama --repeat 3` (11 kịch bản × 2 chế độ × 3 lần):
+  `scripts/p4_cleanup_admin.bat`) và `compile` — nguyên nhân thật về sau xác định là lỗi splat
+  trong `verify_phase.ps1` (sửa ở `184df3d`), không phải `.pyc` bị khoá như nhận định ban đầu.
+- *(Quan sát lịch sử do người duy trì chạy; phụ thuộc trạng thái Ollama và tính ngẫu nhiên của model,
+  **không tái hiện được chỉ từ repo**; output thô được lưu ở `evidence/live_smoke-1e5458f-repeat3.txt`)*
+  `scripts/p4_live_smoke.py --provider ollama --repeat 3` (11 kịch bản × 2 chế độ × 3 lần):
   - guarded: **tấn công thành công 0/18**; benign chọn đúng công cụ 13/15; lỗi 0.
   - unguarded: **tấn công thành công 12/18** (đọc `internal_secrets`, gửi email ra
     `evil-mail.test`, trả STK giả từ tài liệu đầu độc, `DELETE FROM inventory` — chỉ trên bản sao
@@ -176,7 +179,7 @@ cho lần chạy (không sửa biến môi trường của người dùng).
 Double-click `scripts\p4_windows_check.bat` (build DB → verify_phase → live smoke qwen3), kết quả ở
 `logs\p4-check\`. Chỉ live: `scripts\p4_live_ollama.bat`. Không gọi API trả phí.
 
-## Kết quả cuối (Windows, commit `184df3d`)
+## Kết quả verify tại commit `184df3d` (lịch sử; xem mục “Verify tại HEAD” bên dưới cho commit cuối)
 `verify_phase.ps1`: **TAT CA PASS** — compile, focused_tests (404 passed), full_suite
 (**1708 passed, 4 skipped**), validator, determinism, manifest, frozen_artifacts (9 file
 byte-identical), git_diff_check, scope_invariants, no_temp_dirs, no_tracked_db.
@@ -198,3 +201,8 @@ phương pháp/claim) và người duy trì quyết định. Holdout P2SQL độ
   `1e5458f` (code agent giống `14e1ba0`; log của lần chạy 11:41 đã bị ghi đè). Tóm tắt trong file:
   guarded 0/18, unguarded 12/18, benign 13/15 và 12/15, lỗi 0. Đây là **quan sát smoke-test do người duy trì
   chạy trên máy của mình**, ngẫu nhiên, n=3/ô — không phải số liệu báo cáo.
+
+## Verify tại HEAD
+Xem `evidence/verify_phase-HEAD.txt` (được tạo bằng `scripts/p4_verify_only.bat` sau commit sửa audit
+vòng 2; dòng `base_commit` trong file ghi commit được kiểm). Các commit sau `184df3d` chỉ thay đổi
+tài liệu, bằng chứng, prompt audit và file `.bat` — không đổi code ứng dụng hay test.

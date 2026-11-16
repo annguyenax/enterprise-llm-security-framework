@@ -21,3 +21,5 @@ Output (English, concise): table ID | Severity (Critical/Major/Minor/Info) | fil
 End with `VERDICT: PASS` or `VERDICT: REVISE`.
 
 7. Re-audit: for each finding in `docs/p4-claude-sql/audit/codex-integrity-round1.md`, state RESOLVED / NOT RESOLVED with evidence.
+
+8. Round 2 report: `docs/p4-claude-sql/audit/codex-integrity-round2.md` — re-check its findings too.
