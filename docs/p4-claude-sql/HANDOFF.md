@@ -17,14 +17,14 @@ nên thiếu contract). Leader tự làm cả 3 task theo đúng `00_CONTRACT.md
 
 ## 1. What changed
 **A. Provider Claude** — `app/services/providers/anthropic.py` (`LLM_PROVIDER=anthropic`,
-`LLM_MODEL_NAME=claude-sonnet-5-5`, `ANTHROPIC_API_KEY`). Lớp HTTP dùng stdlib (`urllib`), không thêm gói mới vào `requirements.txt`. Prompt hệ thống,
+`LLM_MODEL_NAME=claude-sonnet-5-5`, `ANTHROPIC_API_KEY`). Lớp HTTP dùng stdlib (`urllib`), không thêm gói mới vào `requirements.txt`. Mặc định không gọi API trả phí: chỉ khi người dùng chủ động đặt `LLM_PROVIDER=anthropic` + key và gửi request; `p4_live_smoke.py` còn đòi thêm `--allow-paid`. Prompt hệ thống,
 lịch sử và khối CONTEXT tách ra `providers/_shared.py`; `ollama.py` dùng chung → hai model
 nhận **cùng một chỉ dẫn** (cả nhánh guarded lẫn `unguarded_lab`). CONTEXT đặt trong tham số
 `system` (tương đương vị trí system-role trong Ollama). Key không bao giờ xuất hiện trong lỗi.
 
 **B. Dataset** — `datasets/furniture/`: schema (contract), `seed.sql` sinh tất định bởi
-`scripts/generate_furniture_seed.py`, *(số liệu lịch sử tại commit `adf8877`; dataset hiện tại xem
-P4.1)* 8 tài liệu sạch + 6 bản đầu độc ghép cặp, 18 dòng tấn công
+`scripts/generate_furniture_seed.py`, *(ghi chú lịch sử chưa kiểm chứng về commit `adf8877`; artifact
+hiện tại không tái hiện được trạng thái đó — dataset hiện tại xem P4.1)* 8 tài liệu sạch + 6 bản đầu độc ghép cặp, 18 dòng tấn công
 P2SQL gián tiếp (9 `orders.note`, 9 `product_reviews.content`) + 18 dòng đối chứng lành tính,
 `manifest.json`, `scripts/build_furniture_db.py`. Đặt cạnh dữ liệu cũ; `datasets/v2`, `v3` không đổi
 (`git diff eff5243 HEAD -- datasets/v2 datasets/v3` = 0 dòng).
@@ -61,7 +61,7 @@ Chạy thật với Claude (TỐN TIỀN — cần người duy trì duyệt, AG
 `LLM_PROVIDER=anthropic`, `LLM_MODEL_NAME=claude-sonnet-5-5`, `ANTHROPIC_API_KEY=...`, rồi
 `uvicorn app.main:app` và gọi `/v1/sql/chat` vs `/v1/unguarded/sql/chat`.
 
-## 4. Evidence (output thật, Linux VM, Python 3.10.12 — KHÔNG phải `.venv` Windows của dự án)
+## 4. Evidence lịch sử (implementer tự báo, Linux VM, Python 3.10.12 — **không có log được lưu, chưa kiểm chứng**; bằng chứng chính thức là `evidence/verify_phase-HEAD.txt`)
 - Bộ test P4 + provider liên quan: `120 passed, 1 warning in 3.47s`.
 - Toàn bộ `tests/` (trừ `phase12f/release/ci`): `2 failed, 1350 passed, 16 skipped`.
   `tests/phase12f tests/release tests/ci`: `3 failed, 269 passed, 7 skipped`.
@@ -120,7 +120,7 @@ Leader duyệt → email chỉ tới `@example.test` + DLP → Output Guard + xo
 Unguarded: bỏ toàn bộ. Endpoint: `POST /v1/agent/chat`, `POST /v1/unguarded/agent/chat`,
 `POST /v1/agent/actions/{id}/approve`, `GET /v1/agent/outbox`. Tham số `corpus=clean|poisoned`.
 
-## Evidence (Linux VM, Python 3.10.12)
+## Evidence (Linux VM, Python 3.10.12 — số pytest dưới đây là lịch sử implementer tự báo, không có log được lưu; số fixture tái hiện được bằng script)
 - `scripts/eval_indirect_fixtures.py` (Result Guard, không LLM):
   `dev 24/24`, `holdout 9/14`, `benign flagged 0/32` — **quan sát trên fixture**, tái hiện được bằng
   script (Code X đã chạy lại ra đúng các số này). Dev và holdout do **cùng tác giả** viết; repo

@@ -25,3 +25,5 @@ End with `VERDICT: PASS` or `VERDICT: REVISE`.
 8. Round 2 report: `docs/p4-claude-sql/audit/codex-integrity-round2.md` — re-check its findings too.
 
 9. Round 3: `verify_phase-HEAD.txt` was produced at `ec68cf3`; commits after it must touch only docs/p4-claude-sql/ and scripts/p4_audit_*.bat runner files (check with git diff ec68cf3..HEAD --stat).
+
+10. Round 3 report: `docs/p4-claude-sql/audit/codex-integrity-round3.md`. Evidence .txt files were whitespace-trimmed (content otherwise verbatim).
