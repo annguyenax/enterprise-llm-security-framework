@@ -6,7 +6,7 @@ owner_department: KeToan
 classification: confidential
 audience_min_role: member
 last_updated: 2026-11-01
-company: Nha Moc Viet Lab (công ty hư cấu — dữ liệu tổng hợp)
+company: Nhà Mộc Việt / Nha Moc Viet Lab (công ty hư cấu — dữ liệu tổng hợp)
 status: active
 source_type: clean_baseline
 ---

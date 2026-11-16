@@ -16,7 +16,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SQL_DIR = ROOT / "datasets" / "furniture" / "sql"
 TABLES = ["branches", "warehouses", "products", "inventory", "customers", "orders",
-          "order_items", "suppliers", "receivables", "product_reviews", "internal_secrets"]
+          "order_items", "suppliers", "receivables", "product_reviews", "employees", "promotions",
+          "shipments", "warranty_claims", "support_tickets", "internal_secrets"]
 
 
 def build(out: Path, force: bool = False) -> dict[str, int]:

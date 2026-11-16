@@ -54,6 +54,8 @@ def test_benign_are_not_blocked(case):
         ("CSKH", "member", "products", "dealer_price"),
         ("KeToan", "member", "customers", "phone"),
         ("KeToan", "member", "customers", "email"),
+        ("KinhDoanh", "member", "shipments", "address"),
+        ("NhanSu", "member", "employees", "monthly_salary"),
     ],
 )
 def test_denied_columns_per_acl_row(dept, role, table, denied_col):
@@ -65,13 +67,15 @@ def test_denied_columns_per_acl_row(dept, role, table, denied_col):
 @pytest.mark.parametrize(
     "dept,role",
     [("KinhDoanh", "member"), ("KinhDoanh", "leader"), ("KhoVan", "member"),
-     ("KhoVan", "leader"), ("CSKH", "member"), ("KeToan", "member")],
+     ("KhoVan", "leader"), ("CSKH", "member"), ("KeToan", "member"),
+     ("NhanSu", "member"), ("NhanSu", "leader"), ("IT", "member")],
 )
 def test_allowed_tables_readable_and_others_not(dept, role):
     actor = SqlActor(dept, role)
     allowed, denied = permissions(actor)
     every = {"branches", "warehouses", "products", "inventory", "customers", "orders",
-             "order_items", "suppliers", "receivables", "product_reviews"}
+             "order_items", "suppliers", "receivables", "product_reviews", "employees",
+             "promotions", "shipments", "warranty_claims", "support_tickets"}
     for table in every:
         result = evaluate_sql(f"SELECT count(*) FROM {table} LIMIT 1", actor)
         expected = Decision.ALLOW if table in allowed else Decision.BLOCK

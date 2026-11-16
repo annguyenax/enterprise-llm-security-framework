@@ -1,5 +1,5 @@
 -- Furniture & household goods company (100% synthetic). CONTRACT FILE -- owned by leader.
--- Workers MUST NOT change table/column names. Seed data lives in seed.sql (Worker B).
+-- Schema version 1.1. Workers MUST NOT change table/column names. Seed data lives in seed.sql (Worker B).
 -- Brand/company name: "Nha Moc Viet Lab" (fictional). No real people/companies.
 
 CREATE TABLE branches (
@@ -77,6 +77,56 @@ CREATE TABLE product_reviews (
   customer_id TEXT NOT NULL REFERENCES customers(customer_id),
   rating      INTEGER NOT NULL,
   content     TEXT NOT NULL              -- may carry INDIRECT P2SQL payloads (attack fixtures)
+);
+
+-- ---- v1.1 extension (leader, P4 upgrade): operations tables ----
+
+CREATE TABLE employees (
+  employee_id TEXT PRIMARY KEY,          -- e.g. 'NV-0001'
+  full_name   TEXT NOT NULL,             -- synthetic
+  department  TEXT NOT NULL,             -- KinhDoanh, KhoVan, CSKH, KeToan, NhanSu, IT
+  title       TEXT NOT NULL,
+  branch_id   TEXT NOT NULL REFERENCES branches(branch_id),
+  work_email  TEXT NOT NULL,             -- @example.test
+  monthly_salary INTEGER NOT NULL        -- CONFIDENTIAL (NhanSu leader, KeToan)
+);
+
+CREATE TABLE promotions (
+  promo_code   TEXT PRIMARY KEY,
+  description  TEXT NOT NULL,
+  discount_pct INTEGER NOT NULL,
+  min_order_vnd INTEGER NOT NULL,
+  valid_from   TEXT NOT NULL,
+  valid_to     TEXT NOT NULL
+);
+
+CREATE TABLE shipments (
+  shipment_id    TEXT PRIMARY KEY,
+  order_id       TEXT NOT NULL REFERENCES orders(order_id),
+  carrier        TEXT NOT NULL,
+  status         TEXT NOT NULL,          -- cho-lay, dang-van-chuyen, da-giao, that-bai
+  scheduled_date TEXT NOT NULL,
+  address        TEXT NOT NULL,          -- PII (synthetic)
+  driver_note    TEXT NOT NULL DEFAULT '' -- free text; may carry INDIRECT payloads
+);
+
+CREATE TABLE warranty_claims (
+  claim_id    TEXT PRIMARY KEY,
+  order_id    TEXT NOT NULL REFERENCES orders(order_id),
+  sku         TEXT NOT NULL REFERENCES products(sku),
+  opened_at   TEXT NOT NULL,
+  status      TEXT NOT NULL,             -- moi, dang-xu-ly, chap-nhan, tu-choi
+  description TEXT NOT NULL              -- customer text; may carry INDIRECT payloads
+);
+
+CREATE TABLE support_tickets (
+  ticket_id   TEXT PRIMARY KEY,
+  customer_id TEXT NOT NULL REFERENCES customers(customer_id),
+  channel     TEXT NOT NULL,             -- zalo, email, hotline, web
+  opened_at   TEXT NOT NULL,
+  status      TEXT NOT NULL,             -- mo, dang-xu-ly, dong
+  subject     TEXT NOT NULL,
+  content     TEXT NOT NULL              -- customer text; may carry INDIRECT payloads
 );
 
 -- Lab-only table that guarded SQL must NEVER read. Holds fake markers only.

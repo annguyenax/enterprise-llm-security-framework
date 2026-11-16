@@ -20,6 +20,11 @@ def _load(name):
     return mod
 
 
+KEYCOL = {"orders": "order_id", "product_reviews": "review_id", "support_tickets": "ticket_id",
+          "warranty_claims": "claim_id", "shipments": "shipment_id", "suppliers": "supplier_id",
+          "customers": "customer_id"}
+
+
 @pytest.fixture(scope="module")
 def db(tmp_path_factory):
     out = tmp_path_factory.mktemp("furniture") / "furniture.db"
@@ -76,7 +81,7 @@ def test_secrets_are_fake_markers_only(db):
 def test_manifest_row_fixtures_resolve(db, manifest):
     conn, _, _ = db
     rows = [e for e in manifest["entries"] if e["kind"] in {"attack_row", "benign_row"}]
-    keycol = {"orders": "order_id", "product_reviews": "review_id"}
+    keycol = KEYCOL
     for e in rows:
         val = conn.execute(
             f"SELECT {e['column']} FROM {e['table']} WHERE {keycol[e['table']]} = ?", (e["key"],)
@@ -84,19 +89,26 @@ def test_manifest_row_fixtures_resolve(db, manifest):
         assert val and val[0].strip(), e["id"]
 
 
-def test_attack_and_benign_rows_balanced(manifest):
-    for table in ("orders", "product_reviews"):
-        attack = [e for e in manifest["entries"] if e.get("table") == table and e["kind"] == "attack_row"]
-        benign = [e for e in manifest["entries"] if e.get("table") == table and e["kind"] == "benign_row"]
-        assert len(attack) >= 8 and len(benign) == len(attack)
+def test_attack_rows_diverse_and_split(manifest):
+    attacks = [e for e in manifest["entries"] if e["kind"] == "attack_row"]
+    benign = [e for e in manifest["entries"] if e["kind"] == "benign_row"]
+    assert len(attacks) >= 30 and len(benign) >= 30
+    assert len({e["attack_type"] for e in attacks}) >= 20
+    assert len({e["table"] for e in attacks}) >= 6
+    assert {e["split"] for e in attacks} == {"dev", "holdout"}
+
+
+def test_planted_rows_do_not_collide(manifest):
+    keys = [(e["table"], e["key"]) for e in manifest["entries"] if e["kind"] in {"attack_row", "benign_row"}]
+    assert len(keys) == len(set(keys))
 
 
 def test_docs_resolve_and_poisoned_are_paired(manifest):
     docs = [e for e in manifest["entries"] if e["kind"] in {"clean", "poisoned"}]
     clean_ids = {e["id"] for e in docs if e["kind"] == "clean"}
-    assert len(clean_ids) >= 8
+    assert len(clean_ids) >= 15
     poisoned = [e for e in docs if e["kind"] == "poisoned"]
-    assert len(poisoned) >= 6
+    assert len(poisoned) >= 14
     for e in docs:
         assert (ROOT / e["path"]).is_file()
     for e in poisoned:

@@ -51,6 +51,7 @@ so the A/B comparison is not confounded by different prompts.
 | KhoVan      | leader  | + suppliers                                                           | — |
 | CSKH        | member  | products, orders, order_items, product_reviews, customers             | products.dealer_price |
 | KeToan      | member  | orders, order_items, receivables, products, customers, suppliers      | customers.phone, customers.email |
+| (v1.1)      |         | Bảng đầy đủ v1.1 (thêm shipments, warranty_claims, support_tickets, promotions, employees; phòng NhanSu, IT) xem `app/sql_agent/acl.py` | |
 | any         | any     | NEVER: internal_secrets, sqlite_master/sqlite_schema, pragma_*        | — |
 
 ### SQL agent (Worker C)
