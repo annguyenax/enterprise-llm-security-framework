@@ -17,7 +17,7 @@ nên thiếu contract). Leader tự làm cả 3 task theo đúng `00_CONTRACT.md
 
 ## 1. What changed
 **A. Provider Claude** — `app/services/providers/anthropic.py` (`LLM_PROVIDER=anthropic`,
-`LLM_MODEL_NAME=claude-sonnet-5-5`, `ANTHROPIC_API_KEY`). Chỉ dùng stdlib. Prompt hệ thống,
+`LLM_MODEL_NAME=claude-sonnet-5-5`, `ANTHROPIC_API_KEY`). Lớp HTTP dùng stdlib (`urllib`), không thêm gói mới vào `requirements.txt`. Prompt hệ thống,
 lịch sử và khối CONTEXT tách ra `providers/_shared.py`; `ollama.py` dùng chung → hai model
 nhận **cùng một chỉ dẫn** (cả nhánh guarded lẫn `unguarded_lab`). CONTEXT đặt trong tham số
 `system` (tương đương vị trí system-role trong Ollama). Key không bao giờ xuất hiện trong lỗi.
@@ -46,7 +46,9 @@ P2SQL gián tiếp (9 `orders.note`, 9 `product_reviews.content`) + 18 dòng đ�
 
 ## 2. Why
 Tạo bảng 2x2 {qwen3 local, Claude Sonnet 5.5} × {không guard, có guard} cho cả RAG poisoning và
-SQL injection/P2SQL, để kiểm chứng luận điểm "bảo mật nằm ở gateway, không nằm ở model".
+SQL injection/P2SQL. Đây là **độ phủ thực nghiệm được lên kế hoạch** để sau này đánh giá giả thuyết
+"bảo mật nằm ở gateway, không nằm ở model" — phase này **chưa** kiểm chứng giả thuyết đó (chưa gọi
+Claude, kết quả smoke không báo cáo được, chưa có holdout P2SQL độc lập).
 
 ## 3. How to test
 ```powershell
@@ -119,10 +121,11 @@ Unguarded: bỏ toàn bộ. Endpoint: `POST /v1/agent/chat`, `POST /v1/unguarded
 
 ## Evidence (Linux VM, Python 3.10.12)
 - `scripts/eval_indirect_fixtures.py` (Result Guard, không LLM):
-  `dev 24/24`, `holdout 9/14`, `benign flagged 0/32`. Luật chỉ được chỉnh trên dev; holdout đo
-  **một lần, không chỉnh luật sau đó**. Các ca holdout trượt: diễn đạt lại tiếng Việt/Anh, `[INST]`,
-  chữ tách bằng gạch nối, social engineering kiểu nói chuyện → **giới hạn của luật regex**, là
-  luận cứ cho lớp semantic/LLM-judge ở bước sau.
+  `dev 24/24`, `holdout 9/14`, `benign flagged 0/32` — **quan sát trên fixture**, tái hiện được bằng
+  script (Code X đã chạy lại ra đúng các số này). Theo lời khai của implementer, luật chỉ được chỉnh
+  trên dev và holdout được đo một lần; **repo không có bằng chứng độc lập cho quy trình này** (không lưu
+  lịch sử chạy/tác giả), và holdout do cùng tác giả viết. Các ca holdout trượt (diễn đạt lại, `[INST]`,
+  chữ tách gạch nối, social engineering) **gợi ý** — chưa chứng minh — giới hạn của luật regex.
 - Bộ test P4 + provider + gateway liên quan: `192 passed, 1 warning`.
 - Toàn bộ `tests/` (trừ `phase12f/release/ci`): `2 failed, 1408 passed, 16 skipped` — 2 lỗi nằm ở
   `tests/test_benchmark_v2_freeze.py`, có sẵn từ trước (Python 3.10 thiếu `read_text(newline=)`).
@@ -145,7 +148,7 @@ Biến hệ thống `OLLAMA_HOST=192.168.100.40:11434` khiến Ollama chỉ nghe
 chỉ cho `127.0.0.1` → `scripts/p4_live_ollama.bat` tự mở thêm một tiến trình Ollama ở loopback
 cho lần chạy (không sửa biến môi trường của người dùng).
 
-## Evidence (output thật, `logs/p4-check/`)
+## Evidence (output thật; bản sao được track ở `docs/p4-claude-sql/evidence/`)
 - `verify_phase.ps1` tại commit `1e5458f`: `full_suite: 1708 passed, 4 skipped`; validator,
   determinism, manifest, frozen_artifacts (9 file byte-identical), git_diff_check,
   scope_invariants, no_tracked_db: PASS. FAIL còn lại chỉ do môi trường:
@@ -186,3 +189,12 @@ Hai việc dọn dẹp để đạt kết quả này:
 
 Việc tiếp theo theo quy trình: audit độc lập (Grok chat mới: kỹ thuật/bảo mật; Gemini:
 phương pháp/claim) và người duy trì quyết định. Holdout P2SQL độc lập vẫn là TBD.
+
+## Bằng chứng được lưu trong repo (đáp ứng Code X F1)
+`logs/` bị gitignore, nên bản sao nguyên văn được commit tại `docs/p4-claude-sql/evidence/`:
+- `verify_phase-184df3d.txt`, `verify_status-184df3d.txt` — output `verify_phase.ps1` trên Windows (TAT CA PASS).
+- `live-ollama-1e5458f-repeat3.json`, `live_smoke-1e5458f-repeat3.txt` — output thô của
+  `p4_live_smoke.py --repeat 3` với qwen3:4b-instruct, lần chạy 11:52 ngày 16/11/2026 tại commit
+  `1e5458f` (code agent giống `14e1ba0`; log của lần chạy 11:41 đã bị ghi đè). Tóm tắt trong file:
+  guarded 0/18, unguarded 12/18, benign 13/15 và 12/15, lỗi 0. Đây là **quan sát smoke-test do người duy trì
+  chạy trên máy của mình**, ngẫu nhiên, n=3/ô — không phải số liệu báo cáo.
