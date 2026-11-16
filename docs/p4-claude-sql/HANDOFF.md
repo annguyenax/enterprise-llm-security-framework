@@ -25,7 +25,9 @@ nhận **cùng một chỉ dẫn** (cả nhánh guarded lẫn `unguarded_lab`). 
 **B. Dataset** — `datasets/furniture/`: schema (contract), `seed.sql` sinh tất định bởi
 `scripts/generate_furniture_seed.py`, tài liệu sạch + bản đầu độc ghép cặp, dòng tấn công P2SQL gián tiếp
 và dòng đối chứng lành tính (số lượng hiện tại: xem P4.1 và `datasets/furniture/manifest.json`),
-`manifest.json`, `scripts/build_furniture_db.py`. Đặt cạnh dữ liệu cũ; `datasets/v2`, `v3` không đổi
+`manifest.json`, `scripts/build_furniture_db.py`. Tính tất định được kiểm bằng
+`tests/test_furniture_dataset.py::test_seed_is_deterministic` (sinh vào thư mục tạm của pytest rồi so
+từng byte với `seed.sql` và `manifest.json` đang được track — chạy được ở chế độ chỉ đọc). Đặt cạnh dữ liệu cũ; `datasets/v2`, `v3` không đổi
 (`git diff eff5243 HEAD -- datasets/v2 datasets/v3` = 0 dòng).
 
 **C. SQL agent** — `app/sql_agent/`:

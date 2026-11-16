@@ -29,3 +29,5 @@ End with `VERDICT: PASS` or `VERDICT: REVISE`.
 10. Round 3 report: `docs/p4-claude-sql/audit/codex-integrity-round3.md`. Evidence .txt files were whitespace-trimmed (content otherwise verbatim).
 
 11. Round 4 report: `docs/p4-claude-sql/audit/codex-integrity-round4.md` (F6, F8 were NOT RESOLVED there).
+
+12. Round 5 report: `docs/p4-claude-sql/audit/codex-integrity-round5.md`. For determinism you may rely on `tests/test_furniture_dataset.py::test_seed_is_deterministic` (writes only to pytest tmp_path, compares bytes with tracked files).
