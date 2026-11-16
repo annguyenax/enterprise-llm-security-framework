@@ -17,6 +17,7 @@ from typing import AsyncIterator
 from fastapi import FastAPI
 
 from app.api.routes import router
+from app.api.agent_routes import router as agent_router
 from app.api.sql_routes import router as sql_router
 from app.core.config import settings
 from app.workspace import store as workspace_store
@@ -56,4 +57,5 @@ app = FastAPI(
 
 app.include_router(router)
 app.include_router(sql_router)
+app.include_router(agent_router)
 app.include_router(workspace_router)
