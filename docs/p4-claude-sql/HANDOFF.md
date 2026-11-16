@@ -123,7 +123,8 @@ Unguarded: bỏ toàn bộ. Endpoint: `POST /v1/agent/chat`, `POST /v1/unguarded
   script (Code X đã chạy lại ra đúng các số này). Dev và holdout do **cùng tác giả** viết; repo
   **không** ghi lại quy trình chỉnh luật, nên tài liệu này **không** đưa ra khẳng định nào về quy trình
   đó, cũng không suy ra nguyên nhân các ca trượt. Cần holdout độc lập trước khi báo bất kỳ tỉ lệ nào.
-- Số pytest Linux VM ở giai đoạn này không được lưu log nên đã bị gỡ; xem `evidence/verify_phase-HEAD.txt`.
+- Số pytest chạy trên Linux VM ở giai đoạn này không được lưu log nên đã bị gỡ. `evidence/verify_phase-HEAD.txt`
+  là một lần chạy **riêng biệt, về sau**, trên Windows tại `ec68cf3` — không thay thế hay xác nhận các log Linux đã mất.
 
 ## Risks / TBD (bổ sung)
 - Holdout do **cùng tác giả** viết → chỉ là kiểm tra sơ bộ; cần holdout độc lập (Grok/Gemini/người).
@@ -201,3 +202,11 @@ phương pháp/claim) và người duy trì quyết định. Holdout P2SQL độ
 `evidence/verify_phase-HEAD.txt`: `base_commit: ec68cf3`, **TAT CA PASS**, full_suite
 `1708 passed, 4 skipped`. Commit chứa file bằng chứng này chỉ thêm file bằng chứng và sửa đoạn này trong HANDOFF. Các commit sau `184df3d` chỉ thay đổi
 tài liệu, bằng chứng, prompt audit và file `.bat` — không đổi code ứng dụng hay test.
+
+## Trạng thái audit (Code X / Codex CLI, chỉ đọc)
+Báo cáo các vòng: `audit/codex-integrity-round1..6.md`. Từ vòng 3 không còn Critical/Major. Vòng 6 còn 2 Minor:
+F2 (câu chữ — đã sửa ở commit này) và F8 (sandbox của auditor không có thư mục tạm nên pytest không khởi
+động được — vấn đề môi trường auditor; các vòng 1–5 chạy cùng bộ test được: 172 passed). Implementer
+**không** tự tuyên bố PASS; người duy trì quyết định.
+Grok (audit kỹ thuật/bảo mật): **chưa chạy xong** — Grok Build CLI hết hạn mức miễn phí; chạy lại
+`scripts\p4_audit_run.bat` khi có hạn mức. Gemini (phương pháp): chưa chạy (chưa có CLI; cần Node ≥ 20).
