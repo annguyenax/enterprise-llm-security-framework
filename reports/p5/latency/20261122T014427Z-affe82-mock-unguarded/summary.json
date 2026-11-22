@@ -1,0 +1,150 @@
+{
+  "case_count": 425,
+  "cases_file": "datasets/v3/cases/all.jsonl",
+  "endpoint": "messages_unguarded",
+  "environment": {
+    "cpu_count": 24,
+    "git_commit": "e001985727d95bd8473798bdf51452aeb643a5a5",
+    "git_worktree_dirty": true,
+    "llm_model_name": "mock-rag-guard-v1",
+    "llm_provider": "mock",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "processor": "Intel64 Family 6 Model 191 Stepping 2, GenuineIntel",
+    "python": "3.13.1",
+    "semantic_guard_model": "mock-rag-guard-v1",
+    "semantic_guard_timeout_s": "5.0",
+    "semantic_guard_use_llm": "0"
+  },
+  "label": "mock-unguarded",
+  "percentile_method": "nearest-rank",
+  "repeats": 3,
+  "run_id": "20261122T014427Z-affe82",
+  "schema": "p5-latency-v1",
+  "summary": {
+    "all": {
+      "e2e": {
+        "max": 37.8024,
+        "mean": 16.7877,
+        "n": 1275,
+        "p50": 16.3959,
+        "p95": 22.5646,
+        "p99": 27.9192,
+        "p99_reportable": true
+      },
+      "guard_overhead": {
+        "max": 0.1156,
+        "mean": 0.0087,
+        "n": 1275,
+        "p50": 0.0079,
+        "p95": 0.0116,
+        "p99": 0.0198,
+        "p99_reportable": true
+      },
+      "history_screen": {
+        "max": 0.1156,
+        "mean": 0.0087,
+        "n": 1275,
+        "p50": 0.0079,
+        "p95": 0.0116,
+        "p99": 0.0198,
+        "p99_reportable": true
+      },
+      "input_guard": null,
+      "output_guard": null,
+      "provider": {
+        "max": 0.1858,
+        "mean": 0.0053,
+        "n": 1275,
+        "p50": 0.0048,
+        "p95": 0.0065,
+        "p99": 0.0153,
+        "p99_reportable": true
+      },
+      "rag_context_guard": null,
+      "retrieval": {
+        "max": 9.69,
+        "mean": 2.8172,
+        "n": 1275,
+        "p50": 2.3135,
+        "p95": 6.0451,
+        "p99": 8.2774,
+        "p99_reportable": true
+      },
+      "semantic_input": null,
+      "semantic_judge_llm": null,
+      "semantic_output": null
+    },
+    "counts": {
+      "errors": 0,
+      "reached_provider": 1275,
+      "requests": 1275
+    },
+    "reached_provider": {
+      "e2e": {
+        "max": 37.8024,
+        "mean": 16.7877,
+        "n": 1275,
+        "p50": 16.3959,
+        "p95": 22.5646,
+        "p99": 27.9192,
+        "p99_reportable": true
+      },
+      "guard_overhead": {
+        "max": 0.1156,
+        "mean": 0.0087,
+        "n": 1275,
+        "p50": 0.0079,
+        "p95": 0.0116,
+        "p99": 0.0198,
+        "p99_reportable": true
+      },
+      "history_screen": {
+        "max": 0.1156,
+        "mean": 0.0087,
+        "n": 1275,
+        "p50": 0.0079,
+        "p95": 0.0116,
+        "p99": 0.0198,
+        "p99_reportable": true
+      },
+      "input_guard": null,
+      "output_guard": null,
+      "provider": {
+        "max": 0.1858,
+        "mean": 0.0053,
+        "n": 1275,
+        "p50": 0.0048,
+        "p95": 0.0065,
+        "p99": 0.0153,
+        "p99_reportable": true
+      },
+      "rag_context_guard": null,
+      "retrieval": {
+        "max": 9.69,
+        "mean": 2.8172,
+        "n": 1275,
+        "p50": 2.3135,
+        "p95": 6.0451,
+        "p99": 8.2774,
+        "p99_reportable": true
+      },
+      "semantic_input": null,
+      "semantic_judge_llm": null,
+      "semantic_output": null
+    },
+    "stopped_before_provider": {
+      "e2e": null,
+      "guard_overhead": null,
+      "history_screen": null,
+      "input_guard": null,
+      "output_guard": null,
+      "provider": null,
+      "rag_context_guard": null,
+      "retrieval": null,
+      "semantic_input": null,
+      "semantic_judge_llm": null,
+      "semantic_output": null
+    }
+  },
+  "warmup": 20
+}

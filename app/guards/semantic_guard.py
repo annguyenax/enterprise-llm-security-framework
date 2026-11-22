@@ -386,6 +386,7 @@ def _evaluate_with_llm(text: str, context: str = "input") -> GuardDecisionRespon
             "model": model_name,
             "messages": messages,
             "stream": False,
+            "think": False,
             "options": {"temperature": 0.0, "num_predict": 8},
         }
     ).encode("utf-8")

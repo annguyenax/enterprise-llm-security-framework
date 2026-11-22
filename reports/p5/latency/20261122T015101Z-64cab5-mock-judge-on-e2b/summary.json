@@ -1,0 +1,286 @@
+{
+  "case_count": 425,
+  "cases_file": "datasets/v3/cases/all.jsonl",
+  "endpoint": "messages",
+  "environment": {
+    "cpu_count": 24,
+    "git_commit": "e001985727d95bd8473798bdf51452aeb643a5a5",
+    "git_worktree_dirty": true,
+    "llm_model_name": "mock-rag-guard-v1",
+    "llm_provider": "mock",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "processor": "Intel64 Family 6 Model 191 Stepping 2, GenuineIntel",
+    "python": "3.13.1",
+    "semantic_guard_model": "gemma4:e2b-it-q4_K_M",
+    "semantic_guard_timeout_s": "5.0",
+    "semantic_guard_use_llm": "1"
+  },
+  "label": "mock-judge-on-e2b",
+  "percentile_method": "nearest-rank",
+  "repeats": 1,
+  "run_id": "20261122T015101Z-64cab5",
+  "schema": "p5-latency-v1",
+  "summary": {
+    "all": {
+      "e2e": {
+        "max": 451.1656,
+        "mean": 61.1628,
+        "n": 425,
+        "p50": 20.9656,
+        "p95": 131.1588,
+        "p99": 141.856,
+        "p99_reportable": true
+      },
+      "guard_overhead": {
+        "max": 438.8414,
+        "mean": 43.938,
+        "n": 425,
+        "p50": 0.7296,
+        "p95": 110.8915,
+        "p99": 121.4218,
+        "p99_reportable": true
+      },
+      "history_screen": {
+        "max": 0.0208,
+        "mean": 0.0094,
+        "n": 425,
+        "p50": 0.0091,
+        "p95": 0.0121,
+        "p99": 0.0176,
+        "p99_reportable": true
+      },
+      "input_guard": {
+        "max": 0.4732,
+        "mean": 0.1801,
+        "n": 425,
+        "p50": 0.1527,
+        "p95": 0.3464,
+        "p99": 0.4149,
+        "p99_reportable": true
+      },
+      "output_guard": {
+        "max": 0.0464,
+        "mean": 0.0272,
+        "n": 225,
+        "p50": 0.0268,
+        "p95": 0.0319,
+        "p99": 0.039,
+        "p99_reportable": true
+      },
+      "provider": {
+        "max": 0.0261,
+        "mean": 0.0064,
+        "n": 225,
+        "p50": 0.0062,
+        "p95": 0.0074,
+        "p99": 0.0091,
+        "p99_reportable": true
+      },
+      "rag_context_guard": {
+        "max": 1.2138,
+        "mean": 0.6231,
+        "n": 210,
+        "p50": 0.4842,
+        "p95": 1.1332,
+        "p99": 1.1813,
+        "p99_reportable": true
+      },
+      "retrieval": {
+        "max": 9.6458,
+        "mean": 2.9632,
+        "n": 425,
+        "p50": 2.52,
+        "p95": 5.9771,
+        "p99": 7.2147,
+        "p99_reportable": true
+      },
+      "semantic_input": {
+        "max": 438.6645,
+        "mean": 79.8968,
+        "n": 231,
+        "p50": 96.5156,
+        "p95": 114.028,
+        "p99": 130.1107,
+        "p99_reportable": true
+      },
+      "semantic_judge_llm": {
+        "max": 438.4678,
+        "mean": 100.1228,
+        "n": 184,
+        "p50": 99.789,
+        "p95": 114.7301,
+        "p99": 156.8212,
+        "p99_reportable": true
+      },
+      "semantic_output": null
+    },
+    "counts": {
+      "errors": 0,
+      "reached_provider": 225,
+      "requests": 425
+    },
+    "reached_provider": {
+      "e2e": {
+        "max": 176.37,
+        "mean": 96.5938,
+        "n": 225,
+        "p50": 114.3963,
+        "p95": 133.071,
+        "p99": 135.4954,
+        "p99_reportable": true
+      },
+      "guard_overhead": {
+        "max": 158.0399,
+        "mean": 78.3112,
+        "n": 225,
+        "p50": 97.1786,
+        "p95": 113.2672,
+        "p99": 120.3023,
+        "p99_reportable": true
+      },
+      "history_screen": {
+        "max": 0.0191,
+        "mean": 0.0101,
+        "n": 225,
+        "p50": 0.0099,
+        "p95": 0.0123,
+        "p99": 0.0142,
+        "p99_reportable": true
+      },
+      "input_guard": {
+        "max": 0.2533,
+        "mean": 0.1279,
+        "n": 225,
+        "p50": 0.1225,
+        "p95": 0.1853,
+        "p99": 0.23,
+        "p99_reportable": true
+      },
+      "output_guard": {
+        "max": 0.0464,
+        "mean": 0.0272,
+        "n": 225,
+        "p50": 0.0268,
+        "p95": 0.0319,
+        "p99": 0.039,
+        "p99_reportable": true
+      },
+      "provider": {
+        "max": 0.0261,
+        "mean": 0.0064,
+        "n": 225,
+        "p50": 0.0062,
+        "p95": 0.0074,
+        "p99": 0.0091,
+        "p99_reportable": true
+      },
+      "rag_context_guard": {
+        "max": 1.2138,
+        "mean": 0.6231,
+        "n": 210,
+        "p50": 0.4842,
+        "p95": 1.1332,
+        "p99": 1.1813,
+        "p99_reportable": true
+      },
+      "retrieval": {
+        "max": 8.9809,
+        "mean": 3.2261,
+        "n": 225,
+        "p50": 2.798,
+        "p95": 6.0642,
+        "p99": 7.1079,
+        "p99_reportable": true
+      },
+      "semantic_input": {
+        "max": 156.9898,
+        "mean": 77.5645,
+        "n": 225,
+        "p50": 96.1603,
+        "p95": 112.1461,
+        "p99": 120.1655,
+        "p99_reportable": true
+      },
+      "semantic_judge_llm": {
+        "max": 156.8212,
+        "mean": 97.8627,
+        "n": 178,
+        "p50": 99.7677,
+        "p95": 113.2381,
+        "p99": 120.0589,
+        "p99_reportable": true
+      },
+      "semantic_output": null
+    },
+    "stopped_before_provider": {
+      "e2e": {
+        "max": 451.1656,
+        "mean": 21.3028,
+        "n": 200,
+        "p50": 16.2405,
+        "p95": 25.5775,
+        "p99": 141.856,
+        "p99_reportable": true
+      },
+      "guard_overhead": {
+        "max": 438.8414,
+        "mean": 5.2681,
+        "n": 200,
+        "p50": 0.2251,
+        "p95": 0.423,
+        "p99": 128.8052,
+        "p99_reportable": true
+      },
+      "history_screen": {
+        "max": 0.0208,
+        "mean": 0.0085,
+        "n": 200,
+        "p50": 0.0081,
+        "p95": 0.01,
+        "p99": 0.0176,
+        "p99_reportable": true
+      },
+      "input_guard": {
+        "max": 0.4732,
+        "mean": 0.2388,
+        "n": 200,
+        "p50": 0.2112,
+        "p95": 0.3718,
+        "p99": 0.4246,
+        "p99_reportable": true
+      },
+      "output_guard": null,
+      "provider": null,
+      "rag_context_guard": null,
+      "retrieval": {
+        "max": 9.6458,
+        "mean": 2.6673,
+        "n": 200,
+        "p50": 2.1389,
+        "p95": 5.5465,
+        "p99": 7.3927,
+        "p99_reportable": true
+      },
+      "semantic_input": {
+        "max": 438.6645,
+        "mean": 167.3596,
+        "n": 6,
+        "p50": 114.7093,
+        "p95": 438.6645,
+        "p99": 438.6645,
+        "p99_reportable": false
+      },
+      "semantic_judge_llm": {
+        "max": 438.4678,
+        "mean": 167.1719,
+        "n": 6,
+        "p50": 114.5822,
+        "p95": 438.4678,
+        "p99": 438.4678,
+        "p99_reportable": false
+      },
+      "semantic_output": null
+    }
+  },
+  "warmup": 5
+}

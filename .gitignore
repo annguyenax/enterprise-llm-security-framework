@@ -126,3 +126,6 @@ docs/defense/
 # Phase 13 evaluation runs: only the run_ids cited by docs/ are tracked as
 # evidence (see reports/v3/README.md). Everything else stays local.
 reports/v3/_eval-documents/
+
+reports/p5/**/_docs/
+

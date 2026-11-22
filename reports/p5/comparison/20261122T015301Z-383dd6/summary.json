@@ -1,0 +1,491 @@
+{
+  "datasets": {
+    "deepset_all": {
+      "count": 662,
+      "description": "HuggingFace deepset/prompt-injections (full train+test, 662 case)",
+      "path": "d:/DoAnThucTap/p5-tools/datasets/deepset_prompt_injections/all.jsonl",
+      "sha256": "4aeab3a7916b8a9089b65f8be56e4c05e31ba5c0c1a77fb13fbe10c59de7cc0b"
+    },
+    "deepset_test": {
+      "count": 116,
+      "description": "HuggingFace deepset/prompt-injections (test split, 116 case)",
+      "path": "d:/DoAnThucTap/p5-tools/datasets/deepset_prompt_injections/test.jsonl",
+      "sha256": "c09b6f1a2db6cf96dcf3626a6755b1e231adef98b517d567809012d1bad242c5"
+    },
+    "v3_425": {
+      "count": 425,
+      "description": "Tập 425 case của đồ án (200 malicious, 225 benign)",
+      "path": "D:/DoAnThucTap/shield-p5-eval/datasets/v3/cases/all.jsonl",
+      "sha256": "b3127ecd8184fe77f0aef3fa1043722120f2000bad52f5cc7e64991ef77b2e37"
+    }
+  },
+  "run_id": "20261122T015301Z-383dd6",
+  "schema": "p5-comparison-v1",
+  "summaries": [
+    {
+      "counts": {
+        "benign": 225,
+        "errors": 0,
+        "fn": 6,
+        "fp": 0,
+        "malicious": 200,
+        "tn": 225,
+        "total": 425,
+        "tp": 194
+      },
+      "dataset": "v3_425",
+      "latency_ms": {
+        "max": 0.474,
+        "mean": 0.218,
+        "n": 425,
+        "p50": 0.203,
+        "p95": 0.353,
+        "p99": 0.398,
+        "p99_reportable": true
+      },
+      "method_id": "shield_rule",
+      "method_label": "Shield AI (Rule + Fast Pre-screen, Judge OFF)",
+      "rates": {
+        "accuracy": 0.9859,
+        "f1": 0.9848,
+        "fpr": 0.0,
+        "precision": 1.0,
+        "tpr": 0.97
+      }
+    },
+    {
+      "counts": {
+        "benign": 225,
+        "errors": 0,
+        "fn": 6,
+        "fp": 0,
+        "malicious": 200,
+        "tn": 225,
+        "total": 425,
+        "tp": 194
+      },
+      "dataset": "v3_425",
+      "latency_ms": {
+        "max": 0.391,
+        "mean": 0.154,
+        "n": 425,
+        "p50": 0.125,
+        "p95": 0.346,
+        "p99": 0.38,
+        "p99_reportable": true
+      },
+      "method_id": "shield_regex_only",
+      "method_label": "Shield AI (Input Regex Guard Only)",
+      "rates": {
+        "accuracy": 0.9859,
+        "f1": 0.9848,
+        "fpr": 0.0,
+        "precision": 1.0,
+        "tpr": 0.97
+      }
+    },
+    {
+      "counts": {
+        "benign": 225,
+        "errors": 0,
+        "fn": 6,
+        "fp": 17,
+        "malicious": 200,
+        "tn": 208,
+        "total": 425,
+        "tp": 194
+      },
+      "dataset": "v3_425",
+      "latency_ms": {
+        "max": 101.467,
+        "mean": 56.437,
+        "n": 425,
+        "p50": 58.09,
+        "p95": 83.125,
+        "p99": 90.307,
+        "p99_reportable": true
+      },
+      "method_id": "llama_guard3",
+      "method_label": "Meta Llama Guard 3 (`llama-guard3:1b`)",
+      "rates": {
+        "accuracy": 0.9459,
+        "f1": 0.944,
+        "fpr": 0.0756,
+        "precision": 0.9194,
+        "tpr": 0.97
+      }
+    },
+    {
+      "counts": {
+        "benign": 225,
+        "errors": 0,
+        "fn": 13,
+        "fp": 0,
+        "malicious": 200,
+        "tn": 225,
+        "total": 425,
+        "tp": 187
+      },
+      "dataset": "v3_425",
+      "latency_ms": {
+        "max": 131.956,
+        "mean": 100.738,
+        "n": 425,
+        "p50": 98.152,
+        "p95": 120.158,
+        "p99": 125.232,
+        "p99_reportable": true
+      },
+      "method_id": "nemo_self_check",
+      "method_label": "NeMo Guardrails `self_check_input` (`gemma4:e2b-it-q4_K_M`)",
+      "rates": {
+        "accuracy": 0.9694,
+        "f1": 0.9664,
+        "fpr": 0.0,
+        "precision": 1.0,
+        "tpr": 0.935
+      }
+    },
+    {
+      "counts": {
+        "benign": 225,
+        "errors": 0,
+        "fn": 0,
+        "fp": 0,
+        "malicious": 200,
+        "tn": 225,
+        "total": 425,
+        "tp": 200
+      },
+      "dataset": "v3_425",
+      "latency_ms": {
+        "max": 123.609,
+        "mean": 41.603,
+        "n": 425,
+        "p50": 0.448,
+        "p95": 109.15,
+        "p99": 112.833,
+        "p99_reportable": true
+      },
+      "method_id": "shield_judge",
+      "method_label": "Shield AI (Rule + Semantic Judge `gemma4:e2b-it-q4_K_M`)",
+      "rates": {
+        "accuracy": 1.0,
+        "f1": 1.0,
+        "fpr": 0.0,
+        "precision": 1.0,
+        "tpr": 1.0
+      }
+    },
+    {
+      "counts": {
+        "benign": 56,
+        "errors": 0,
+        "fn": 59,
+        "fp": 0,
+        "malicious": 60,
+        "tn": 56,
+        "total": 116,
+        "tp": 1
+      },
+      "dataset": "deepset_test",
+      "latency_ms": {
+        "max": 1.705,
+        "mean": 0.309,
+        "n": 116,
+        "p50": 0.177,
+        "p95": 0.868,
+        "p99": 1.689,
+        "p99_reportable": true
+      },
+      "method_id": "shield_rule",
+      "method_label": "Shield AI (Rule + Fast Pre-screen, Judge OFF)",
+      "rates": {
+        "accuracy": 0.4914,
+        "f1": 0.0328,
+        "fpr": 0.0,
+        "precision": 1.0,
+        "tpr": 0.0167
+      }
+    },
+    {
+      "counts": {
+        "benign": 56,
+        "errors": 0,
+        "fn": 60,
+        "fp": 0,
+        "malicious": 60,
+        "tn": 56,
+        "total": 116,
+        "tp": 0
+      },
+      "dataset": "deepset_test",
+      "latency_ms": {
+        "max": 0.791,
+        "mean": 0.134,
+        "n": 116,
+        "p50": 0.075,
+        "p95": 0.437,
+        "p99": 0.776,
+        "p99_reportable": true
+      },
+      "method_id": "shield_regex_only",
+      "method_label": "Shield AI (Input Regex Guard Only)",
+      "rates": {
+        "accuracy": 0.4828,
+        "f1": 0.0,
+        "fpr": 0.0,
+        "precision": 0.0,
+        "tpr": 0.0
+      }
+    },
+    {
+      "counts": {
+        "benign": 56,
+        "errors": 0,
+        "fn": 52,
+        "fp": 2,
+        "malicious": 60,
+        "tn": 54,
+        "total": 116,
+        "tp": 8
+      },
+      "dataset": "deepset_test",
+      "latency_ms": {
+        "max": 83.392,
+        "mean": 42.262,
+        "n": 116,
+        "p50": 34.428,
+        "p95": 72.655,
+        "p99": 82.272,
+        "p99_reportable": true
+      },
+      "method_id": "llama_guard3",
+      "method_label": "Meta Llama Guard 3 (`llama-guard3:1b`)",
+      "rates": {
+        "accuracy": 0.5345,
+        "f1": 0.2286,
+        "fpr": 0.0357,
+        "precision": 0.8,
+        "tpr": 0.1333
+      }
+    },
+    {
+      "counts": {
+        "benign": 56,
+        "errors": 0,
+        "fn": 47,
+        "fp": 0,
+        "malicious": 60,
+        "tn": 56,
+        "total": 116,
+        "tp": 13
+      },
+      "dataset": "deepset_test",
+      "latency_ms": {
+        "max": 132.224,
+        "mean": 99.935,
+        "n": 116,
+        "p50": 96.967,
+        "p95": 115.91,
+        "p99": 123.663,
+        "p99_reportable": true
+      },
+      "method_id": "nemo_self_check",
+      "method_label": "NeMo Guardrails `self_check_input` (`gemma4:e2b-it-q4_K_M`)",
+      "rates": {
+        "accuracy": 0.5948,
+        "f1": 0.3562,
+        "fpr": 0.0,
+        "precision": 1.0,
+        "tpr": 0.2167
+      }
+    },
+    {
+      "counts": {
+        "benign": 56,
+        "errors": 0,
+        "fn": 43,
+        "fp": 0,
+        "malicious": 60,
+        "tn": 56,
+        "total": 116,
+        "tp": 17
+      },
+      "dataset": "deepset_test",
+      "latency_ms": {
+        "max": 122.899,
+        "mean": 92.753,
+        "n": 116,
+        "p50": 91.181,
+        "p95": 110.617,
+        "p99": 112.832,
+        "p99_reportable": true
+      },
+      "method_id": "shield_judge",
+      "method_label": "Shield AI (Rule + Semantic Judge `gemma4:e2b-it-q4_K_M`)",
+      "rates": {
+        "accuracy": 0.6293,
+        "f1": 0.4416,
+        "fpr": 0.0,
+        "precision": 1.0,
+        "tpr": 0.2833
+      }
+    },
+    {
+      "counts": {
+        "benign": 399,
+        "errors": 0,
+        "fn": 252,
+        "fp": 0,
+        "malicious": 263,
+        "tn": 399,
+        "total": 662,
+        "tp": 11
+      },
+      "dataset": "deepset_all",
+      "latency_ms": {
+        "max": 5.746,
+        "mean": 0.268,
+        "n": 662,
+        "p50": 0.156,
+        "p95": 0.762,
+        "p99": 1.581,
+        "p99_reportable": true
+      },
+      "method_id": "shield_rule",
+      "method_label": "Shield AI (Rule + Fast Pre-screen, Judge OFF)",
+      "rates": {
+        "accuracy": 0.6193,
+        "f1": 0.0803,
+        "fpr": 0.0,
+        "precision": 1.0,
+        "tpr": 0.0418
+      }
+    },
+    {
+      "counts": {
+        "benign": 399,
+        "errors": 0,
+        "fn": 253,
+        "fp": 0,
+        "malicious": 263,
+        "tn": 399,
+        "total": 662,
+        "tp": 10
+      },
+      "dataset": "deepset_all",
+      "latency_ms": {
+        "max": 5.265,
+        "mean": 0.119,
+        "n": 662,
+        "p50": 0.064,
+        "p95": 0.35,
+        "p99": 0.747,
+        "p99_reportable": true
+      },
+      "method_id": "shield_regex_only",
+      "method_label": "Shield AI (Input Regex Guard Only)",
+      "rates": {
+        "accuracy": 0.6178,
+        "f1": 0.0733,
+        "fpr": 0.0,
+        "precision": 1.0,
+        "tpr": 0.038
+      }
+    },
+    {
+      "counts": {
+        "benign": 399,
+        "errors": 0,
+        "fn": 202,
+        "fp": 7,
+        "malicious": 263,
+        "tn": 392,
+        "total": 662,
+        "tp": 61
+      },
+      "dataset": "deepset_all",
+      "latency_ms": {
+        "max": 90.956,
+        "mean": 42.188,
+        "n": 662,
+        "p50": 36.71,
+        "p95": 65.936,
+        "p99": 82.883,
+        "p99_reportable": true
+      },
+      "method_id": "llama_guard3",
+      "method_label": "Meta Llama Guard 3 (`llama-guard3:1b`)",
+      "rates": {
+        "accuracy": 0.6843,
+        "f1": 0.3686,
+        "fpr": 0.0175,
+        "precision": 0.8971,
+        "tpr": 0.2319
+      }
+    },
+    {
+      "counts": {
+        "benign": 399,
+        "errors": 0,
+        "fn": 185,
+        "fp": 4,
+        "malicious": 263,
+        "tn": 395,
+        "total": 662,
+        "tp": 78
+      },
+      "dataset": "deepset_all",
+      "latency_ms": {
+        "max": 210.179,
+        "mean": 100.923,
+        "n": 662,
+        "p50": 97.727,
+        "p95": 120.742,
+        "p99": 143.598,
+        "p99_reportable": true
+      },
+      "method_id": "nemo_self_check",
+      "method_label": "NeMo Guardrails `self_check_input` (`gemma4:e2b-it-q4_K_M`)",
+      "rates": {
+        "accuracy": 0.7145,
+        "f1": 0.4522,
+        "fpr": 0.01,
+        "precision": 0.9512,
+        "tpr": 0.2966
+      }
+    },
+    {
+      "counts": {
+        "benign": 399,
+        "errors": 0,
+        "fn": 166,
+        "fp": 2,
+        "malicious": 263,
+        "tn": 397,
+        "total": 662,
+        "tp": 97
+      },
+      "dataset": "deepset_all",
+      "latency_ms": {
+        "max": 209.012,
+        "mean": 89.171,
+        "n": 662,
+        "p50": 89.116,
+        "p95": 115.489,
+        "p99": 126.675,
+        "p99_reportable": true
+      },
+      "method_id": "shield_judge",
+      "method_label": "Shield AI (Rule + Semantic Judge `gemma4:e2b-it-q4_K_M`)",
+      "rates": {
+        "accuracy": 0.7462,
+        "f1": 0.5359,
+        "fpr": 0.005,
+        "precision": 0.9798,
+        "tpr": 0.3688
+      }
+    }
+  ]
+}
