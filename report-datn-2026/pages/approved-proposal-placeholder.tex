@@ -4,29 +4,52 @@
   {\fontsize{14pt}{18pt}\selectfont\bfseries PHIẾU PHÊ DUYỆT, GIAO NHIỆM VỤ ĐỀ TÀI\\ĐỒ ÁN TỐT NGHIỆP ĐẠI HỌC}
 \end{center}
 
-\vspace{1.2cm}
+\vspace{0.5cm}
 
 \begin{center}
 \fbox{
-  \begin{minipage}{0.88\textwidth}
+  \begin{minipage}{0.92\textwidth}
     \centering
-    \vspace{0.8cm}
+    \vspace{0.4cm}
     {\itshape Trang này dùng để chèn bản Phiếu phê duyệt, giao nhiệm vụ đề tài Đồ án tốt nghiệp có đầy đủ chữ ký của Khoa / Bộ môn và Giáo viên hướng dẫn khi in đóng quyển.}
-    \vspace{0.8cm}
+    \vspace{0.4cm}
   \end{minipage}
 }
 \end{center}
 
-\vspace{1.0cm}
+\vspace{0.4cm}
 
 \noindent
-\textbf{Thông tin nhiệm vụ đề tài Đồ án tốt nghiệp:}
+\textbf{Thông tin nhiệm vụ đề tài Đồ án tốt nghiệp (theo bảng phân công của GVHD):}
 
 \begin{itemize}
-  \item \textbf{Tên đề tài:} \titlethesis
-  \item \textbf{Nhóm sinh viên thực hiện:} \studentname{} (Mã SV: \mssv), \studentnametwo{} (Mã SV: \mssvtwo)
-  \item \textbf{Lớp:} \classid \quad \textbf{Ngành:} \major \quad \textbf{Khoa:} \faculty
-  \item \textbf{Giáo viên hướng dẫn:} \supervisor
-  \item \textbf{Nội dung lý thuyết:} Tổng quan kiến trúc RAG/Text-to-SQL/Agent và bề mặt tấn công runtime theo OWASP Top~10 for LLM Applications; nghiên cứu nguyên lý Guardrails đa lớp fail-closed, kiểm soát truy cập trước truy hồi (Pre-retrieval RBAC, SQLite Authorizer AST); khảo sát các giải pháp phòng thủ chuẩn (\texttt{Llama Guard~3}, \texttt{NeMo Guardrails}) và công cụ red-team độc lập (\texttt{garak}, \texttt{PyRIT}).
-  \item \textbf{Nội dung thực hành:} Xây dựng khung bảo mật \textbf{Shield AI} tích hợp tầng tiền giải mã (Base64/ROT13/Leetspeak/Unicode), chuỗi Guard đa lớp và Semantic Judge cục bộ (\texttt{gemma4:e2b}); mở rộng bảo vệ sang Text-to-SQL và Multi-Tool Company Agent (Nhà Mộc Việt); chạy kiểm thử đối kháng độc lập bằng \texttt{garak v0.17.1} ($2.048$ probe), \texttt{PyRIT} Converter/Adaptive Multi-Turn và benchmark công khai \texttt{deepset/prompt-injections} ($662$ mẫu); đo phân vị độ trễ \texttt{p50/p95/p99} từng tầng và đối sánh định lượng với \texttt{Meta Llama Guard~3 1B} cùng \texttt{NVIDIA NeMo Guardrails}.
+  \setlength{\itemsep}{3pt}
+  \item \textbf{Tên đề tài Đồ án tốt nghiệp:} \textbf{``\titlethesis''}
+  \item \textbf{Mã nhóm:} \textbf{Thanh\_01 (A06)} \quad \textbf{Nhóm trưởng:} \textbf{\studentname}
+  \item \textbf{Nhóm sinh viên thực hiện:}
+  \begin{itemize}
+    \item \textbf{\studentname} --- Mã SV: \textbf{\mssv} --- Lớp: \textbf{\classid} (Nhóm trưởng)
+    \item \textbf{\studentnametwo} --- Mã SV: \textbf{\mssvtwo} --- Lớp: \textbf{\classid}
+  \end{itemize}
+  \item \textbf{Ngành:} \major \quad \textbf{Khoa:} \faculty
+  \item \textbf{Giáo viên hướng dẫn:} \textbf{\supervisor}
+  \item \textbf{Nội dung lý thuyết:}
+  \begin{enumerate}
+    \setlength{\itemsep}{2pt}
+    \item Tổng quan kiến trúc RAG và bề mặt tấn công tại thời điểm suy luận: Prompt injection trực tiếp, injection gián tiếp qua tài liệu truy hồi, đầu độc ngữ cảnh và rò rỉ dữ liệu theo OWASP Top~10 for LLM Applications.
+    \item Nghiên cứu kiến trúc Guardrails đa lớp theo nguyên tắc fail-closed (mặc định chặn khi không đủ cơ sở kết luận an toàn): kiểm duyệt đầu vào, kiểm soát truy cập trước truy hồi, làm sạch ngữ cảnh và lọc đầu ra.
+    \item Khảo sát các giải pháp Guardrails mã nguồn mở (\texttt{Llama Guard}, \texttt{NeMo Guardrails} hoặc tương đương) và các bộ dữ liệu tấn công công khai.
+    \item Tìm hiểu các khung kiểm thử đối kháng tự động và quy trình kiểm thử hộp đen cho ứng dụng LLM.
+    \item Nghiên cứu phương pháp đánh giá định lượng: tách tập tinh chỉnh luật và tập kiểm định độc lập, các chỉ số $\text{TPR}$, $\text{FPR}$, độ trễ \texttt{p50/p95}, đánh đổi giữa an toàn và khả dụng.
+  \end{enumerate}
+  \item \textbf{Nội dung thực hành:}
+  \begin{enumerate}
+    \setlength{\itemsep}{2pt}
+    \item Xây dựng chatbot RAG doanh nghiệp mô phỏng chứa dữ liệu nhạy cảm giả lập, cung cấp cổng truy cập (gateway) phục vụ kiểm thử.
+    \item Triển khai lớp Guardrails đa lớp theo luồng đầu vào $\rightarrow$ truy hồi $\rightarrow$ ngữ cảnh $\rightarrow$ đầu ra, áp dụng nguyên tắc fail-closed.
+    \item Xây dựng bộ kiểm thử tấn công kết hợp dữ liệu công khai và kịch bản tự xây; tách và khóa tập holdout trước khi tinh chỉnh luật để tránh đánh giá khép kín.
+    \item Thực nghiệm đối chứng giữa cấu hình có và không có Guardrails trên cùng kho tài liệu.
+    \item Đo và phân tích tỷ lệ chặn thành công, False Positive và độ trễ \texttt{p50/p95} ở mức tổng thể lẫn từng lớp.
+    \item Lập bảng đối sánh định lượng với \texttt{Llama Guard} và \texttt{NeMo Guardrails} trên cùng bộ kiểm thử và cùng cấu hình phần cứng; phân tích kết quả và các hạn chế về tính hợp lệ của thực nghiệm.
+  \end{enumerate}
 \end{itemize}

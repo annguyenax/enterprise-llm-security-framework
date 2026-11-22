@@ -32,7 +32,8 @@ import numpy as np
 OUT_DIR = Path(__file__).resolve().parents[2] / "report-datn-2026" / "figures"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-plt.rcParams["font.sans-serif"] = ["Segoe UI", "Arial", "DejaVu Sans"]
+plt.rcParams["font.family"] = "serif"
+plt.rcParams["font.serif"] = ["Times New Roman", "DejaVu Serif"]
 plt.rcParams["axes.unicode_minus"] = False
 
 

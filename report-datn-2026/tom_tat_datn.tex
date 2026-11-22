@@ -4,10 +4,23 @@
   \usepackage[T5,T1]{fontenc}
   \usepackage{mathptmx}
 \else
+  \usepackage{mathptmx}
   \usepackage{fontspec}
+  \defaultfontfeatures{Ligatures=TeX}
   \setmainfont{Times New Roman}
+  \setsansfont{Times New Roman}
+  \IfFontExistsTF{Consolas}{%
+    \setmonofont{Consolas}[Scale=0.88]
+  }{%
+    \setmonofont{Courier New}[Scale=0.90]
+  }
 \fi
 \usepackage[vietnamese]{babel}
+\ifPDFTeX
+  \usepackage{microtype}
+\else
+  \usepackage[protrusion=true,expansion=false]{microtype}
+\fi
 \usepackage{amsmath}
 \usepackage{indentfirst}
 \usepackage{geometry}
@@ -23,7 +36,7 @@
 \pagestyle{fancy}
 \fancyhf{}
 \fancyhead[L]{\fontsize{11pt}{13pt}\itshape\selectfont Báo cáo Tóm tắt Đồ án tốt nghiệp Đại học}
-\fancyhead[R]{\fontsize{11pt}{13pt}\itshape\selectfont Nhóm A06 -- D22CQAT01-N}
+\fancyhead[R]{\fontsize{11pt}{13pt}\itshape\selectfont Nhóm Thanh\_01 (A06) -- D22CQAT01-N}
 \fancyfoot[L]{\fontsize{11pt}{13pt}\itshape\selectfont Nguyễn Văn An, Lê Đình Nghĩa -- D22CQAT01-N}
 \fancyfoot[R]{\fontsize{11pt}{13pt}\selectfont \thepage}
 \renewcommand{\footrulewidth}{0.4pt}
@@ -44,10 +57,10 @@
 \section{Thông tin chung về Đồ án tốt nghiệp}
 
 \begin{itemize}
-    \item \textbf{1. Tên đồ án tốt nghiệp:} \textbf{``Nghiên cứu, kiểm thử đối kháng và đánh giá đối sánh cơ chế Guardrails đa lớp bảo vệ hệ thống RAG trước tấn công Prompt Injection và rò rỉ dữ liệu''}
-    \item \textbf{2. Nhóm sinh viên thực hiện (Nhóm A06):}
+    \item \textbf{1. Tên đồ án tốt nghiệp:} \textbf{``Nghiên cứu và xây dựng cơ chế Guardrails đa lớp cho hệ thống RAG doanh nghiệp trước tấn công Prompt Injection và rò rỉ dữ liệu nhạy cảm''}
+    \item \textbf{2. Nhóm sinh viên thực hiện (Nhóm Thanh\_01 / A06):}
     \begin{itemize}
-        \item Sinh viên 1 --- Mã sinh viên: \textbf{N22DCAT001} \quad Họ và tên: \textbf{Nguyễn Văn An} \quad Lớp: \textbf{D22CQAT01-N}
+        \item Sinh viên 1 (Nhóm trưởng) --- Mã sinh viên: \textbf{N22DCAT001} \quad Họ và tên: \textbf{Nguyễn Văn An} \quad Lớp: \textbf{D22CQAT01-N}
         \item Sinh viên 2 --- Mã sinh viên: \textbf{N22DCAT038} \quad Họ và tên: \textbf{Lê Đình Nghĩa} \quad Lớp: \textbf{D22CQAT01-N}
     \end{itemize}
     \item \textbf{3. Giáo viên hướng dẫn:} \textbf{ThS. Nguyễn Hoàng Thành}

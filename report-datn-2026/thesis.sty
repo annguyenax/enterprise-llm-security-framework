@@ -5,7 +5,7 @@
 %	CÁC BIẾN THÔNG TIN
 %----------------------------------------------------------------------------------------
 \newcommand{\faculty}{Khoa Công nghệ thông tin 2}
-\newcommand{\titlethesis}{Nghiên cứu, kiểm thử đối kháng và đánh giá đối sánh cơ chế Guardrails đa lớp bảo vệ hệ thống RAG trước tấn công Prompt Injection và rò rỉ dữ liệu}
+\newcommand{\titlethesis}{Nghiên cứu và xây dựng cơ chế Guardrails đa lớp cho hệ thống RAG doanh nghiệp trước tấn công Prompt Injection và rò rỉ dữ liệu nhạy cảm}
 \newcommand{\studentname}{Nguyễn Văn An}
 \newcommand{\studentnametwo}{Lê Đình Nghĩa}
 \newcommand{\mssv}{N22DCAT001}
@@ -25,39 +25,45 @@
 \newcommand{\coverpage}{
   \begin{titlepage}
     \thispagestyle{empty}
+    \setlength{\parindent}{0pt}
     \begin{tikzpicture}[remember picture, overlay]
       \draw[line width=0.75pt]
         ($ (current page.north west) + (3.0cm,-2.0cm) $)
         rectangle
-        ($ (current page.south east) + (-1.5cm,1.5cm) $);
+        ($ (current page.south east) + (-2.0cm,2.0cm) $);
       \draw[line width=2.0pt]
         ($ (current page.north west) + (3.15cm,-2.15cm) $)
         rectangle
-        ($ (current page.south east) + (-1.65cm,1.65cm) $);
+        ($ (current page.south east) + (-2.15cm,2.15cm) $);
     \end{tikzpicture}
     \begin{center}
-      {\bfseries\fontsize{14pt}{17pt}\selectfont BỘ KHOA HỌC VÀ CÔNG NGHỆ}\\[0.25cm]
-      {\bfseries\fontsize{14pt}{17pt}\selectfont HỌC VIỆN CÔNG NGHỆ BƯU CHÍNH VIỄN THÔNG}\\[0.25cm]
-      {\bfseries\fontsize{14pt}{17pt}\selectfont CƠ SỞ TẠI THÀNH PHỐ HỒ CHÍ MINH}\\[0.2cm]
-      \textbf{-----------------------------------------}\\[1.0cm]
-      \includegraphics[width=3.3cm]{assets/Logo_PTIT_University.jpg}\\[1.0cm]
-      {\fontsize{32pt}{38pt}\selectfont \bfseries
-        \parbox{14cm}{\centering \reporttype}}\\[1.1cm]
-      {\fontsize{16pt}{22pt}\selectfont \bfseries
-        \parbox{14cm}{\centering Đề tài: ``\titlethesis''}}\\[1.4cm]
+      \vspace*{0.2cm}
+      {\bfseries\fontsize{14pt}{18pt}\selectfont BỘ KHOA HỌC VÀ CÔNG NGHỆ}\\[0.2cm]
+      {\bfseries\fontsize{14pt}{18pt}\selectfont HỌC VIỆN CÔNG NGHỆ BƯU CHÍNH VIỄN THÔNG}\\[0.2cm]
+      {\bfseries\fontsize{14pt}{18pt}\selectfont CƠ SỞ TẠI THÀNH PHỐ HỒ CHÍ MINH}\\[0.15cm]
+      \textbf{-----------------------------------------}\\[0.9cm]
+      \includegraphics[width=3.2cm]{assets/Logo_PTIT_University.jpg}\\[0.9cm]
+      {\fontsize{30pt}{36pt}\selectfont \bfseries
+        \makebox[\textwidth][c]{%
+          \parbox{14cm}{\centering\setlength{\parindent}{0pt}\reporttype}}}\\[1.0cm]
+      {\fontsize{15.5pt}{22pt}\selectfont \bfseries
+        \makebox[\textwidth][c]{%
+          \parbox{14.2cm}{\centering\setlength{\parindent}{0pt}%
+            Đề tài: ``Nghiên cứu và xây dựng cơ chế Guardrails đa lớp\\cho hệ thống RAG doanh nghiệp trước tấn công\\Prompt Injection và rò rỉ dữ liệu nhạy cảm''}}}\\[1.3cm]
       \begin{minipage}{0.88\textwidth}
         \raggedright
-        {\bfseries\fontsize{13pt}{17pt}\selectfont
+        {\bfseries\fontsize{13pt}{18pt}\selectfont
         \begin{tabular}{@{}l l@{}}
-          GIÁO VIÊN HƯỚNG DẪN & : \MakeUppercase{\supervisor} \\[0.25cm]
+          GIÁO VIÊN HƯỚNG DẪN & : \MakeTextUppercase{\supervisor} \\[0.25cm]
           \multicolumn{2}{@{}l@{}}{NHÓM SINH VIÊN THỰC HIỆN :} \\[0.15cm]
-          Mã SV: \mssv    & Họ và tên: \MakeUppercase{\studentname} \quad (\classid) \\[0.15cm]
-          Mã SV: \mssvtwo & Họ và tên: \MakeUppercase{\studentnametwo} \quad (\classid) \\[0.25cm]
-          NGÀNH           & : \MakeUppercase{\major} \\
+          Mã SV: \mssv    & Họ và tên: \MakeTextUppercase{\studentname} \quad (\classid) \\[0.15cm]
+          Mã SV: \mssvtwo & Họ và tên: \MakeTextUppercase{\studentnametwo} \quad (\classid) \\[0.25cm]
+          NGÀNH           & : \MakeTextUppercase{\major} \\
         \end{tabular}}
       \end{minipage}
       \vfill
       {\bfseries\fontsize{13pt}{16pt}\selectfont TP. HỒ CHÍ MINH, NĂM \yearsubmit}
+      \vspace*{0.3cm}
     \end{center}
   \end{titlepage}
 }

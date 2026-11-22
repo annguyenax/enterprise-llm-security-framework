@@ -4,27 +4,30 @@
 \usepackage{iftex}
 \ifPDFTeX
   % Chế độ tương thích cho Overleaf khi project vẫn đang dùng pdfLaTeX.
-  % mathptmx có kiểu chữ Times gần với Times New Roman, nhưng không phải font
-  % Times New Roman hệ thống. Muốn đúng font tuyệt đối, hãy chọn XeLaTeX.
   \usepackage[T5,T1]{fontenc}
   \usepackage{mathptmx}
 \else
+  % XeLaTeX / LuaLaTeX: nhúng trực tiếp font Times New Roman chuẩn Unicode hệ thống
+  % theo đúng Phụ lục QĐ 449/QĐ-HV (Font Times New Roman Unicode, cỡ chữ 13pt)
+  \usepackage{mathptmx}
   \usepackage{fontspec}
-  \usepackage{unicode-math}
   \defaultfontfeatures{Ligatures=TeX}
   \IfFontExistsTF{Times New Roman}{%
     \setmainfont{Times New Roman}
     \setsansfont{Times New Roman}
-    \setmonofont{Times New Roman}
   }{%
-    % Overleaf không cài Times New Roman mặc định vì giấy phép font.
     \setmainfont{TeX Gyre Termes}
     \setsansfont{TeX Gyre Termes}
-    \setmonofont{TeX Gyre Termes}
   }
-  \IfFontExistsTF{Cambria Math}
-    {\setmathfont{Cambria Math}}
-    {\setmathfont{TeX Gyre Termes Math}}
+  \IfFontExistsTF{Consolas}{%
+    \setmonofont{Consolas}[Scale=0.88]
+  }{%
+    \IfFontExistsTF{Courier New}{%
+      \setmonofont{Courier New}[Scale=0.90]
+    }{%
+      \setmonofont{Times New Roman}
+    }%
+  }
 \fi
 \usepackage[vietnamese]{babel}
 \usepackage{indentfirst} % thụt đầu dòng cả đoạn đầu tiên sau tiêu đề (chuẩn VN)
@@ -37,7 +40,11 @@
 % microtype: giãn/co ký tự vi mô để giảm khoảng trắng thưa; emergencystretch cho
 % phép TeX nới nhẹ khi không tìm được điểm ngắt tốt; *hyphenmin hạn chế ngắt từ
 % quá ngắn (phù hợp tiếng Việt).
-\usepackage{microtype}
+\ifPDFTeX
+  \usepackage{microtype}
+\else
+  \usepackage[protrusion=true,expansion=false]{microtype}
+\fi
 \emergencystretch=3em
 \righthyphenmin=2
 \lefthyphenmin=2
