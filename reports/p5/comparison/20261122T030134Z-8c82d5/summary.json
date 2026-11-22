@@ -1,0 +1,305 @@
+{
+  "datasets": {
+    "deepset_all": {
+      "count": 662,
+      "description": "HuggingFace deepset/prompt-injections (full train+test, 662 case)",
+      "path": "d:/DoAnThucTap/p5-tools/datasets/deepset_prompt_injections/all.jsonl",
+      "sha256": "4aeab3a7916b8a9089b65f8be56e4c05e31ba5c0c1a77fb13fbe10c59de7cc0b"
+    },
+    "deepset_test": {
+      "count": 116,
+      "description": "HuggingFace deepset/prompt-injections (test split, 116 case)",
+      "path": "d:/DoAnThucTap/p5-tools/datasets/deepset_prompt_injections/test.jsonl",
+      "sha256": "c09b6f1a2db6cf96dcf3626a6755b1e231adef98b517d567809012d1bad242c5"
+    },
+    "v3_425": {
+      "count": 425,
+      "description": "Tập 425 case của đồ án (200 malicious, 225 benign)",
+      "path": "D:/DoAnThucTap/shield-p5-eval/datasets/v3/cases/all.jsonl",
+      "sha256": "b3127ecd8184fe77f0aef3fa1043722120f2000bad52f5cc7e64991ef77b2e37"
+    }
+  },
+  "run_id": "20261122T030134Z-8c82d5",
+  "schema": "p5-comparison-v1",
+  "summaries": [
+    {
+      "counts": {
+        "benign": 225,
+        "errors": 0,
+        "fn": 6,
+        "fp": 0,
+        "malicious": 200,
+        "tn": 225,
+        "total": 425,
+        "tp": 194
+      },
+      "dataset": "v3_425",
+      "latency_ms": {
+        "max": 1.948,
+        "mean": 0.538,
+        "n": 425,
+        "p50": 0.419,
+        "p95": 1.358,
+        "p99": 1.591,
+        "p99_reportable": true
+      },
+      "method_id": "shield_rule",
+      "method_label": "Shield AI (Rule + Fast Pre-screen, Judge OFF)",
+      "rates": {
+        "accuracy": 0.9859,
+        "f1": 0.9848,
+        "fpr": 0.0,
+        "precision": 1.0,
+        "tpr": 0.97
+      }
+    },
+    {
+      "counts": {
+        "benign": 225,
+        "errors": 0,
+        "fn": 6,
+        "fp": 0,
+        "malicious": 200,
+        "tn": 225,
+        "total": 425,
+        "tp": 194
+      },
+      "dataset": "v3_425",
+      "latency_ms": {
+        "max": 1.63,
+        "mean": 0.455,
+        "n": 425,
+        "p50": 0.307,
+        "p95": 1.346,
+        "p99": 1.5,
+        "p99_reportable": true
+      },
+      "method_id": "shield_regex_only",
+      "method_label": "Shield AI (Input Regex Guard Only)",
+      "rates": {
+        "accuracy": 0.9859,
+        "f1": 0.9848,
+        "fpr": 0.0,
+        "precision": 1.0,
+        "tpr": 0.97
+      }
+    },
+    {
+      "counts": {
+        "benign": 225,
+        "errors": 0,
+        "fn": 1,
+        "fp": 0,
+        "malicious": 200,
+        "tn": 225,
+        "total": 425,
+        "tp": 199
+      },
+      "dataset": "v3_425",
+      "latency_ms": {
+        "max": 5030.613,
+        "mean": 279.392,
+        "n": 425,
+        "p50": 1.407,
+        "p95": 823.273,
+        "p99": 5020.56,
+        "p99_reportable": true
+      },
+      "method_id": "shield_judge",
+      "method_label": "Shield AI (Rule + Semantic Judge `gemma4:e2b-it-q4_K_M`)",
+      "rates": {
+        "accuracy": 0.9976,
+        "f1": 0.9975,
+        "fpr": 0.0,
+        "precision": 1.0,
+        "tpr": 0.995
+      }
+    },
+    {
+      "counts": {
+        "benign": 56,
+        "errors": 0,
+        "fn": 16,
+        "fp": 0,
+        "malicious": 60,
+        "tn": 56,
+        "total": 116,
+        "tp": 44
+      },
+      "dataset": "deepset_test",
+      "latency_ms": {
+        "max": 1.752,
+        "mean": 0.335,
+        "n": 116,
+        "p50": 0.21,
+        "p95": 0.887,
+        "p99": 1.453,
+        "p99_reportable": true
+      },
+      "method_id": "shield_rule",
+      "method_label": "Shield AI (Rule + Fast Pre-screen, Judge OFF)",
+      "rates": {
+        "accuracy": 0.8621,
+        "f1": 0.8462,
+        "fpr": 0.0,
+        "precision": 1.0,
+        "tpr": 0.7333
+      }
+    },
+    {
+      "counts": {
+        "benign": 56,
+        "errors": 0,
+        "fn": 16,
+        "fp": 0,
+        "malicious": 60,
+        "tn": 56,
+        "total": 116,
+        "tp": 44
+      },
+      "dataset": "deepset_test",
+      "latency_ms": {
+        "max": 1.756,
+        "mean": 0.311,
+        "n": 116,
+        "p50": 0.201,
+        "p95": 0.894,
+        "p99": 1.727,
+        "p99_reportable": true
+      },
+      "method_id": "shield_regex_only",
+      "method_label": "Shield AI (Input Regex Guard Only)",
+      "rates": {
+        "accuracy": 0.8621,
+        "f1": 0.8462,
+        "fpr": 0.0,
+        "precision": 1.0,
+        "tpr": 0.7333
+      }
+    },
+    {
+      "counts": {
+        "benign": 56,
+        "errors": 0,
+        "fn": 10,
+        "fp": 0,
+        "malicious": 60,
+        "tn": 56,
+        "total": 116,
+        "tp": 50
+      },
+      "dataset": "deepset_test",
+      "latency_ms": {
+        "max": 164.488,
+        "mean": 77.507,
+        "n": 116,
+        "p50": 115.247,
+        "p95": 145.971,
+        "p99": 160.515,
+        "p99_reportable": true
+      },
+      "method_id": "shield_judge",
+      "method_label": "Shield AI (Rule + Semantic Judge `gemma4:e2b-it-q4_K_M`)",
+      "rates": {
+        "accuracy": 0.9138,
+        "f1": 0.9091,
+        "fpr": 0.0,
+        "precision": 1.0,
+        "tpr": 0.8333
+      }
+    },
+    {
+      "counts": {
+        "benign": 399,
+        "errors": 0,
+        "fn": 84,
+        "fp": 0,
+        "malicious": 263,
+        "tn": 399,
+        "total": 662,
+        "tp": 179
+      },
+      "dataset": "deepset_all",
+      "latency_ms": {
+        "max": 8.192,
+        "mean": 0.341,
+        "n": 662,
+        "p50": 0.203,
+        "p95": 0.938,
+        "p99": 1.68,
+        "p99_reportable": true
+      },
+      "method_id": "shield_rule",
+      "method_label": "Shield AI (Rule + Fast Pre-screen, Judge OFF)",
+      "rates": {
+        "accuracy": 0.8731,
+        "f1": 0.81,
+        "fpr": 0.0,
+        "precision": 1.0,
+        "tpr": 0.6806
+      }
+    },
+    {
+      "counts": {
+        "benign": 399,
+        "errors": 0,
+        "fn": 84,
+        "fp": 0,
+        "malicious": 263,
+        "tn": 399,
+        "total": 662,
+        "tp": 179
+      },
+      "dataset": "deepset_all",
+      "latency_ms": {
+        "max": 8.582,
+        "mean": 0.258,
+        "n": 662,
+        "p50": 0.147,
+        "p95": 0.737,
+        "p99": 1.53,
+        "p99_reportable": true
+      },
+      "method_id": "shield_regex_only",
+      "method_label": "Shield AI (Input Regex Guard Only)",
+      "rates": {
+        "accuracy": 0.8731,
+        "f1": 0.81,
+        "fpr": 0.0,
+        "precision": 1.0,
+        "tpr": 0.6806
+      }
+    },
+    {
+      "counts": {
+        "benign": 399,
+        "errors": 0,
+        "fn": 33,
+        "fp": 2,
+        "malicious": 263,
+        "tn": 397,
+        "total": 662,
+        "tp": 230
+      },
+      "dataset": "deepset_all",
+      "latency_ms": {
+        "max": 169.381,
+        "mean": 88.011,
+        "n": 662,
+        "p50": 116.436,
+        "p95": 142.59,
+        "p99": 148.525,
+        "p99_reportable": true
+      },
+      "method_id": "shield_judge",
+      "method_label": "Shield AI (Rule + Semantic Judge `gemma4:e2b-it-q4_K_M`)",
+      "rates": {
+        "accuracy": 0.9471,
+        "f1": 0.9293,
+        "fpr": 0.005,
+        "precision": 0.9914,
+        "tpr": 0.8745
+      }
+    }
+  ]
+}

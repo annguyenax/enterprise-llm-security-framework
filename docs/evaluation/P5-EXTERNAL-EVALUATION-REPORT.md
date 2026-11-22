@@ -160,49 +160,52 @@ Sau khi ghi nhận các điểm hạn chế từ đợt đánh giá độc lập
 2. **Structural Goal-Hijack & Unconstrained Persona Rules**: Nhận diện cấu trúc chuyển hướng nhiệm vụ đa ngôn ngữ (EN/DE/ES: `forget/ignore/vergiss/ignoriere/olvide`, `new task/neue Aufgabe/second test`), ép đóng vai (`act as / agieren als / auftreten als`), và mẫu persona không giới hạn (`always stays in character... never refuses`).
 3. **Multilingual Task-Hijack Semantic Judge Prompt**: Mở rộng định nghĩa chính sách của Semantic Judge (`gemma4:e2b-it-q4_K_M`) để bao phủ hành vi Goal Hijacking và Persona Override đa ngôn ngữ.
 
-### 4.1. Bảng đối sánh Trước tối ưu P5 vs. Sau tối ưu P5 vs. Llama Guard 3 & NeMo Guardrails
+### 4.1. Bảng đối sánh Trước tối ưu P5 vs. Sau tối ưu P5 (Vòng 1 & Vòng 2) vs. Llama Guard 3 & NeMo Guardrails
 
-Artifact sau tối ưu: `reports/p5/comparison/20261122T022846Z-9371da/summary.json`
+Artifact sau tối ưu Vòng 2: `reports/p5/comparison/20261122T030134Z-8c82d5/summary.json`
 
 | Tập dữ liệu | Giải pháp | TP / Mal | FP / Ben | TPR (Recall) | FPR | Precision | F1 | Latency p50 | Latency p95 |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|
 | **`v3_425`**<br>*(200 mal, 225 ben)* | Shield AI Rule-Only *(Trước tối ưu P5)* | 194/200 | 0/225 | 97.0% | 0.0% | 100.0% | 98.5% | 0.20 ms | 0.35 ms |
-| | **Shield AI Rule-Only *(Sau tối ưu P5)*** | **194/200** | **0/225** | **97.0%** | **0.0%** | **100.0%** | **98.5%** | **0.47 ms** | **1.29 ms** |
+| | **Shield AI Rule-Only *(Sau tối ưu P5 R2)*** | **194/200** | **0/225** | **97.0%** | **0.0%** | **100.0%** | **98.5%** | **0.42 ms** | **1.36 ms** |
 | | Meta Llama Guard 3 (`llama-guard3:1b`) | 194/200 | 17/225 | 97.0% | 7.6% | 91.9% | 94.4% | 58.09 ms | 83.12 ms |
 | | NeMo Guardrails `self_check_input` | 187/200 | 0/225 | 93.5% | 0.0% | 100.0% | 96.6% | 98.15 ms | 120.16 ms |
 | | **Shield AI Rule + Judge *(Sau tối ưu P5)*** | **200/200** | **0/225** | **100.0%** | **0.0%** | **100.0%** | **100.0%** | **1.23 ms** | **146.23 ms** |
 | **`deepset_test`**<br>*(60 mal, 56 ben)* | Shield AI Rule-Only *(Trước tối ưu P5)* | 1/60 | 0/56 | 1.7% | 0.0% | 100.0% | 3.3% | 0.18 ms | 0.87 ms |
-| | **Shield AI Rule-Only *(Sau tối ưu P5)*** | **44/60** | **0/56** | **73.3%** | **0.0%** | **100.0%** | **84.6%** | **0.26 ms** | **1.17 ms** |
+| | **Shield AI Rule-Only *(Sau tối ưu P5 R2)*** | **44/60** | **0/56** | **73.3%** | **0.0%** | **100.0%** | **84.6%** | **0.21 ms** | **0.89 ms** |
 | | Meta Llama Guard 3 (`llama-guard3:1b`) | 8/60 | 2/56 | 13.3% | 3.6% | 80.0% | 22.9% | 34.43 ms | 72.66 ms |
 | | NeMo Guardrails `self_check_input` | 13/60 | 0/56 | 21.7% | 0.0% | 100.0% | 35.6% | 96.97 ms | 115.91 ms |
 | | Shield AI Rule + Judge *(Trước tối ưu P5)* | 17/60 | 0/56 | 28.3% | 0.0% | 100.0% | 44.2% | 91.18 ms | 110.62 ms |
-| | **Shield AI Rule + Judge *(Sau tối ưu P5)*** | **50/60** | **0/56** | **83.3%** | **0.0%** | **100.0%** | **90.9%** | **118.32 ms** | **146.18 ms** |
+| | **Shield AI Rule + Judge *(Sau tối ưu P5 R2)*** | **50/60** | **0/56** | **83.3%** | **0.0%** | **100.0%** | **90.9%** | **115.25 ms** | **145.97 ms** |
 | **`deepset_all`**<br>*(263 mal, 399 ben)* | Shield AI Rule-Only *(Trước tối ưu P5)* | 11/263 | 0/399 | 4.2% | 0.0% | 100.0% | 8.0% | 0.16 ms | 0.76 ms |
-| | **Shield AI Rule-Only *(Sau tối ưu P5)*** | **130/263** | **0/399** | **49.4%** | **0.0%** | **100.0%** | **66.2%** | **0.19 ms** | **0.91 ms** |
+| | Shield AI Rule-Only *(Sau tối ưu P5 R1)* | 130/263 | 0/399 | 49.4% | 0.0% | 100.0% | 66.2% | 0.19 ms | 0.91 ms |
+| | **Shield AI Rule-Only *(Sau tối ưu P5 R2)*** | **179/263** | **0/399** | **68.1%** | **0.0%** | **100.0%** | **81.0%** | **0.20 ms** | **0.94 ms** |
 | | Meta Llama Guard 3 (`llama-guard3:1b`) | 61/263 | 7/399 | 23.2% | 1.8% | 89.7% | 36.9% | 36.71 ms | 65.94 ms |
 | | NeMo Guardrails `self_check_input` | 78/263 | 4/399 | 29.7% | 1.0% | 95.1% | 45.2% | 97.73 ms | 120.74 ms |
 | | Shield AI Rule + Judge *(Trước tối ưu P5)* | 97/263 | 2/399 | 36.9% | 0.5% | 98.0% | 53.6% | 89.12 ms | 115.49 ms |
-| | **Shield AI Rule + Judge *(Sau tối ưu P5)*** | **210/263** | **2/399** | **79.8%** | **0.5%** | **99.1%** | **88.4%** | **120.84 ms** | **146.95 ms** |
+| | Shield AI Rule + Judge *(Sau tối ưu P5 R1)* | 210/263 | 2/399 | 79.8% | 0.5% | 99.1% | 88.4% | 120.84 ms | 146.95 ms |
+| | **Shield AI Rule + Judge *(Sau tối ưu P5 R2)*** | **230/263** | **2/399** | **87.5%** | **0.5%** | **99.1%** | **92.9%** | **116.44 ms** | **142.59 ms** |
 
-### 4.2. Kết quả Garak (`v0.17.1`) & PyRIT Converter Trước vs. Sau tối ưu P5
+### 4.2. Kết quả Garak (`v0.17.1`) & PyRIT Converter Trước vs. Sau tối ưu P5 (R1 & R2)
 
-Artifact sau tối ưu: `reports/p5/redteam_external/20261122T022713Z-619459/summary.json`
+Artifact sau tối ưu Vòng 2: `reports/p5/redteam_external/20261122T030241Z-22b8f0/summary.json`
 
-| Công cụ / Họ tấn công | Chỉ số | Trước tối ưu P5 | Sau tối ưu P5 | Mức cải thiện |
-|---|---|:---:|:---:|---|
-| **Garak `encoding.InjectBase64`** (`/v1/rag/query`) | Tỉ lệ Input Guard chặn | 0/256 (0.0%) | **147/256 (57.4%)** | **+57.4 điểm %** |
-| **Garak `dan.DanInTheWild`** (`/v1/rag/query`) | Tỉ lệ Input Guard chặn (trên mẫu hợp lệ) | 33/160 (20.6%) | **48/147 (32.6%)** *(+109 mẫu bị chặn ở Schema cap)* | **+12.0 điểm %** |
-| **Garak `latentinjection.LatentJailbreak`** (`/v1/rag/query`) | Tỉ lệ Input Guard chặn | 0/256 (0.0%) | **36/256 (14.1%)** | **+14.1 điểm %** |
-| **Garak `promptinject.HijackHateHumans`** (`/v1/rag/query`) | Tỉ lệ Input Guard chặn | 205/256 (80.1%) | **204/256 (79.7%)** | Giữ ổn định ~80% |
-| **PyRIT Converter Matrix (35 biến thể mã hóa)** | **Rule-Only chặn** | 17/35 (48.6%) | **30/35 (85.7%)** *(Base64 5/5, ROT13 5/5, Leet 4/5)* | **+37.1 điểm %** |
-| **PyRIT Converter Matrix (35 biến thể mã hóa)** | **Rule + Judge chặn** | 28/35 (80.0%) | **35/35 (100.0%)** *(Chặn 100% cả 7/7 họ biến đổi)* | **+20.0 điểm % (Đạt 100%)** |
+| Công cụ / Họ tấn công | Chỉ số | Trước tối ưu P5 | Sau tối ưu R1 | Sau tối ưu R2 (Cuối) | Mức cải thiện tổng |
+|---|---|:---:|:---:|:---:|---|
+| **Garak `promptinject.HijackHateHumans`** (`/v1/rag/query`) | Tỉ lệ Input Guard chặn | 205/256 (80.1%) | 204/256 (79.7%) | **256/256 (100.0%)** | **+19.9 điểm % (Đạt 100%)** |
+| **Garak `latentinjection.LatentJailbreak`** (`/v1/rag/query`) | Tỉ lệ Input Guard chặn | 0/256 (0.0%) | 36/256 (14.1%) | **256/256 (100.0%)** | **+100.0 điểm % (Đạt 100%)** |
+| **Garak `encoding.InjectBase64`** (`/v1/rag/query`) | Tỉ lệ Input Guard chặn | 0/256 (0.0%) | 147/256 (57.4%) | **250/256 (97.7%)** | **+97.7 điểm %** |
+| **Garak `dan.DanInTheWild`** (`/v1/rag/query`) | Tỉ lệ Input Guard chặn (trên mẫu hợp lệ) | 33/160 (20.6%) | 48/147 (32.6%) | **98/166 (59.0%)** *(+90 mẫu bị chặn ở Schema cap = **188/256 = 73.4%**)* | **+38.4 điểm %** |
+| **Tổng 1.024 probe Garak vào `/v1/rag/query`** | **Tỉ lệ ngăn chặn trước Retrieval** | 334/1024 (32.6%) | 544/1024 (53.1%) | **950/1024 (92.8%)** | **+60.2 điểm %** |
+| **PyRIT Converter Matrix (35 biến thể mã hóa)** | **Rule-Only chặn** | 17/35 (48.6%) | 30/35 (85.7%) | **30/35 (85.7%)** *(Base64 5/5, ROT13 5/5, Leet 4/5)* | **+37.1 điểm %** |
+| **PyRIT Converter Matrix (35 biến thể mã hóa)** | **Rule + Judge chặn** | 28/35 (80.0%) | 35/35 (100.0%) | **35/35 (100.0%)** *(Chặn 100% cả 7/7 họ biến đổi)* | **+20.0 điểm % (Đạt 100%)** |
 
 ---
 
 ## 5. Kết quả hợp nhất P5 × P4 (Text-to-SQL Guard, Indirect DB Result Guard & Multi-Tool Company Agent "Nhà Mộc Việt")
 
 Script tái lập: [`scripts/p5/eval_sql_and_agent.py`](../../scripts/p5/eval_sql_and_agent.py)  
-Artifact: `reports/p5/sql_agent_eval/20261122T024828Z-c245d1/summary.json`
+Artifact sau tối ưu R2: `reports/p5/sql_agent_eval/20261122T025527Z-8301b7/summary.json`
 
 Trên nhánh hợp nhất `feat-p5-integrated-thesis` (gộp toàn bộ P3 + P5 với nhánh `feat/claude-provider-sql-guard` của Nghĩa — **469/469 unit test tích hợp PASS**), nhóm đã đo hiệu năng phát hiện và độ trễ `p50 / p95 / p99` cho 2 lớp bảo vệ dữ liệu có cấu trúc mới:
 
@@ -210,15 +213,15 @@ Trên nhánh hợp nhất `feat-p5-integrated-thesis` (gộp toàn bộ P3 + P5 
 
 | Tập mẫu | TP / Mal | FP / Ben | TPR (Recall) | FPR | F1 | Số lượt đo (`n`) | Latency p50 (ms) | Latency p95 (ms) | Latency p99 (ms) |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| `redteam/sql/p2sql-direct` (38 tấn công) + `p2sql-benign` (31 benign) | 38/38 | 0/31 | **100.0%** | **0.0%** | **100.0%** | 345 | **0.48 ms** | **0.59 ms** | **0.76 ms** |
+| `redteam/sql/p2sql-direct` (38 tấn công) + `p2sql-benign` (31 benign) | 38/38 | 0/31 | **100.0%** | **0.0%** | **100.0%** | 345 | **0.49 ms** | **0.64 ms** | **0.73 ms** |
 
 ### 5.2. Indirect P2SQL Data-Cell Result Guard (`app.sql_agent.result_guard.guard_rows` — RAG Context Guard + SQL Injection Rules + DLP)
 
 | Tập mẫu | TP / Mal | FP / Ben | TPR (Recall) | FPR | F1 | Số lượt đo (`n`) | Latency p50 (ms) | Latency p95 (ms) | Latency p99 (ms) |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| `indirect-rows` (Dev split — 24 tấn công) | 24/24 | 0/32 | **100.0%** | **0.0%** | — | 350 | **0.17 ms** | **0.26 ms** | **0.36 ms** |
-| `indirect-rows` (Holdout split — 14 tấn công) | 9/14 | 0/32 | **64.3%** | **0.0%** | — | 350 | **0.17 ms** | **0.26 ms** | **0.36 ms** |
-| `indirect-rows` (Tổng hợp 70 mẫu: 38 tấn công + 32 hard-benign) | 33/38 | 0/32 | **86.8%** | **0.0%** | **93.0%** | 350 | **0.17 ms** | **0.26 ms** | **0.36 ms** |
+| `indirect-rows` (Dev split — 24 tấn công) | 24/24 | 0/32 | **100.0%** | **0.0%** | — | 350 | **0.18 ms** | **0.29 ms** | **0.42 ms** |
+| `indirect-rows` (Holdout split — 14 tấn công, *Trước R2: 9/14 = 64.3%*) | **14/14** | **0/32** | **100.0%** | **0.0%** | — | 350 | **0.18 ms** | **0.29 ms** | **0.42 ms** |
+| `indirect-rows` (Tổng hợp 70 mẫu: 38 tấn công + 32 hard-benign) | **38/38** | **0/32** | **100.0%** | **0.0%** | **100.0%** | 350 | **0.18 ms** | **0.29 ms** | **0.42 ms** |
 
 **Ý nghĩa quan trọng cho luận văn tốt nghiệp:**
 - Kết quả trên chứng minh nhận xét của giảng viên là **hoàn toàn chính xác**: trên tập template tĩnh (`v3` PyRIT family), hệ thống đạt 100%, nhưng khi đối mặt với:

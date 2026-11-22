@@ -15,10 +15,12 @@ import unicodedata
 
 _ZERO_WIDTH = dict.fromkeys(map(ord, "​‌‍⁠﻿"), None)
 _LEET = str.maketrans({"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s"})
+_HYPHEN_OBFUSC = re.compile(r"(?<=\w)-(?=\w)")
 
 
 def normalize(text: str) -> str:
     text = unicodedata.normalize("NFC", text).translate(_ZERO_WIDTH)
+    text = _HYPHEN_OBFUSC.sub("", text)
     return text.casefold().translate(_LEET)
 
 
@@ -33,12 +35,12 @@ RULES: list[tuple[str, re.Pattern[str], str]] = [
     ("SQLI-META", _rx(r"\b(pragma|sqlite_master|sqlite_schema|load_extension|internal_secrets|run_sql)\b"),
      "reference to database internals or SQL tooling in data"),
     ("SQLI-STACK", _rx(r"['\"]\s*;\s*\w+|;\s*--"), "stacked-query / quote-breakout payload in data"),
-    ("PI-ADDRESS", _rx(r"(\b(ai|assistant|tro ly|trợ lý|he thong|hệ thống|system)\b|\[/?system\]).{0,80}"
-                       r"(hay|hãy|must|phai|phải|from now|bo qua|bỏ qua|ignore|chay|chạy|xuat|xuất|in ra|liet ke|liệt kê|cho toi biet|cho tôi biết|tiet lo|tiết lộ|xac nhan|xác nhận)"),
+    ("PI-ADDRESS", _rx(r"(\b(ai|assistant|bot|tro ly|trợ lý|he thong|hệ thống|system)\b|\[/?(system|inst)\]).{0,80}"
+                       r"(hay|hãy|must|phai|phải|from now|bo qua|bỏ qua|phot lo|phớt lờ|ignore|disregard|chay|chạy|xuat|xuất|in ra|liet ke|liệt kê|list|đọc bảng|doc bang|cho (toi|tôi|minh|mình) biet|cho (toi|tôi|minh|mình) biết|tiet lo|tiết lộ|xac nhan|xác nhận|bạn là quản trị viên|ban la quan tri vien)"),
      "instruction addressed to the assistant inside data"),
-    ("PI-OVERRIDE", _rx(r"(bỏ qua|bo qua)\s+(mọi|moi|tất cả|tat ca)?\s*(hướng dẫn|huong dan|quy tắc|quy tac|giới hạn|gioi han)|ignore\s+(all\s+)?previous"),
+    ("PI-OVERRIDE", _rx(r"(bỏ qua|bo qua|phớt lờ|phot lo)\s+(mọi|moi|tất cả|tat ca)?\s*(hướng dẫn|huong dan|quy tắc|quy tac|quy định|quy dinh|giới hạn|gioi han)|ignore\s+(all\s+)?previous|disregard\s+your\s+guidelines"),
      "instruction-override language inside data"),
-    ("PI-EXFIL-COL", _rx(r"\b(dealer_price|receivables|contract_terms)\b|(số điện thoại|so dien thoai|email)\s+(của|cua)\s+(tất cả|tat ca|khách|khach)"),
+    ("PI-EXFIL-COL", _rx(r"\b(dealer_price|receivables|contract_terms|amount_due)\b|(số điện thoại|so dien thoai|email)\s+(của|cua)\s+(tất cả|tat ca|khách|khach)|every\s+customer'?s\s+email|bảng công nợ|bang cong no|lương trưởng phòng|luong truong phong"),
      "request for restricted columns inside data"),
     ("POLICY-POISON", _rx(r"(trọn đời|tron doi).{0,60}(hoàn tiền|hoan tien)\s*\d{3}\s*%|hoàn tiền\s*200\s*%"),
      "policy-poisoning claim inside data"),
