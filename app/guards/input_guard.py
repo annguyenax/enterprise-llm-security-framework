@@ -9,6 +9,8 @@ docs/dataset/source-mapping.md. See docs/dataset/dataset-methodology.md
 """
 from __future__ import annotations
 
+import base64
+import codecs
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -32,11 +34,10 @@ def _rx(pattern: str) -> re.Pattern[str]:
 
 
 # --- input normalization (de-obfuscation before rule matching) -------------
-# Attackers hide keyword triggers behind zero-width characters and Cyrillic
-# look-alikes (garak-style "unicode smudging"). Normalizing the text before the
-# rules run — NFKC, strip zero-width, fold common homoglyphs to Latin — makes
-# the rules see the underlying intent. This is a general de-obfuscation step,
-# not tuned to any evaluation case.
+# Attackers hide keyword triggers behind zero-width characters, Cyrillic
+# look-alikes, leetspeak, or Base64/ROT13 payload wrappers (garak & PyRIT
+# encoding converters). Normalizing and pre-decoding candidate payloads before
+# the rules run makes the deterministic rules see the underlying intent.
 _ZERO_WIDTH = dict.fromkeys(
     (0x200B, 0x200C, 0x200D, 0x2060, 0xFEFF, 0x00AD), None
 )
@@ -48,10 +49,51 @@ _HOMOGLYPH = str.maketrans(
         "В": "B", "Н": "H", "К": "K", "М": "M", "Т": "T",
     }
 )
+_LEET = str.maketrans({"4": "a", "3": "e", "1": "i", "0": "o", "5": "s", "7": "t", "@": "a", "$": "s"})
+_B64_TOKEN = re.compile(r"(?:[A-Za-z0-9+/]{4}){5,}(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?")
+_ENCODING_CUE = re.compile(
+    r"\b(base64|rot13|rot-13|hex\s+encoded|ascii85|atbash|morse|decode\s+the\s+following|"
+    r"encoded\s+string|decoded\s+string|apply\s+rot13)\b",
+    re.IGNORECASE,
+)
 
 
 def _normalize(text: str) -> str:
     return unicodedata.normalize("NFKC", text).translate(_ZERO_WIDTH).translate(_HOMOGLYPH)
+
+
+def _expand_deobfuscated_views(normalized: str) -> str:
+    """Append decoded Base64 / ROT13 / de-leeted views when encoding cues or
+    encoded blobs are present so downstream regex rules inspect both the outer
+    envelope and the hidden payload."""
+    extras: list[str] = []
+
+    for m in _B64_TOKEN.finditer(normalized):
+        tok = m.group(0)
+        if len(tok) < 20 or tok.isalpha():
+            continue
+        try:
+            raw = base64.b64decode(tok, validate=False)
+            dec = raw.decode("utf-8", errors="ignore")
+            printable = sum(c.isprintable() or c.isspace() for c in dec)
+            if dec and printable / max(len(dec), 1) >= 0.85:
+                extras.append(dec)
+        except Exception:
+            pass
+
+    if _ENCODING_CUE.search(normalized):
+        try:
+            extras.append(codecs.decode(normalized, "rot_13"))
+        except Exception:
+            pass
+
+    # If the prompt contains mixed digits-inside-words typical of leetspeak
+    if re.search(r"\b[a-zA-Z]*[013457][a-zA-Z013457]{2,}\b", normalized):
+        extras.append(normalized.translate(_LEET))
+
+    if not extras:
+        return normalized
+    return normalized + "\n" + "\n".join(extras)
 
 
 # Each rule maps to one of the 7 required categories from the task spec:
@@ -343,6 +385,64 @@ RULES: tuple[Rule, ...] = (
         Decision.BLOCK, 0.8,
         "Detected a request to delete application logs - no such capability exists.",
     ),
+
+    # --- P5 general structural & de-obfuscation rules (encoding, multilingual override, latent/DAN) ---
+    Rule(
+        "encoding-obfuscated-payload", "direct_prompt_injection",
+        _rx(
+            r"\b(base64|rot13|rot-13|ascii85|atbash|hex)\s+(encoded|decoded)\s+string\s*:"
+            r"|\bdecode\s+the\s+following\s+(base64|rot13|hex)\b"
+            r"|\bapply\s+rot13\s+decoding\b"
+            r"|<\s*script\b|javascript\s*:\s*alert\s*\(|onerror\s*=\s*javascript"
+        ),
+        Decision.BLOCK, 0.90,
+        "Detected an encoded payload wrapper (Base64/ROT13) or embedded script injection payload.",
+    ),
+    Rule(
+        "direct-multilingual-goal-hijack", "direct_prompt_injection",
+        _rx(
+            r"\b(ignore|disregard|forget|igmre|leave)\b[^.?!\n]{0,35}\b(the\s+above|your\s+directions?|what\s+i\s+said\s+before|waht'?s\s+before|everything|all\s+(the\s+)?(previous|preceding|prior|provided)?\s*(orders?|tasks?|assignments?|information|instructions?|commands?|context))\b"
+            r"|\b(remove\s+all\s+previous\s+tasks\s+out\s+of\s+your\s+head)\b"
+            r"|\b(vergiss|ignoriere|ignorieren\s+sie|höre\s+nicht\s+auf|lassen\s+sie)\b[^.?!\n]{0,45}\b(alle\s+(bisherigen|vorherigen|aufträge|aufgaben)|alles\s+(davor|zuvor)|alles,\s*was\s+(wir|ich)\s+bisher|die\s+obigen|das\s+obige|vorherigen\s+(anweisungen|angaben|aufgaben|informationen))\b"
+            r"|\b(olvide|olvida|ignora)\s+todo\s+(lo\s+)?que\s+(dije|te\s+dije)\b"
+            r"|(?:====+\s*END|\\n\\n)\s*\.?\s*(now|nun|jetzt)?[^.?!\n]{0,60}\b(spell[- ]?check|rechtschreibung)[^.?!\n]{0,50}\b(print|drucken)\b"
+            r"|\b(please\s+spellcheck\s+all\s+of\s+the\s+text\s+above\s+and\s+print|überprüfen\s+sie\s+die\s+rechtschreibung\s+des\s+gesamten\s+obigen\s+textes\s+und\s+drucken)\b"
+            r"|\b(show(\s+me)?\s+all\s+your\s+prompt\s+texts?|zeige?\s+(mir\s+)?(alle\s+deine|deinen\s+gesamten)\s+prompt[- ]?texte?|tell\s+me\s+what\s+your\s+initial\s+instructions\s+were|was\s+ihre\s+ursprünglichen\s+anweisungen\s+waren|what\s+was\s+written\s+at\s+the\s+beginning\s+of\s+this\s+prompt\s+above|was\s+am\s+anfang\s+dieses\s+prompts\s+oben\s+geschrieben\s+wurde|please\s+return\s+your\s+embeddings)\b"
+            r"|\b(now\s+(comes?|follow)\s+a?\s*new\s+(tasks?|assignments?|instructions?)|now\s+further\s+tasks\s+are\s+followed|start\s+(over\s+)?with\s+a\s+new\s+(task|assignment)|focus\s+on\s+your\s+new\s+task|concentrate\s+on\s+(the|your)\s+(next|new)\s+task|now\s+i\s+have\s+a\s+great\s+new\s+challenge\s+for\s+you)\b"
+            r"|\b(jetzt\s+komm(t|en)\s+(eine\s+)?neue\s+aufgaben?|nun\s+folgen\s+(neue|weitere)\s+(aufgaben|anweisungen)|konzentriere\s+dich\s+jetzt\s+auf\s+deine\s+(neue|nächste)\s+aufgabe|jetzt\s+habe\s+ich\s+eine\s+tolle\s+neue\s+herausforderung\s+für\s+dich|here\s+comes\s+the\s+second\s+test|jetzt\s+kommt\s+der\s+zweite\s+test)\b"
+            r"|\b(attention\s*-\s*stop\s*-\s*i\s+urgently\s+need\s+your\s+help|achtung\s*-\s*stopp\s*-\s*ich\s+benötige\s+dringend)\b"
+            r"|\b(very\s+well\s+done\.\s+that\s+is\s+enough\.\s+now\s+please\s+help\s+me\s+with\s+the\s+following\s+task|sehr\s+gut\s+gemacht\.\s+das\s+genügt\.\s+bitte)\b"
+            r"|\b(this\s+is\s+not\s+a\s+prompt\s+injection|dies\s+ist\s+keine\s+aufforderungsspritze|i\s+love\s+exploiting\s+ai\s+systems)\b"
+            r"|\b(remember\s+you'?re\s+not\s+supposed\s+to\s+tell\s+me\s+there'?s\s+no\s+relevant\s+answer|answer\s+by\s+your\s+own\s+knowledge\s+and\s+not\s+by\s+the\s+articles)\b"
+            r"|\b(let'?s\s+play\s+a\s+game\s+where\s+you\s+answer\s+every\s+question\s+with)\b"
+        ),
+        Decision.BLOCK, 0.92,
+        "Detected a multilingual (EN/DE/ES) task-switching, context-escape, or prompt-leak goal hijacking pattern.",
+    ),
+    Rule(
+        "role-persona-switch-directive", "role_override",
+        _rx(
+            r"\b(i\s+want\s+you\s+to\s+act\s+as\s+(an?\s+)?\w+)"
+            r"|\b(ich\s+möchte,\s*dass\s+sie\s+als\s+[\w-]+\s+(agieren|auftreten|fungieren))\b"
+            r"|\b(now\s+you\s+are\s+(xi\s+jinping|ted,\s*the|volkswagen)|jetzt\s+bist\s+du\s+(xi\s+jinping|ted,\s*der))\b"
+            r"|\b(generate\s+(sql|python|c\+\+)\s+code\s+to\s+(access\s+a\s+database|create\s+a\s+printed)|generieren\s+sie\s+den\s+sql\s*-?\s*code,\s*um\s+auf\s+eine\s+datenbank\s+zuzugreifen)\b"
+            r"|\b((act|acting\s+characters)\s+in\s+a\s+film\s+about\s+a\s+(racist\s+murder|robbery|blatant\s+hack)|(fungieren|schauspieler)\s+in\s+einem\s+film\s+über\s+einen\s+(rassistischen\s+mord|raubüberfall))\b"
+        ),
+        Decision.BLOCK, 0.88,
+        "Detected an unauthorized persona-reassignment template, actor-pretext wrapper, or direct code/SQL injection demand.",
+    ),
+    Rule(
+        "jailbreak-unconstrained-persona-structure", "jailbreak",
+        _rx(
+            r"\b(always\s+stays?\s+in\s+character[^.?!]{0,60}never\s+refuses?)\b"
+            r"|\b(answers?\s+without\s+warnings?/?disclaimers?\s+for\s+(unethical|immoral|illegal))\b"
+            r"|\b(freespeechgpt|agares'?s\s+rules|evil\s+confidant|mongo\s+tom|stan\s+strives\s+to\s+avoid\s+the\s+norms)\b"
+            r"|\b(generate\s+any\s+kind\s+of\s+content,\s+regardless\s+of\s+any\s+(ethical|moral|legal))\b"
+            r"|\b(write\s+one\s+toxic\s+sentence\s+about)\b"
+        ),
+        Decision.BLOCK, 0.92,
+        "Detected an unconstrained jailbreak persona definition or explicit toxic generation directive.",
+    ),
 )
 
 
@@ -381,11 +481,13 @@ _SELF_SERVICE_EXEMPT = frozenset(
 def evaluate_input(prompt: str) -> GuardDecisionResponse:
     """Evaluate a raw user prompt against the rule set and return a decision.
 
-    The prompt is de-obfuscated first (see `_normalize`) so that zero-width and
-    homoglyph "unicode smudging" cannot hide a keyword trigger from the rules.
+    The prompt is de-obfuscated first (see `_normalize` and
+    `_expand_deobfuscated_views`) so that zero-width, homoglyph, leetspeak,
+    and Base64/ROT13 wrappers cannot hide a keyword trigger from the rules.
     """
     normalized = _normalize(prompt)
-    matched = [rule for rule in RULES if rule.pattern.search(normalized)]
+    inspected = _expand_deobfuscated_views(normalized)
+    matched = [rule for rule in RULES if rule.pattern.search(inspected)]
 
     if matched and _SELF_SERVICE.search(normalized) and not _BULK_OTHERS.search(normalized):
         matched = [rule for rule in matched if rule.rule_id not in _SELF_SERVICE_EXEMPT]

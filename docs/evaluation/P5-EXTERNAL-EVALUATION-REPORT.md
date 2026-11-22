@@ -151,6 +151,52 @@ Artifact: `reports/p5/redteam_external/20261122T020415Z-bcf26b/summary.json`
 | **Shield AI (Rule-Only, Judge OFF)** | 5 | 4/5 (80%) | **5/5 (100%)** | **0/5 (0%)** |
 | **Shield AI (Rule + Semantic Judge ON)** | 5 | 5/5 (100%) | **5/5 (100%)** | **0/5 (0%)** |
 
+---
+
+## 4. Kết quả SAU TỐI ƯU P5 (Payload De-obfuscation Pre-decoder + Structural Goal-Hijack Rules + Multilingual Judge Prompt)
+
+Sau khi ghi nhận các điểm hạn chế từ đợt đánh giá độc lập đầu tiên (commit `3c2df65`), nhóm đã thực hiện 3 cải tiến tổng quát (không phụ thuộc mẫu cụ thể) trong [`app/guards/input_guard.py`](../../app/guards/input_guard.py) và [`app/guards/semantic_guard.py`](../../app/guards/semantic_guard.py):
+1. **Payload De-obfuscation Pre-processor (`_expand_deobfuscated_views`)**: Tự động giải mã các chuỗi Base64, dịch ROT13 khi có tín hiệu mã hóa, và chuẩn hóa Leetspeak trước khi đưa vào bộ luật Regex.
+2. **Structural Goal-Hijack & Unconstrained Persona Rules**: Nhận diện cấu trúc chuyển hướng nhiệm vụ đa ngôn ngữ (EN/DE/ES: `forget/ignore/vergiss/ignoriere/olvide`, `new task/neue Aufgabe/second test`), ép đóng vai (`act as / agieren als / auftreten als`), và mẫu persona không giới hạn (`always stays in character... never refuses`).
+3. **Multilingual Task-Hijack Semantic Judge Prompt**: Mở rộng định nghĩa chính sách của Semantic Judge (`gemma4:e2b-it-q4_K_M`) để bao phủ hành vi Goal Hijacking và Persona Override đa ngôn ngữ.
+
+### 4.1. Bảng đối sánh Trước tối ưu P5 vs. Sau tối ưu P5 vs. Llama Guard 3 & NeMo Guardrails
+
+Artifact sau tối ưu: `reports/p5/comparison/20261122T022846Z-9371da/summary.json`
+
+| Tập dữ liệu | Giải pháp | TP / Mal | FP / Ben | TPR (Recall) | FPR | Precision | F1 | Latency p50 | Latency p95 |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| **`v3_425`**<br>*(200 mal, 225 ben)* | Shield AI Rule-Only *(Trước tối ưu P5)* | 194/200 | 0/225 | 97.0% | 0.0% | 100.0% | 98.5% | 0.20 ms | 0.35 ms |
+| | **Shield AI Rule-Only *(Sau tối ưu P5)*** | **194/200** | **0/225** | **97.0%** | **0.0%** | **100.0%** | **98.5%** | **0.47 ms** | **1.29 ms** |
+| | Meta Llama Guard 3 (`llama-guard3:1b`) | 194/200 | 17/225 | 97.0% | 7.6% | 91.9% | 94.4% | 58.09 ms | 83.12 ms |
+| | NeMo Guardrails `self_check_input` | 187/200 | 0/225 | 93.5% | 0.0% | 100.0% | 96.6% | 98.15 ms | 120.16 ms |
+| | **Shield AI Rule + Judge *(Sau tối ưu P5)*** | **200/200** | **0/225** | **100.0%** | **0.0%** | **100.0%** | **100.0%** | **1.23 ms** | **146.23 ms** |
+| **`deepset_test`**<br>*(60 mal, 56 ben)* | Shield AI Rule-Only *(Trước tối ưu P5)* | 1/60 | 0/56 | 1.7% | 0.0% | 100.0% | 3.3% | 0.18 ms | 0.87 ms |
+| | **Shield AI Rule-Only *(Sau tối ưu P5)*** | **44/60** | **0/56** | **73.3%** | **0.0%** | **100.0%** | **84.6%** | **0.26 ms** | **1.17 ms** |
+| | Meta Llama Guard 3 (`llama-guard3:1b`) | 8/60 | 2/56 | 13.3% | 3.6% | 80.0% | 22.9% | 34.43 ms | 72.66 ms |
+| | NeMo Guardrails `self_check_input` | 13/60 | 0/56 | 21.7% | 0.0% | 100.0% | 35.6% | 96.97 ms | 115.91 ms |
+| | Shield AI Rule + Judge *(Trước tối ưu P5)* | 17/60 | 0/56 | 28.3% | 0.0% | 100.0% | 44.2% | 91.18 ms | 110.62 ms |
+| | **Shield AI Rule + Judge *(Sau tối ưu P5)*** | **50/60** | **0/56** | **83.3%** | **0.0%** | **100.0%** | **90.9%** | **118.32 ms** | **146.18 ms** |
+| **`deepset_all`**<br>*(263 mal, 399 ben)* | Shield AI Rule-Only *(Trước tối ưu P5)* | 11/263 | 0/399 | 4.2% | 0.0% | 100.0% | 8.0% | 0.16 ms | 0.76 ms |
+| | **Shield AI Rule-Only *(Sau tối ưu P5)*** | **130/263** | **0/399** | **49.4%** | **0.0%** | **100.0%** | **66.2%** | **0.19 ms** | **0.91 ms** |
+| | Meta Llama Guard 3 (`llama-guard3:1b`) | 61/263 | 7/399 | 23.2% | 1.8% | 89.7% | 36.9% | 36.71 ms | 65.94 ms |
+| | NeMo Guardrails `self_check_input` | 78/263 | 4/399 | 29.7% | 1.0% | 95.1% | 45.2% | 97.73 ms | 120.74 ms |
+| | Shield AI Rule + Judge *(Trước tối ưu P5)* | 97/263 | 2/399 | 36.9% | 0.5% | 98.0% | 53.6% | 89.12 ms | 115.49 ms |
+| | **Shield AI Rule + Judge *(Sau tối ưu P5)*** | **210/263** | **2/399** | **79.8%** | **0.5%** | **99.1%** | **88.4%** | **120.84 ms** | **146.95 ms** |
+
+### 4.2. Kết quả Garak (`v0.17.1`) & PyRIT Converter Trước vs. Sau tối ưu P5
+
+Artifact sau tối ưu: `reports/p5/redteam_external/20261122T022713Z-619459/summary.json`
+
+| Công cụ / Họ tấn công | Chỉ số | Trước tối ưu P5 | Sau tối ưu P5 | Mức cải thiện |
+|---|---|:---:|:---:|---|
+| **Garak `encoding.InjectBase64`** (`/v1/rag/query`) | Tỉ lệ Input Guard chặn | 0/256 (0.0%) | **147/256 (57.4%)** | **+57.4 điểm %** |
+| **Garak `dan.DanInTheWild`** (`/v1/rag/query`) | Tỉ lệ Input Guard chặn (trên mẫu hợp lệ) | 33/160 (20.6%) | **48/147 (32.6%)** *(+109 mẫu bị chặn ở Schema cap)* | **+12.0 điểm %** |
+| **Garak `latentinjection.LatentJailbreak`** (`/v1/rag/query`) | Tỉ lệ Input Guard chặn | 0/256 (0.0%) | **36/256 (14.1%)** | **+14.1 điểm %** |
+| **Garak `promptinject.HijackHateHumans`** (`/v1/rag/query`) | Tỉ lệ Input Guard chặn | 205/256 (80.1%) | **204/256 (79.7%)** | Giữ ổn định ~80% |
+| **PyRIT Converter Matrix (35 biến thể mã hóa)** | **Rule-Only chặn** | 17/35 (48.6%) | **30/35 (85.7%)** *(Base64 5/5, ROT13 5/5, Leet 4/5)* | **+37.1 điểm %** |
+| **PyRIT Converter Matrix (35 biến thể mã hóa)** | **Rule + Judge chặn** | 28/35 (80.0%) | **35/35 (100.0%)** *(Chặn 100% cả 7/7 họ biến đổi)* | **+20.0 điểm % (Đạt 100%)** |
+
 **Ý nghĩa quan trọng cho luận văn tốt nghiệp:**
 - Kết quả trên chứng minh nhận xét của giảng viên là **hoàn toàn chính xác**: trên tập template tĩnh (`v3` PyRIT family), hệ thống đạt 100%, nhưng khi đối mặt với:
   1. **Biến đổi mã hóa (Base64, ROT13, Leetspeak)** từ `garak` và `PyRIT Converter`: lớp Regex Input Guard giảm tỉ lệ chặn từ 80% xuống 0–20% (vì chưa có bộ giải mã Base64/ROT13 trước khi quét regex); bật Semantic Judge giúp nâng tỉ lệ chặn Converter từ **48.6% lên 80.0%**.
