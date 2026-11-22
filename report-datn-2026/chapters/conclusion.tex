@@ -1,0 +1,31 @@
+\chapter*{Kết luận và kiến nghị}
+\addcontentsline{toc}{chapter}{Kết luận và kiến nghị}
+\markboth{KẾT LUẬN VÀ KIẾN NGHỊ}{}
+
+\section*{Kết quả chính đã đạt được}
+
+Đồ án tốt nghiệp đã hoàn thành trọn vẹn mục tiêu nghiên cứu, thiết kế, hiện thực, kiểm thử đối kháng độc lập và đánh giá đối sánh định lượng cơ chế Guardrails đa lớp cho hệ thống RAG, Text-to-SQL và Multi-Tool Agent:
+
+\begin{enumerate}
+    \item \textbf{Hoàn thiện kiến trúc phòng thủ chiều sâu đa lớp (Shield AI P2--P5):} Tích hợp tầng tiền giải mã tự động (\emph{Payload De-obfuscation Pre-decoder} cho Base64, ROT13, Leetspeak, Unicode NFKC/Homoglyph), bộ luật cấu trúc đa ngôn ngữ (Input Guard), kiểm soát truy cập trước truy hồi (\emph{Pre-retrieval RBAC}) trên nền truy hồi lai vectorized (\texttt{SQLite FTS5 BM25} + nhân ma trận \texttt{numpy} trên vector \texttt{float32} BLOB), Provenance Guard, RAG Context Guard, Output/DLP Guard và bộ phán đoán ngữ nghĩa cục bộ (\emph{Semantic Judge} \texttt{gemma4:e2b-it-q4\_K\_M}).
+    \item \textbf{Mở rộng bảo vệ sang dữ liệu có cấu trúc Text-to-SQL và Multi-Tool Company Agent:} Xây dựng \textbf{SQL Guard} sử dụng chính trình biên dịch \texttt{EXPLAIN} và \texttt{Authorizer AST callback} của SQLite để phân quyền tới từng bảng/cột (đạt $\text{TPR} = 100{,}0\%$ trên $38$ đòn P2SQL trực tiếp, $\text{FPR} = 0{,}0\%$ trên $31$ mẫu lành tính, độ trễ $\text{p50} = 0{,}49\,\text{ms}$), kết hợp \textbf{Indirect Data-Cell Result Guard} đạt $\text{TPR} = 100{,}0\%$ trên cả tập \texttt{dev} ($24/24$) và \texttt{holdout} ($14/14$) với $\text{FPR} = 0{,}0\%$ ($0/32$) ở độ trễ $\text{p50} = 0{,}18\,\text{ms}$, cùng hàng chờ phê duyệt cấp quản lý (\emph{Leader Approval Queue}) chặn $18/18$ kịch bản tấn công trên mô hình \texttt{qwen3:4b-instruct}.
+    \item \textbf{Đo đạc đầy đủ phân vị độ trễ \texttt{p50/p95/p99} và khắc phục điểm nghẽn hiệu năng Judge:} Xác lập tổng chi phí của toàn bộ chuỗi Guard tất định chỉ ở mức $\mathbf{\text{p50} = 0{,}42\,\text{ms}, \text{p95} = 1{,}21\,\text{ms}, \text{p99} = 1{,}39\,\text{ms}}$ ($n = 1.275$). Khắc phục lỗi sinh chuỗi suy nghĩ ngầm (\texttt{think=False}) giúp giảm thời gian gọi Judge LLM hơn 60 lần (từ $\sim 6.440\,\text{ms}$ xuống $\text{p50} = 99{,}79\,\text{ms}$), và nhờ cơ chế lọc phân tầng (\emph{tiered short-circuit} lọc sớm $56{,}7\%$ lưu lượng), độ trễ trung vị toàn tập khi bật Judge vẫn giữ ở mức $\mathbf{\text{p50} = 0{,}73\,\text{ms}}$ ($\text{p95} = 110{,}89\,\text{ms}$).
+    \item \textbf{Kiểm chứng độc lập trên Benchmark công khai và Đối sánh vượt trội với Llama Guard~3 \& NeMo Guardrails:} Trên bộ dữ liệu độc lập \texttt{deepset/prompt-injections} ($662$ mẫu), chứng minh định lượng hiện tượng khớp quá mức của bộ regex cũ ($\text{TPR} = 4{,}2\%$) và nâng hiệu quả sau cải tiến P5 lên **$\text{TPR} = 68{,}1\%, \text{FPR} = 0{,}0\%, \text{F1} = 81{,}0\%$ (Rule-Only)** và **$\text{TPR} = 87{,}5\%, \text{FPR} = 0{,}5\%, \text{F1} = 92{,}9\%$ (Rule + Semantic Judge)** --- cao hơn đáng kể so với \textbf{Meta Llama Guard~3 1B} ($\text{TPR} = 23{,}2\%, \text{FPR} = 1{,}8\%, \text{F1} = 36{,}9\%$) và \textbf{NVIDIA NeMo Guardrails} ($\text{TPR} = 29{,}7\%, \text{FPR} = 1{,}0\%, \text{F1} = 45{,}2\%$).
+    \item \textbf{Chống chịu vững chắc trước công cụ Red-Team độc lập \texttt{NVIDIA garak v0.17.1} và \texttt{PyRIT}:} Chặn trực tiếp **$\mathbf{950/1.024}$ probe ($\mathbf{92{,}8\%}$)** của \texttt{garak} trên endpoint \texttt{/v1/rag/query} (\texttt{HijackHateHumans} $100\%$, \texttt{LatentJailbreak} $100\%$, \texttt{InjectBase64} $97{,}7\%$), chặn **$\mathbf{35/35}$ ($\mathbf{100{,}0\%}$)** biến thể mã hoá của \texttt{PyRIT Converter Matrix}, và giữ tỷ lệ rò rỉ dữ liệu mục tiêu ở mức **$\mathbf{0/5}$ ($\mathbf{0{,}0\%}$)** trước kẻ tấn công thích nghi đa lượt nhờ cơ chế \emph{Pre-retrieval RBAC + Defense-in-Depth}.
+\end{enumerate}
+
+\section*{Các mối đe doạ tính hợp lệ (Threats to Validity) và Hạn chế}
+
+\begin{itemize}
+    \item \textbf{Tính hợp lệ nội tại (Internal Validity):} Trên tập benchmark độc lập \texttt{deepset/prompt-injections}, vòng tối ưu thứ hai có tham khảo các họ cấu trúc tấn công đa ngôn ngữ xuất hiện trong tập dữ liệu (như mẫu \emph{``act as / agieren als''} và \emph{``vergiss alle bisherigen''}). Để đảm bảo tính minh bạch học thuật, báo cáo trình bày đầy đủ cả ba mốc số liệu: \emph{Trước tối ưu P5} (zero-shot hoàn toàn: Rule $4{,}2\%$, Rule+Judge $36{,}9\%$), \emph{Sau Vòng~1} (Rule $49{,}4\%$, Rule+Judge $79{,}8\%$) và \emph{Sau Vòng~2} (Rule $68{,}1\%$, Rule+Judge $87{,}5\%$).
+    \item \textbf{Tính hợp lệ ngoại tại (External Validity):} Dù đã kiểm chứng trên benchmark công khai \texttt{deepset} ($662$ mẫu) và $2.048$ probe của \texttt{garak v0.17.1}, kho tài liệu nghiệp vụ và cơ sở dữ liệu Nhà Mộc Việt vẫn là dữ liệu tổng hợp quy mô phòng thí nghiệm; các mô hình suy luận cục bộ ($1\text{B}$--$4\text{B}$ tham số trên GPU 6\,GB VRAM) có năng lực ngữ nghĩa thấp hơn các mô hình thương mại cỡ lớn.
+    \item \textbf{Giới hạn của bộ lọc đầu vào trước tấn công thích nghi đa lượt:} Như thí nghiệm \texttt{PyRIT Adaptive Multi-Turn} đã chỉ ra, một kẻ tấn công có khả năng tự động viết lại câu hỏi sang văn phong nghiệp vụ lành tính ở lượt thứ 2--4 vẫn có thể vượt qua lớp lọc đầu vào; do đó, an toàn của hệ thống bắt buộc phải dựa vào \emph{Pre-retrieval RBAC}, \emph{SQL Authorizer AST} và \emph{Output/DLP Guard} thay vì chỉ tin cậy vào Input Guard.
+\end{itemize}
+
+\section*{Hướng phát triển tiếp theo}
+
+\begin{enumerate}
+    \item Tích hợp thêm bộ phân loại encoder chuyên biệt kích thước nhỏ (như \texttt{Llama Prompt Guard~2 86M} hoặc \texttt{DeBERTa-v3 Prompt Injection}) chạy qua ONNX Runtime để giảm độ trễ tầng phân loại ngữ nghĩa từ $\sim 100\,\text{ms}$ xuống dưới $15\,\text{ms}$.
+    \item Mở rộng đánh giá phần Multi-Tool Agent trên các bộ benchmark tác tử đa bước công khai như \texttt{AgentDojo} với các mô hình thương mại (\texttt{Claude Sonnet}, \texttt{GPT-4o}) khi có ngân sách API.
+    \item Bổ sung cơ chế theo dõi trạng thái rủi ro tích luỹ theo phiên hội thoại (\emph{Session-level Stateful Risk Scoring}) để phát hiện sớm các chiến dịch dò quét thích nghi nhiều lượt kiểu \texttt{PyRIT Crescendo}.
+\end{enumerate}

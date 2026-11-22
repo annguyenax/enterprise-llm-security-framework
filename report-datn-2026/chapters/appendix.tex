@@ -1,0 +1,58 @@
+\chapter{Cấu trúc thư mục và thành phần mã nguồn}
+\label{ap:source-tree}
+\markboth{PHỤ LỤC \Alph{chapter}. CẤU TRÚC THƯ MỤC VÀ THÀNH PHẦN MÃ NGUỒN}{}
+
+\begin{itemize}
+    \item \texttt{app/guards/} --- Chuỗi Guard phòng thủ: \texttt{input\_guard.py} (kèm tầng tiền giải mã \emph{Payload Pre-decoder} Base64/ROT13/Leetspeak/Unicode và luật cấu trúc đa ngôn ngữ), \texttt{semantic\_guard.py} (Fast Pre-screen + Ollama Judge \texttt{gemma4:e2b} tối ưu \texttt{think=False}), \texttt{rag\_guard.py}, \texttt{provenance\_guard.py}, \texttt{acl\_guard.py}, \texttt{dlp\_guard.py}, \texttt{output\_guard.py}.
+    \item \texttt{app/sql\_agent/} --- Bảo vệ truy vấn cơ sở dữ liệu có cấu trúc Text-to-SQL: \texttt{guard.py} (SQLite \texttt{EXPLAIN} + \texttt{set\_authorizer} AST verification), \texttt{executor.py} (chế độ chỉ đọc \texttt{mode=ro} + \texttt{query\_only}), \texttt{result\_guard.py} và \texttt{injection\_rules.py} (quét từng ô dữ liệu trả về chống tiêm nhiễm gián tiếp).
+    \item \texttt{app/company\_agent/} --- Trợ lý doanh nghiệp đa công cụ (5 công cụ \texttt{search\_docs}, \texttt{query\_db}, \texttt{order\_status}, \texttt{create\_ticket}, \texttt{send\_email}) với allowlist theo phòng ban và hàng chờ phê duyệt cấp quản lý (\emph{Leader Approval Queue}).
+    \item \texttt{scripts/p5/} --- Bộ công cụ kiểm thử đối kháng độc lập, đo độ trễ và đối sánh baseline: \texttt{latency\_bench.py}, \texttt{compare\_baselines.py}, \texttt{run\_external\_redteam.py}, \texttt{eval\_sql\_and\_agent.py}, \texttt{generate\_thesis\_figures.py}, \texttt{garak\_rag\_query.json}.
+    \item \texttt{datasets/} và \texttt{redteam/} --- Bộ dữ liệu kiểm thử RAG (\texttt{v2}, \texttt{v3} 425 case, \texttt{enterprise-kb-full} 48 tài liệu) và cơ sở dữ liệu doanh nghiệp nội thất Nhà Mộc Việt (\texttt{datasets/furniture/} 12 bảng SQL, 29 tài liệu, 38 mẫu indirect P2SQL + 32 mẫu benign; \texttt{redteam/sql/} 38 mẫu direct P2SQL + 31 mẫu benign).
+    \item \texttt{reports/p5/} và \texttt{docs/evaluation/P5-EXTERNAL-EVALUATION-REPORT.md} --- Toàn bộ artifact kết quả thực nghiệm có khóa mã băm SHA-256.
+\end{itemize}
+
+\chapter{Danh sách nhóm kịch bản và bộ dữ liệu kiểm thử}
+\label{ap:test-groups}
+\markboth{PHỤ LỤC \Alph{chapter}. DANH SÁCH NHÓM KỊCH BẢN VÀ BỘ DỮ LIỆU KIỂM THỬ}{}
+
+Chương trình đánh giá của đồ án tốt nghiệp bao phủ tổng cộng hơn \textbf{3.200 mẫu và probe kiểm thử} trên 5 tập dữ liệu độc lập và nội bộ:
+\begin{enumerate}
+    \item \textbf{Bộ đánh giá nội bộ \texttt{v3\_425} ($425$ mẫu):} $200$ mẫu tấn công và $225$ mẫu lành tính (gồm $125$ mẫu \emph{hard-benign} chứa từ khoá nhạy cảm hợp pháp).
+    \item \textbf{Bộ benchmark công khai \texttt{deepset/prompt-injections} ($662$ mẫu):} $263$ mẫu tấn công prompt injection và $399$ mẫu lành tính tự nhiên đa ngôn ngữ (Anh, Đức, Tây Ban Nha) tải trực tiếp từ HuggingFace.
+    \item \textbf{Bộ probe gốc của \texttt{NVIDIA garak v0.17.1} ($2.048$ lượt tấn công HTTP REST):} $1.024$ probe bắn vào \texttt{POST /v1/rag/query} và $1.024$ probe bắn vào \texttt{POST /v1/gateway/chat} thuộc 4 họ: \texttt{promptinject.HijackHateHumans} ($256$), \texttt{latentinjection.LatentJailbreak} ($256$), \texttt{encoding.InjectBase64} ($256$) và \texttt{dan.DanInTheWild} ($256$).
+    \item \textbf{Chiến dịch \texttt{PyRIT} Converter \& Adaptive Multi-Turn ($55$ lượt tấn công):} $35$ biến thể mã hoá trên 7 bộ Converter và $20$ lượt hội thoại thích nghi đa lượt (5 mục tiêu $\times$ 4 lượt LLM tự động viết lại prompt).
+    \item \textbf{Bộ kiểm thử Text-to-SQL \& Indirect Data-Cell ($139$ mẫu):} $69$ mẫu Direct P2SQL ($38$ tấn công, $31$ lành tính) và $70$ mẫu Indirect Data-Cell ($24$ dev, $14$ holdout, $32$ hard-benign).
+\end{enumerate}
+
+\chapter{Bảng truy vết yêu cầu và cơ chế kiểm soát}
+\label{ap:traceability}
+\markboth{PHỤ LỤC \Alph{chapter}. BẢNG TRUY VẾT YÊU CẦU VÀ CƠ CHẾ KIỂM SOÁT}{}
+
+\begin{table}[H]
+\centering
+\caption{Truy vết yêu cầu -- cơ chế -- kiểm thử trong Đồ án tốt nghiệp}
+\label{tab:trace}
+\begin{tabular}{@{}p{0.14\linewidth}p{0.38\linewidth}p{0.40\linewidth}@{}}
+\toprule
+\textbf{Yêu cầu} & \textbf{Cơ chế hiện thực} & \textbf{Kiểm thử \& Thực nghiệm đối chứng} \\
+\midrule
+FR-IN & Input Guard + Pre-decoder (Base64, ROT13, Leet) + Semantic Judge 2B & Benchmark \texttt{v3\_425}, \texttt{deepset} ($662$ mẫu), \texttt{garak} ($2.048$ probes), \texttt{PyRIT} Converter \\
+FR-CTX & Provenance Guard + RAG Context Guard & Kiểm thử tài liệu đầu độc, \texttt{PyRIT} Adaptive Multi-Turn ($0/5$ rò rỉ) \\
+FR-OUT & Output Guard + DLP + Canary Detector & Thí nghiệm A/B canary-sạch ($0/18$ rò rỉ), pytest DLP \\
+FR-RAG & Hybrid BM25 + Numpy BLOB + Pre-retrieval RBAC & Đo độ trễ $\text{p50} = 2{,}08\,\text{ms}$ ($n=1.275$), pytest ACL \\
+FR-SQL & SQLite \texttt{EXPLAIN} + Authorizer AST + Indirect Result Guard & Direct P2SQL ($\text{TPR } 100\%, \text{p50 } 0{,}49\,\text{ms}$), Indirect Holdout ($\text{TPR } 100\%, \text{p50 } 0{,}18\,\text{ms}$) \\
+FR-AGT & Multi-Tool Company Agent + Leader Approval Queue & Live \texttt{qwen3:4b} ($0/18$ tấn công thành công vs.\ $12/18$ không tường) \\
+FR-LOG & Nhật ký kiểm toán JSON content-free & Kiểm thử canonical I/O \& terminal audit ($469$ tests PASS) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\chapter{Khai báo minh bạch sử dụng công cụ AI trong Đồ án tốt nghiệp}
+\label{ap:ai-disclosure}
+\markboth{PHỤ LỤC \Alph{chapter}. KHAI BÁO MINH BẠCH SỬ DỤNG CÔNG CỤ AI}{}
+
+Nhóm thực hiện đồ án sử dụng các công cụ trí tuệ nhân tạo ở hai vai trò tách biệt và đều được kiểm soát chặt chẽ:
+\begin{enumerate}
+    \item \textbf{Với vai trò là thành phần kỹ thuật và đối tượng khảo sát của hệ thống:} Các mô hình ngôn ngữ lớn chạy cục bộ hoàn toàn qua \textbf{Ollama} trên GPU cá nhân (gồm \texttt{gemma4:e2b-it-q4\_K\_M} làm Semantic Judge 2B và Attacker mutator, \texttt{gemma4:e4b-it-qat}, \texttt{qwen3:4b-instruct} cho Multi-Tool Company Agent, và \texttt{llama-guard3:1b} làm mốc đối sánh chuẩn của Meta). Toàn bộ lượt chạy thực nghiệm đều thực thi cục bộ (offline), có mã băm SHA-256 cho tập dữ liệu và file kết quả, đảm bảo tái lập 100\% mà không phụ thuộc dịch vụ đám mây.
+    \item \textbf{Với vai trò là công cụ hỗ trợ lập trình và rà soát tài liệu:} Các trợ lý lập trình AI (Claude Code, GitHub Copilot, Codex CLI) được sử dụng để hỗ trợ sinh khung mã kiểm thử, viết script đo đạc tự động và kiểm toán chéo tính toàn vẹn của mã nguồn. Mọi đoạn mã, biểu thức chính quy và kịch bản kiểm thử đều do hai sinh viên trực tiếp kiểm tra, chạy thực nghiệm thực tế và chịu trách nhiệm học thuật; tuyệt đối không có số liệu thực nghiệm nào do AI tự sinh mà không qua log chạy thật từ hệ thống.
+\end{enumerate}

@@ -1,0 +1,30 @@
+\chapter*{Kế hoạch thực hiện công việc nhóm}
+\addcontentsline{toc}{chapter}{Kế hoạch thực hiện công việc nhóm}
+\markboth{KẾ HOẠCH THỰC HIỆN CÔNG VIỆC NHÓM}{}
+\setlength{\parskip}{6pt}
+
+Bảng dưới đây tóm tắt kế hoạch, phân công và mức hoàn thành công việc theo các hạng mục chuyên môn của đề tài. Nhóm gồm hai thành viên: \textbf{SV1} --- \studentname{}; \textbf{SV2} --- \studentnametwo{}.
+
+\begin{table}[H]
+\centering
+\caption{Kế hoạch và phân công thực hiện công việc}
+\label{tab:ke-hoach-nhom}
+\begin{tabularx}{\linewidth}{@{}p{0.04\linewidth}X p{0.16\linewidth}p{0.15\linewidth}@{}}
+\toprule
+\textbf{TT} & \textbf{Nội dung} & \textbf{Phụ trách} & \textbf{Mức độ} \\
+\midrule
+1 & Khảo sát bài toán, nghiên cứu nền tảng an toàn LLM/RAG/Text-to-SQL & Cả hai & Hoàn thành \\
+2 & Phân tích yêu cầu FR/NFR, mô hình mối đe doạ, kiến trúc đa lớp & Cả hai & Hoàn thành \\
+3 & Hiện thực gateway, chuỗi guard (Input + Pre-decoder, RAG Context, Output/DLP) & SV1 & Hoàn thành \\
+4 & Truy hồi lai tối ưu (BM25 + embedding BLOB, RBAC trước truy hồi) & SV1 & Hoàn thành \\
+5 & Đo phân vị độ trễ p50/p95/p99 từng tầng và tối ưu Semantic Judge (\texttt{gemma4:e2b}) & SV1 & Hoàn thành \\
+6 & Kiểm thử đối kháng độc lập (\texttt{garak v0.17.1}, \texttt{PyRIT}, \texttt{deepset}) và đối sánh \texttt{Llama Guard~3} / \texttt{NeMo} & SV1 & Hoàn thành \\
+7 & Mở rộng Text-to-SQL Guard (SQLite \texttt{EXPLAIN} + Authorizer AST) và Indirect DB Result Guard & SV2 & Hoàn thành \\
+8 & Xây dựng bộ dữ liệu doanh nghiệp Nhà Mộc Việt và Multi-Tool Company Agent (Approval Queue) & SV2 & Hoàn thành \\
+9 & Kiểm thử tự động tích hợp (469+ unit/integration tests) và rà soát chéo & Cả hai & Hoàn thành \\
+10 & Soạn thảo và hoàn thiện quyển báo cáo Đồ án tốt nghiệp & Cả hai & Hoàn thành \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\textbf{Nguyên tắc làm việc:} hai thành viên rà soát chéo kết quả của nhau trước khi hợp nhất; mọi số liệu đánh giá bám sát artifact/script tái lập được; không mở rộng kết luận vượt quá bằng chứng thực nghiệm.

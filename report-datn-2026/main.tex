@@ -1,0 +1,86 @@
+\documentclass[a4paper,oneside]{book}
+\input{styles/settings}
+\begin{document}
+\frontmatter
+\pagenumbering{roman}
+
+% --- Bìa ngoài ---
+\coverpage
+% --- Bìa đệm (copy nguyên bìa chính) ---
+\coverpageinner
+
+% --- Mục lục ---
+\cleardoublepage
+\begin{spacing}{1.15}
+\tableofcontents
+\end{spacing}
+
+% --- Lời cảm ơn ---
+\input{pages/acknowledgments}
+
+% --- Thuật ngữ và từ viết tắt ---
+\input{pages/abbreviations}
+
+% --- Danh mục bảng ---
+\cleardoublepage
+\phantomsection
+\addcontentsline{toc}{chapter}{Danh mục các bảng vẽ}
+\chapter*{DANH MỤC CÁC BẢNG VẼ}
+\begingroup
+\singlespacing
+\makeatletter
+\@starttoc{lot}
+\makeatother
+\endgroup
+
+% --- Danh mục hình ---
+\cleardoublepage
+\phantomsection
+\addcontentsline{toc}{chapter}{Danh mục các hình vẽ, sơ đồ}
+\chapter*{DANH MỤC CÁC HÌNH VẼ, SƠ ĐỒ}
+\begingroup
+\singlespacing
+\makeatletter
+\@starttoc{lof}
+\makeatother
+\endgroup
+
+% --- Kế hoạch thực hiện công việc nhóm ---
+\cleardoublepage
+\input{pages/group-work-plan}
+
+% --- Phần nội dung chính ---
+\mainmatter
+\pagenumbering{arabic}
+\input{chapters/chap-0.phan-mo-dau}
+\input{chapters/chap-1-background}
+\input{chapters/chap-2-method}
+\input{chapters/chap-3}
+\input{chapters/chap4}
+\input{chapters/conclusion}
+
+% --- Tài liệu tham khảo (QĐ 922: sau Kết luận, trước Phụ lục) ---
+\cleardoublepage
+\phantomsection
+\addcontentsline{toc}{chapter}{Danh mục tài liệu tham khảo}
+\markboth{DANH MỤC TÀI LIỆU THAM KHẢO}{}
+\renewcommand{\bibname}{TÀI LIỆU THAM KHẢO}
+\bibliographystyle{plain}
+\begingroup
+\RaggedRight
+\sloppy
+\setlength{\parskip}{2pt}
+\let\originalbibitem\bibitem
+\renewcommand{\bibitem}[1]{\par\addvspace{3pt}\originalbibitem{#1}}
+\bibliography{refs}
+\endgroup
+
+% --- Phụ lục ---
+\appendix
+\titleformat{name=\chapter}[block]
+  {\normalfont\fontsize{14pt}{20pt}\bfseries\centering}
+  {Phụ lục \thechapter.}{1em}{\MakeUppercase}
+\renewcommand{\cftchappresnum}{Phụ lục }
+\input{chapters/appendix}
+
+\end{document}
