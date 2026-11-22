@@ -4,28 +4,34 @@
 \frontmatter
 \pagenumbering{roman}
 
-% --- Bìa ngoài ---
+% --- Bìa ngoài (Mẫu 1 QĐ 449/QĐ-HV) ---
 \coverpage
-% --- Bìa đệm (copy nguyên bìa chính) ---
+% --- Bìa phụ (Mẫu 2 QĐ 449/QĐ-HV) ---
 \coverpageinner
 
-% --- Mục lục ---
+% --- 1. Phê duyệt, giao nhiệm vụ đề tài (Mục I.1 QĐ 449/QĐ-HV) ---
+\input{pages/approved-proposal-placeholder}
+
+% --- 2. Lời cảm ơn (Mẫu 3 QĐ 449/QĐ-HV) ---
+\input{pages/acknowledgments}
+
+% --- 3. Lời cam đoan (Mẫu 4 QĐ 449/QĐ-HV) ---
+\input{pages/declaration}
+
+% --- 4. Mục lục (Mẫu 5 QĐ 449/QĐ-HV) ---
 \cleardoublepage
 \begin{spacing}{1.15}
 \tableofcontents
 \end{spacing}
 
-% --- Lời cảm ơn ---
-\input{pages/acknowledgments}
-
-% --- Thuật ngữ và từ viết tắt ---
+% --- 5. Danh mục các ký hiệu và chữ viết tắt (Mẫu 6 QĐ 449/QĐ-HV) ---
 \input{pages/abbreviations}
 
-% --- Danh mục bảng ---
+% --- 6. Danh mục các bảng, sơ đồ, hình vẽ (Mẫu 7 QĐ 449/QĐ-HV) ---
 \cleardoublepage
 \phantomsection
-\addcontentsline{toc}{chapter}{Danh mục các bảng vẽ}
-\chapter*{DANH MỤC CÁC BẢNG VẼ}
+\addcontentsline{toc}{chapter}{Danh mục các bảng}
+\chapter*{DANH MỤC CÁC BẢNG}
 \begingroup
 \singlespacing
 \makeatletter
@@ -33,7 +39,6 @@
 \makeatother
 \endgroup
 
-% --- Danh mục hình ---
 \cleardoublepage
 \phantomsection
 \addcontentsline{toc}{chapter}{Danh mục các hình vẽ, sơ đồ}
@@ -45,18 +50,20 @@
 \makeatother
 \endgroup
 
-% --- Kế hoạch thực hiện công việc nhóm ---
-\cleardoublepage
-\input{pages/group-work-plan}
-
-% --- Phần nội dung chính ---
+% --- Phần nội dung chính (Đánh số 1, 2, 3... từ Mở đầu đến Phụ lục theo المقطع II.5 QĐ 449) ---
 \mainmatter
 \pagenumbering{arabic}
+% --- 7. Mở đầu (Mẫu 8 QĐ 449/QĐ-HV) ---
 \input{chapters/chap-0.phan-mo-dau}
+% --- 8. Bảng phân công nhiệm vụ nhóm thực hiện (Mục I.8 QĐ 449/QĐ-HV) ---
+\cleardoublepage
+\input{pages/group-work-plan}
+% --- 9. Chương 1 .. Chương 4 ---
 \input{chapters/chap-1-background}
 \input{chapters/chap-2-method}
 \input{chapters/chap-3}
 \input{chapters/chap4}
+% --- 10. Kết luận, kiến nghị ---
 \input{chapters/conclusion}
 
 % --- Tài liệu tham khảo (QĐ 922: sau Kết luận, trước Phụ lục) ---

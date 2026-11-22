@@ -1,36 +1,32 @@
-% Trang "Phiếu giao đề cương TTTN được phê duyệt".
-% Đây là trang giữ chỗ (placeholder) vì nhóm chưa có bản scan/PDF phiếu đã ký,
-% duyệt thực tế từ Khoa/Bộ môn. Không đánh số trang, không đưa vào Mục lục,
-% đúng quy ước áp dụng cho các trang bìa/biểu mẫu hành chính.
 \clearpage
 \thispagestyle{empty}
 \begin{center}
-  {\fontsize{14pt}{18pt}\selectfont\bfseries PHIẾU GIAO ĐỀ CƯƠNG\\THỰC TẬP TỐT NGHIỆP ĐƯỢC PHÊ DUYỆT}
+  {\fontsize{14pt}{18pt}\selectfont\bfseries PHIẾU PHÊ DUYỆT, GIAO NHIỆM VỤ ĐỀ TÀI\\ĐỒ ÁN TỐT NGHIỆP ĐẠI HỌC}
 \end{center}
 
-\vspace{2cm}
+\vspace{1.2cm}
 
 \begin{center}
 \fbox{
-  \begin{minipage}{0.85\textwidth}
+  \begin{minipage}{0.88\textwidth}
     \centering
-    \vspace{1cm}
-    {\itshape Phiếu giao đề cương TTTN được phê duyệt sẽ được bổ sung theo biểu mẫu của Khoa/Bộ môn.}
-    \vspace{1cm}
+    \vspace{0.8cm}
+    {\itshape Trang này dùng để chèn bản Phiếu phê duyệt, giao nhiệm vụ đề tài Đồ án tốt nghiệp có đầy đủ chữ ký của Khoa / Bộ môn và Giáo viên hướng dẫn khi in đóng quyển.}
+    \vspace{0.8cm}
   \end{minipage}
 }
 \end{center}
 
-\vspace{1.5cm}
+\vspace{1.0cm}
 
 \noindent
-Các thông tin dưới đây được điền tạm theo hồ sơ hiện có của nhóm, dùng để đối chiếu khi thay thế bằng phiếu chính thức đã ký duyệt:
+\textbf{Thông tin nhiệm vụ đề tài Đồ án tốt nghiệp:}
 
 \begin{itemize}
   \item \textbf{Tên đề tài:} \titlethesis
-  \item \textbf{Sinh viên thực hiện:} \studentname{} (\mssv), \studentnametwo{} (\mssvtwo)
-  \item \textbf{Lớp:} \classid \quad \textbf{Ngành:} \major
-  \item \textbf{Giảng viên hướng dẫn:} \supervisor
-  \item \textbf{Ngày phê duyệt:} \textit{(chưa có -- chờ bổ sung)}
-  \item \textbf{Chữ ký xác nhận của đơn vị/GVHD:} \textit{(chưa có -- chờ bổ sung)}
+  \item \textbf{Nhóm sinh viên thực hiện:} \studentname{} (Mã SV: \mssv), \studentnametwo{} (Mã SV: \mssvtwo)
+  \item \textbf{Lớp:} \classid \quad \textbf{Ngành:} \major \quad \textbf{Khoa:} \faculty
+  \item \textbf{Giáo viên hướng dẫn:} \supervisor
+  \item \textbf{Nội dung lý thuyết:} Tổng quan kiến trúc RAG/Text-to-SQL/Agent và bề mặt tấn công runtime theo OWASP Top~10 for LLM Applications; nghiên cứu nguyên lý Guardrails đa lớp fail-closed, kiểm soát truy cập trước truy hồi (Pre-retrieval RBAC, SQLite Authorizer AST); khảo sát các giải pháp phòng thủ chuẩn (\texttt{Llama Guard~3}, \texttt{NeMo Guardrails}) và công cụ red-team độc lập (\texttt{garak}, \texttt{PyRIT}).
+  \item \textbf{Nội dung thực hành:} Xây dựng khung bảo mật \textbf{Shield AI} tích hợp tầng tiền giải mã (Base64/ROT13/Leetspeak/Unicode), chuỗi Guard đa lớp và Semantic Judge cục bộ (\texttt{gemma4:e2b}); mở rộng bảo vệ sang Text-to-SQL và Multi-Tool Company Agent (Nhà Mộc Việt); chạy kiểm thử đối kháng độc lập bằng \texttt{garak v0.17.1} ($2.048$ probe), \texttt{PyRIT} Converter/Adaptive Multi-Turn và benchmark công khai \texttt{deepset/prompt-injections} ($662$ mẫu); đo phân vị độ trễ \texttt{p50/p95/p99} từng tầng và đối sánh định lượng với \texttt{Meta Llama Guard~3 1B} cùng \texttt{NVIDIA NeMo Guardrails}.
 \end{itemize}
