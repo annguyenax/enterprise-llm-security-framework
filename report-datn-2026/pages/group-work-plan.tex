@@ -1,22 +1,24 @@
 \chapter*{Bảng phân công nhiệm vụ nhóm thực hiện}
 \addcontentsline{toc}{chapter}{Bảng phân công nhiệm vụ nhóm thực hiện}
 \markboth{BẢNG PHÂN CÔNG NHIỆM VỤ NHÓM THỰC HIỆN}{}
-\setlength{\parskip}{6pt}
+\setlength{\parskip}{4pt}
 
-Bảng~\ref{tab:ke-hoach-nhom} và Bảng~\ref{tab:doi-chieu-nhiem-vu} trình bày kế hoạch phân công công việc giữa hai thành viên (\textbf{SV1} --- \studentname{}, Nhóm trưởng; \textbf{SV2} --- \studentnametwo{}) cũng như bảng đối chiếu trực tiếp 11 hạng mục nhiệm vụ đề tài (5 nội dung lý thuyết và 6 nội dung thực hành do Giáo viên hướng dẫn giao) với các chương, mục và minh chứng thực nghiệm trong quyển báo cáo.
+Bảng~\ref{tab:ke-hoach-nhom} và Bảng~\ref{tab:doi-chieu-nhiem-vu} trình bày kế hoạch phân công công việc giữa hai thành viên (\textbf{SV1} --- \studentname{}, Nhóm trưởng; \textbf{SV2} --- \studentnametwo{}) cùng bảng đối chiếu 11 hạng mục nhiệm vụ đề tài (5 nội dung lý thuyết và 6 nội dung thực hành do Giáo viên hướng dẫn giao) với các chương, mục và minh chứng thực nghiệm trong quyển báo cáo.
 
-\begin{table}[H]
+\begin{table}[!htbp]
 \centering
 \caption{Kế hoạch và phân công thực hiện công việc của nhóm Thanh\_01 (A06)}
 \label{tab:ke-hoach-nhom}
-\begin{tabularx}{\linewidth}{@{}p{0.05\linewidth}X p{0.16\linewidth}p{0.15\linewidth}@{}}
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabularx}{\linewidth}{@{}C{0.05\linewidth}X C{0.12\linewidth}C{0.14\linewidth}@{}}
 \toprule
 \textbf{TT} & \textbf{Nội dung công việc} & \textbf{Phụ trách} & \textbf{Mức độ} \\
 \midrule
 1 & Khảo sát kiến trúc RAG, bề mặt tấn công OWASP LLM Top~10, nguyên tắc fail-closed và các giải pháp Llama Guard~3, NeMo Guardrails, garak, PyRIT & Cả hai & Hoàn thành \\
 2 & Phân tích yêu cầu FR/NFR, mô hình mối đe doạ, thiết kế kiến trúc Guardrails đa lớp (đầu vào $\rightarrow$ truy hồi $\rightarrow$ ngữ cảnh $\rightarrow$ đầu ra) & Cả hai & Hoàn thành \\
 3 & Xây dựng FastAPI Security Gateway, chuỗi Guard (Input + Pre-decoder, RAG Context, Output/DLP) và truy hồi lai BM25 + Dense + Pre-retrieval RBAC & SV1 & Hoàn thành \\
-4 & Tách và khóa SHA-256 tập holdout, tích hợp benchmark công khai \texttt{deepset/prompt-injections} ($662$ mẫu) và bộ kiểm thử nội bộ ($425$ mẫu) & SV1 & Hoàn thành \\
+4 & Tách và khóa SHA-256 tập holdout, tích hợp benchmark công khai \texttt{deepset/\allowbreak prompt-injections} ($662$ mẫu) và bộ kiểm thử nội bộ ($425$ mẫu) & SV1 & Hoàn thành \\
 5 & Thực nghiệm đối chứng có/không có Guardrails, đo phân vị độ trễ \texttt{p50/p95/p99} từng lớp và tổng thể (tối ưu \texttt{think=False} cho Semantic Judge) & SV1 & Hoàn thành \\
 6 & Kiểm thử đối kháng bằng \texttt{NVIDIA garak v0.17.1} ($2.048$ probe), \texttt{PyRIT} và lập bảng đối sánh với \texttt{Llama Guard~3 1B} \& \texttt{NeMo Guardrails} & SV1 & Hoàn thành \\
 7 & Mở rộng kho dữ liệu doanh nghiệp Nhà Mộc Việt (12 bảng SQL, 29 tài liệu) và Multi-Tool Company Agent (Approval Queue) & SV2 & Hoàn thành \\
@@ -27,29 +29,30 @@ Bảng~\ref{tab:ke-hoach-nhom} và Bảng~\ref{tab:doi-chieu-nhiem-vu} trình b�
 \end{tabularx}
 \end{table}
 
-\begin{table}[H]
+\textbf{Nguyên tắc làm việc:} hai thành viên rà soát chéo kết quả của nhau trước khi hợp nhất; mọi số liệu đánh giá bám sát artifact/script tái lập được; không mở rộng kết luận vượt quá bằng chứng thực nghiệm.
+
+\begin{table}[!htbp]
 \centering
 \caption{Đối chiếu 11 hạng mục Lý thuyết và Thực hành được giao với nội dung báo cáo}
 \label{tab:doi-chieu-nhiem-vu}
 \footnotesize
-\begin{tabularx}{\linewidth}{@{}p{0.07\linewidth}p{0.44\linewidth}p{0.18\linewidth}X@{}}
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabularx}{\linewidth}{@{}C{0.06\linewidth}L{0.42\linewidth}L{0.18\linewidth}X@{}}
 \toprule
 \textbf{Mã} & \textbf{Nội dung nhiệm vụ theo bảng giao đề tài} & \textbf{Vị trí trong báo cáo} & \textbf{Kết quả / Minh chứng đạt được} \\
 \midrule
 \textbf{LT1} & Tổng quan kiến trúc RAG và bề mặt tấn công runtime (Direct/Indirect Prompt Injection, đầu độc ngữ cảnh, rò rỉ dữ liệu theo OWASP LLM Top~10) & Chương~1 (Mục~1.1, 1.2) & Phân tích 4 bề mặt tấn công liên thông và ánh xạ chi tiết OWASP LLM01, LLM02, LLM06, LLM08. \\
 \textbf{LT2} & Kiến trúc Guardrails đa lớp theo nguyên tắc fail-closed: kiểm duyệt đầu vào, kiểm soát truy cập trước truy hồi, làm sạch ngữ cảnh, lọc đầu ra & Chương~1 (Mục~1.3), Chương~2 (Mục~2.1--2.4) & Thiết kế chuỗi phòng thủ chiều sâu fail-closed kết hợp Pre-retrieval RBAC và SQLite Authorizer AST. \\
-\textbf{LT3} & Khảo sát giải pháp Guardrails mã nguồn mở (Llama Guard, NeMo Guardrails) và bộ dữ liệu tấn công công khai & Chương~1 (Mục~1.4, 1.5, Bảng~1.1) & Phân tích cơ chế Llama Guard~3 1B, NeMo \texttt{self\_check\_input} và bộ dữ liệu \texttt{deepset/prompt-injections} ($662$ mẫu). \\
-\textbf{LT4} & Tìm hiểu khung kiểm thử đối kháng tự động và quy trình kiểm thử hộp đen cho ứng dụng LLM & Chương~1 (Mục~1.4, 1.5), Chương~4 (Mục~4.6) & Khảo sát kiến trúc probe của \texttt{NVIDIA garak v0.17.1} và Converter/Orchestrator của \texttt{Microsoft PyRIT}. \\
+\textbf{LT3} & Khảo sát giải pháp Guardrails mã nguồn mở (Llama Guard, NeMo Guardrails) và bộ dữ liệu tấn công công khai & Chương~1 (Mục~1.4, 1.5, Bảng~1.1) & Phân tích cơ chế Llama Guard~3 1B, NeMo \texttt{self\_\allowbreak check\_\allowbreak input} và bộ dữ liệu \texttt{deepset/\allowbreak prompt-injections} ($662$ mẫu). \\
+\textbf{LT4} & Tìm hiểu khung kiểm thử đối kháng tự động và quy trình kiểm thử hộp đen cho ứng dụng LLM & Chương~1 (Mục~1.4, 1.5), Chương~4 (Mục~4.6) & Khảo sát kiến trúc probe của \texttt{NVIDIA garak v0.17.1} và Converter/\allowbreak Orchestrator của \texttt{Microsoft PyRIT}. \\
 \textbf{LT5} & Phương pháp đánh giá định lượng: tách tập tinh chỉnh luật và tập kiểm định độc lập, chỉ số TPR, FPR, độ trễ p50/p95, đánh đổi an toàn -- khả dụng & Chương~2 (Mục~2.2), Chương~4 (Mục~4.1) & Định nghĩa giao thức tách dev/holdout khóa SHA-256 và bộ chỉ số $\text{TPR}$, $\text{FPR}$, $\text{F1}$, $\text{ASR}$, $\text{p50/p95/p99}$. \\
 \midrule
 \textbf{TH1} & Xây dựng chatbot RAG doanh nghiệp mô phỏng chứa dữ liệu nhạy cảm giả lập, cung cấp cổng truy cập (gateway) phục vụ kiểm thử & Chương~2 (Mục~2.3), Chương~3 (Mục~3.1, 3.3) & Kho RAG 48 văn bản đa phòng ban + CSDL Nhà Mộc Việt (12 bảng SQL, 29 tài liệu) qua FastAPI Security Gateway. \\
 \textbf{TH2} & Triển khai lớp Guardrails đa lớp theo luồng đầu vào $\rightarrow$ truy hồi $\rightarrow$ ngữ cảnh $\rightarrow$ đầu ra, áp dụng nguyên tắc fail-closed & Chương~3 (Mục~3.1--3.3) & Hiện thực Pre-decoder + Input Guard $\rightarrow$ RBAC / SQL AST $\rightarrow$ RAG Context / Result Guard $\rightarrow$ Output/DLP Guard ($469$ tests PASS). \\
-\textbf{TH3} & Xây dựng bộ kiểm thử kết hợp dữ liệu công khai và kịch bản tự xây; tách và khóa tập holdout trước khi tinh chỉnh luật & Chương~4 (Mục~4.1, 4.4, 4.7) & Khóa SHA-256 tập \texttt{v2\_holdout} ($50$ mẫu), \texttt{sql\_holdout} ($14$ mẫu), kết hợp \texttt{v3\_425} và \texttt{deepset} công khai ($662$ mẫu). \\
+\textbf{TH3} & Xây dựng bộ kiểm thử kết hợp dữ liệu công khai và kịch bản tự xây; tách và khóa tập holdout trước khi tinh chỉnh luật & Chương~4 (Mục~4.1, 4.4, 4.7) & Khóa SHA-256 tập \texttt{v2\_\allowbreak holdout} ($50$ mẫu), \texttt{sql\_\allowbreak holdout} ($14$ mẫu), kết hợp \texttt{v3\_425} và \texttt{deepset} công khai ($662$ mẫu). \\
 \textbf{TH4} & Thực nghiệm đối chứng giữa cấu hình có và không có Guardrails trên cùng kho tài liệu & Chương~4 (Mục~4.2, Bảng~4.1, 4.2) & Không Guard: $\text{ASR}=84{,}00\%$; Có Guard: $\text{ASR}=0{,}00\%$, kèm ma trận Ablation 8 cấu hình trên cùng kho tài liệu. \\
 \textbf{TH5} & Đo và phân tích tỷ lệ chặn thành công, False Positive và độ trễ p50/p95 ở mức tổng thể lẫn từng lớp & Chương~4 (Mục~4.3--4.5, Bảng~4.3, Hình~4.1) & Guard tất định: $\text{p50}=0{,}42\,\text{ms}$, $\text{p95}=1{,}21\,\text{ms}$; Bật Judge (\texttt{think=False}): Judge $\text{p50}=99{,}79\,\text{ms}$, tổng thể $\text{p50}=0{,}73\,\text{ms}$. \\
 \textbf{TH6} & Lập bảng đối sánh định lượng với Llama Guard và NeMo Guardrails trên cùng bộ kiểm thử và phần cứng; phân tích kết quả và hạn chế thực nghiệm & Chương~4 (Mục~4.4, 4.9, Bảng~4.4, Hình~4.2) & Trên \texttt{deepset} ($662$ mẫu): Shield AI đạt $\text{F1}=92{,}9\%$ ($\text{FPR}=0{,}5\%$), vượt Llama Guard~3 ($\text{F1}=36{,}9\%$) và NeMo ($\text{F1}=45{,}2\%$); phân tích 4 nhóm hạn chế thực nghiệm (Mục~4.9). \\
 \bottomrule
 \end{tabularx}
 \end{table}
-
-\textbf{Nguyên tắc làm việc:} hai thành viên rà soát chéo kết quả của nhau trước khi hợp nhất; mọi số liệu đánh giá bám sát artifact/script tái lập được; không mở rộng kết luận vượt quá bằng chứng thực nghiệm.

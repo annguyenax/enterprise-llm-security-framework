@@ -17,7 +17,7 @@ Prompt injection là kỹ thuật khiến mô hình ưu tiên chỉ dẫn của 
 
 \subsection{Rò rỉ dữ liệu và thông tin nhạy cảm}
 
-Hệ thống có thể phát tán PII, bí mật giả định, hoặc nội dung nội bộ nếu đầu ra không được kiểm soát, hoặc nếu gói bàn giao chứa file log/dữ liệu thô (JSONL, \texttt{result.json}, cơ sở dữ liệu tạm).
+Hệ thống có thể phát tán PII, bí mật giả định, hoặc nội dung nội bộ nếu đầu ra không được kiểm soát, hoặc nếu gói bàn giao chứa file log/dữ liệu thô (JSONL, \texttt{result.\allowbreak json}, cơ sở dữ liệu tạm).
 
 \subsection{Đầu ra không an toàn}
 
@@ -29,7 +29,7 @@ Mô hình có thể ``ảo giác'' hoặc bị thao túng bởi ngữ cảnh đ�
 
 \subsection{Rủi ro từ dữ liệu, truy vấn Text-to-SQL và tác tử tích hợp công cụ (Multi-Tool Agent)}
 
-Khi LLM được kết nối với cơ sở dữ liệu quan hệ (Text-to-SQL) hoặc được cấp các công cụ thực thi (gửi email, tạo phiếu hỗ trợ, tra cứu đơn hàng), bề mặt tấn công mở rộng thêm hai hình thái nguy hiểm: (i)~\textbf{Prompt-to-SQL Injection (P2SQL)} trực tiếp, trong đó kẻ tấn công lừa mô hình sinh câu lệnh SQL vượt quyền đọc các bảng/cột nhạy cảm (\texttt{UNION SELECT}, truy vấn lồng nhau, CTE đệ quy gây cạn kiệt tài nguyên hoặc câu lệnh ghép \texttt{DROP/DELETE}); và (ii)~\textbf{Indirect Data-Cell Injection}, trong đó chỉ dẫn độc hại được cài sẵn trong một ô văn bản của cơ sở dữ liệu (như ghi chú đơn hàng hoặc đánh giá sản phẩm) để khi câu lệnh \texttt{SELECT} trả kết quả về, nội dung ô dữ liệu đó sẽ chiếm quyền điều khiển lần gọi LLM thứ hai và kích hoạt công cụ ngoài ý muốn~\cite{zhan2024injecagent}. Do đó, hệ thống cần kiểm soát cả cây cú pháp câu lệnh SQL trước khi chạy lẫn nội dung từng ô dữ liệu trả về trước khi đưa lại cho mô hình.
+Khi LLM được kết nối với cơ sở dữ liệu quan hệ (Text-to-SQL) hoặc được cấp các công cụ thực thi (gửi email, tạo phiếu hỗ trợ, tra cứu đơn hàng), bề mặt tấn công mở rộng thêm hai hình thái nguy hiểm: (i)~\textbf{Prompt-to-SQL Injection (P2SQL)} trực tiếp, trong đó kẻ tấn công lừa mô hình sinh câu lệnh SQL vượt quyền đọc các bảng/cột nhạy cảm (\texttt{UNION SELECT}, truy vấn lồng nhau, CTE đệ quy gây cạn kiệt tài nguyên hoặc câu lệnh ghép \texttt{DROP/\allowbreak DELETE}); và (ii)~\textbf{Indirect Data-Cell Injection}, trong đó chỉ dẫn độc hại được cài sẵn trong một ô văn bản của cơ sở dữ liệu (như ghi chú đơn hàng hoặc đánh giá sản phẩm) để khi câu lệnh \texttt{SELECT} trả kết quả về, nội dung ô dữ liệu đó sẽ chiếm quyền điều khiển lần gọi LLM thứ hai và kích hoạt công cụ ngoài ý muốn~\cite{zhan2024injecagent}. Do đó, hệ thống cần kiểm soát cả cây cú pháp câu lệnh SQL trước khi chạy lẫn nội dung từng ô dữ liệu trả về trước khi đưa lại cho mô hình.
 
 \section{Nguyên tắc kiểm soát an toàn}
 
@@ -58,7 +58,7 @@ sự~\cite{greshake2023indirect} chỉ ra \emph{indirect prompt injection}: ch�
 độc hại nằm trong dữ liệu được truy hồi thay vì trong câu hỏi trực tiếp.
 PoisonedRAG~\cite{zou2024poisonedrag} tấn công đầu độc kho tri thức của RAG, còn
 InjecAgent~\cite{zhan2024injecagent} xây bộ chuẩn đánh giá injection gián tiếp cho
-LLM agent tích hợp công cụ. Ở khía cạnh công cụ dò quét đối kháng tự động, \texttt{NVIDIA garak}~\cite{derczynski2024garak} cung cấp hàng nghìn probe chuẩn hoá cho direct/latent prompt injection, DAN jailbreak và mã hoá Base64/ROT13, trong khi \texttt{Microsoft PyRIT}~\cite{microsoft_pyrit} cung cấp kiến trúc Converter biến đổi payload và chiến lược tấn công thích nghi nhiều lượt (multi-turn crescendo). Trong đồ án tốt nghiệp này, nhóm vừa đánh giá trên tập 425 mẫu nội bộ, vừa \textbf{chạy trực tiếp} công cụ \texttt{garak v0.17.1} và bộ \texttt{PyRIT} Converter/Adaptive Multi-Turn qua giao thức HTTP REST vào các endpoint của hệ thống, đồng thời kiểm chứng độc lập trên bộ benchmark công khai \texttt{deepset/prompt-injections}.
+LLM agent tích hợp công cụ. Ở khía cạnh công cụ dò quét đối kháng tự động, \texttt{NVIDIA garak}~\cite{derczynski2024garak} cung cấp hàng nghìn probe chuẩn hoá cho direct/latent prompt injection, DAN jailbreak và mã hoá Base64/ROT13, trong khi \texttt{Microsoft PyRIT}~\cite{microsoft_pyrit} cung cấp kiến trúc Converter biến đổi payload và chiến lược tấn công thích nghi nhiều lượt (multi-turn crescendo). Trong đồ án tốt nghiệp này, nhóm vừa đánh giá trên tập 425 mẫu nội bộ, vừa \textbf{chạy trực tiếp} công cụ \texttt{garak v0.\allowbreak 17.\allowbreak 1} và bộ \texttt{PyRIT} Converter/Adaptive Multi-Turn qua giao thức HTTP REST vào các endpoint của hệ thống, đồng thời kiểm chứng độc lập trên bộ benchmark công khai \texttt{deepset/\allowbreak prompt-\allowbreak injections}.
 
 \textbf{Phòng thủ.} Llama Guard~\cite{inan2023llamaguard} dùng một LLM tinh chỉnh
 làm bộ bảo vệ đầu vào/đầu ra; NeMo Guardrails~\cite{rebedea2023nemo} cung cấp
@@ -81,24 +81,24 @@ lẻ, mà ở việc kết hợp \emph{nhiều lớp tất định} với \emph{
 RBAC} trước truy hồi --- một hướng ít được nhấn mạnh trong các công cụ guardrail
 tổng quát.
 
-\begin{table}[H]
+\begin{table}[!htbp]
 \centering
 \caption{Định vị đề tài so với các giải pháp guardrail chuẩn}
 \label{tab:related-compare}
-\begin{tabularx}{\linewidth}{@{}p{0.22\linewidth}p{0.22\linewidth}YYY@{}}
+\begin{tabularx}{\linewidth}{@{}L{0.22\linewidth}L{0.22\linewidth}YYY@{}}
 \toprule
-\textbf{Giải pháp} & \textbf{Cơ chế chính} & \textbf{Pre-retrieval RBAC \& SQL AST} & \textbf{Giải mã Base64/ROT13} & \textbf{Độ trễ p50 (Lưu lượng hỗn hợp)} \\
+\textbf{Giải pháp} & \textbf{Cơ chế chính} & \textbf{Pre-retrieval RBAC \& SQL AST} & \textbf{Giải mã Base64/\allowbreak ROT13} & \textbf{Độ trễ p50 (Lưu lượng hỗn hợp)} \\
 \midrule
 Llama Guard~3~\cite{inan2023llamaguard} & LLM phân loại 1B/8B & Không & Không (phụ thuộc LLM) & $\sim 36{,}7$--$58{,}1\,\text{ms}$ \\
-NeMo Guardrails~\cite{rebedea2023nemo} & Rail lập trình + LLM \texttt{self\_check} & Không (mặc định) & Không (mặc định) & $\sim 97{,}7$--$98{,}2\,\text{ms}$ \\
+NeMo Guardrails~\cite{rebedea2023nemo} & Rail lập trình + LLM \texttt{self\_\allowbreak check} & Không (mặc định) & Không (mặc định) & $\sim 97{,}7$--$98{,}2\,\text{ms}$ \\
 Đề tài (\textbf{Shield AI}) & \textbf{Luật + Pre-decoder + Judge 2B} & \textbf{Có (ACL + SQLite Authorizer)} & \textbf{Có (Tất định)} & $\mathbf{0{,}42\,\text{ms}}$ (Rule) / $\mathbf{0{,}73\,\text{ms}}$ (Lai) \\
 \bottomrule
 \end{tabularx}
 \end{table}
 
-\begin{figure}[H]
+\begin{figure}[!htbp]
 \centering
-\includegraphics[width=0.75\linewidth]{figures/fig-threat-model.png}
+\includegraphics[width=0.68\linewidth]{figures/fig-threat-model.png}
 \caption{Mô hình mối đe doạ: ba bề mặt tấn công và guard phòng vệ tương ứng}
 \label{fig:threat-model}
 \end{figure}

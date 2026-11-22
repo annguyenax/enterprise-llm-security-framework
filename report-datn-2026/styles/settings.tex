@@ -9,7 +9,6 @@
 \else
   % XeLaTeX / LuaLaTeX: nhúng trực tiếp font Times New Roman chuẩn Unicode hệ thống
   % theo đúng Phụ lục QĐ 449/QĐ-HV (Font Times New Roman Unicode, cỡ chữ 13pt)
-  \usepackage{mathptmx}
   \usepackage{fontspec}
   \defaultfontfeatures{Ligatures=TeX}
   \IfFontExistsTF{Times New Roman}{%
@@ -20,10 +19,10 @@
     \setsansfont{TeX Gyre Termes}
   }
   \IfFontExistsTF{Consolas}{%
-    \setmonofont{Consolas}[Scale=0.88]
+    \setmonofont{Consolas}[Scale=0.84]
   }{%
     \IfFontExistsTF{Courier New}{%
-      \setmonofont{Courier New}[Scale=0.90]
+      \setmonofont{Courier New}[Scale=0.86]
     }{%
       \setmonofont{Times New Roman}
     }%
@@ -45,7 +44,13 @@
 \else
   \usepackage[protrusion=true,expansion=false]{microtype}
 \fi
-\emergencystretch=3em
+\sloppy
+\emergencystretch=4em
+\tolerance=2500
+\hbadness=10000
+\hfuzz=1.5pt
+\vfuzz=2.0pt
+\raggedbottom
 \righthyphenmin=2
 \lefthyphenmin=2
 %----------------------------------------------------------------------------------------
@@ -56,9 +61,12 @@
 % Hình đã được chuyển sẵn SVG -> PNG (thư mục figures/), dùng \includegraphics
 % để tránh gọi Inkscape lúc biên dịch (nguyên nhân timeout trên Overleaf free).
 \usepackage{array,booktabs,multirow}
-% Cột X căn giữa cho tabularx: bảng luôn vừa \linewidth, nội dung tự xuống dòng
-% (dùng cho các bảng số liệu để không tràn lề).
-\newcolumntype{Y}{>{\centering\arraybackslash}X}
+\usepackage{ragged2e}
+% Cột X căn trái tự nhiên & cột Y căn giữa cho tabularx: không kéo giãn khoảng trắng
+\renewcommand{\tabularxcolumn}[1]{>{\RaggedRight\arraybackslash\hspace{0pt}}p{#1}}
+\newcolumntype{Y}{>{\Centering\arraybackslash\hspace{0pt}}X}
+\newcolumntype{L}[1]{>{\RaggedRight\arraybackslash\hspace{0pt}}p{#1}}
+\newcolumntype{C}[1]{>{\Centering\arraybackslash\hspace{0pt}}p{#1}}
 \usepackage{siunitx} % canh lề số đẹp
 \sisetup{
   round-mode=places,round-precision=3,
@@ -285,7 +293,7 @@
 \apptocmd{\thebibliography}{%
   \RaggedRight
   \sloppy
-  \setlength{\itemsep}{3pt}%
+  \setlength{\itemsep}{0.5pt}%
   \setlength{\parsep}{0pt}%
 }{}{}
 \makeatother

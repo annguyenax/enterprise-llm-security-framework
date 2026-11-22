@@ -53,11 +53,11 @@ Bản ghi ở dạng JSON content-free, chỉ chứa mã lý do ổn định và
 không lưu nội dung nhạy cảm thô. Cách ghi này bảo đảm nhật ký có thể chia sẻ để
 kiểm toán mà không trở thành một kênh rò rỉ dữ liệu mới.
 
-\begin{table}[H]
+\begin{table}[!htbp]
 \centering
 \caption{Tóm tắt nhóm yêu cầu chức năng chính}
 \label{tab:fr-summary}
-\begin{tabular}{@{}p{0.18\linewidth}p{0.72\linewidth}@{}}
+\begin{tabular}{@{}L{0.18\linewidth}L{0.72\linewidth}@{}}
 \toprule
 \textbf{Mã nhóm} & \textbf{Mô tả} \\
 \midrule
@@ -109,7 +109,7 @@ luật mới hoặc thay đổi một lớp mà không ảnh hưởng lớp khá
 
 Kiến trúc logic gồm ba lớp: (1)~lớp ứng dụng/gateway FastAPI; (2)~chuỗi guard phòng thủ nhiều lớp; (3)~cơ chế truy hồi lai kết hợp kiểm soát truy cập RBAC và mô hình ngôn ngữ (Mock hoặc cục bộ). Mọi lớp chia sẻ nguyên tắc fail-closed và ghi nhật ký content-free.
 
-\begin{figure}[H]
+\begin{figure}[!htbp]
 \centering
 \includegraphics[width=0.78\linewidth]{figures/fig-kien-truc.png}
 \caption{Kiến trúc tổng thể hệ thống Shield AI}
@@ -129,11 +129,11 @@ tắc \emph{phòng thủ theo chiều sâu} (defense-in-depth): mỗi yêu cầu
 chuỗi guard độc lập, mỗi guard chặn một lớp mối đe doạ khác nhau, và một guard
 thất bại vẫn còn các lớp sau. Bốn lớp guard được hiện thực như sau.
 
-\begin{table}[H]
+\begin{table}[!htbp]
 \centering
 \caption{Bốn lớp guard phòng thủ theo chiều sâu}
 \label{tab:guard-layers}
-\begin{tabularx}{\linewidth}{@{}p{0.24\linewidth}p{0.20\linewidth}X@{}}
+\begin{tabularx}{\linewidth}{@{}L{0.24\linewidth}L{0.20\linewidth}X@{}}
 \toprule
 \textbf{Lớp guard} & \textbf{Cơ chế} & \textbf{Mối đe doạ xử lý} \\
 \midrule
@@ -171,16 +171,16 @@ $D$ phép nhân--cộng) bằng một phép nhân ma trận được thư viện
 
 \subsection{Kiến trúc bảo vệ Text-to-SQL và Multi-Tool Company Agent (P4 $\times$ P5)}
 
-Để bảo vệ các ứng dụng trợ lý doanh nghiệp có kết nối cơ sở dữ liệu quan hệ và công cụ nghiệp vụ (mô phỏng qua doanh nghiệp nội thất Nhà Mộc Việt với 12 bảng SQL và 5 công cụ \texttt{search\_docs}, \texttt{query\_db}, \texttt{order\_status}, \texttt{create\_ticket}, \texttt{send\_email}), kiến trúc Shield AI được mở rộng với bốn chốt chặn chuyên biệt (Hình~\ref{fig:sql-agent-arch}):
+Để bảo vệ các ứng dụng trợ lý doanh nghiệp có kết nối cơ sở dữ liệu quan hệ và công cụ nghiệp vụ (mô phỏng qua doanh nghiệp nội thất Nhà Mộc Việt với 12 bảng SQL và 5 công cụ \texttt{search\_\allowbreak docs}, \texttt{query\_db}, \texttt{order\_\allowbreak status}, \texttt{create\_\allowbreak ticket}, \texttt{send\_\allowbreak email}), kiến trúc Shield AI được mở rộng với bốn chốt chặn chuyên biệt (Hình~\ref{fig:sql-agent-arch}):
 
 \begin{enumerate}
-    \item \textbf{SQLite \texttt{EXPLAIN} + Authorizer AST Guard (\texttt{app/sql\_agent/guard.py}):} Thay vì chỉ dựa vào biểu thức chính quy dễ bị vượt qua bởi bí danh (alias), bảng tạm (CTE), truy vấn con (subquery), \texttt{UNION} hoặc \texttt{SELECT *}, hệ thống biên dịch thử câu lệnh SQL bằng chính trình biên dịch của SQLite (\texttt{EXPLAIN}, không thực thi dữ liệu) trên một bản sao lược đồ rỗng trong bộ nhớ, đồng thời gắn hàm callback \texttt{sqlite3.set\_authorizer}. Trình biên dịch SQLite báo cáo chính xác mọi hành động \texttt{SQLITE\_READ(table, column)} và \texttt{SQLITE\_FUNCTION(func)}; nếu câu lệnh chạm vào bảng cấm (\texttt{internal\_secrets}, \texttt{sqlite\_master}, \texttt{pragma\_*}), vượt phạm vi bảng/cột được phép của cặp \emph{(phòng ban, vai trò)}, dùng hàm ngoài danh sách an toàn (\texttt{load\_extension}, \texttt{randomblob}, \texttt{char}) hoặc không phải câu lệnh chỉ đọc \texttt{SELECT/WITH}, SQL Guard chặn ngay lập tức và tự động bao bọc giới hạn \texttt{LIMIT $\le$ 50}.
-    \item \textbf{Thực thi chỉ đọc cô lập (\texttt{app/sql\_agent/executor.py}):} Câu lệnh SQL hợp lệ được thực thi qua kết nối URI \texttt{mode=ro} kèm cờ \texttt{PRAGMA query\_only = ON}, gắn lại cùng bộ Authorizer AST và giới hạn thời gian/số dòng trả về.
-    \item \textbf{Indirect Data-Cell Result Guard (\texttt{app/sql\_agent/result\_guard.py}):} Mọi ô văn bản tự do trả về từ cơ sở dữ liệu (như \texttt{orders.note}, \texttt{product\_reviews.comment}, \texttt{support\_tickets.content}) đều được xem là dữ liệu không đáng tin cậy và phải đi qua ba bộ lọc trước khi đưa vào lần gọi LLM thứ hai: (i)~chuẩn hoá bỏ ký tự ẩn zero-width, giải nhiễu gạch nối (\texttt{b-ỏ q-u-a}) và giải mã Base64 nhúng trong ô dữ liệu; (ii)~quét qua RAG Context Guard và bộ luật tiêm nhiễm SQL gián tiếp (\texttt{injection\_rules.py}: bắt thẻ giả mạo \texttt{[INST]}, lệnh đổi số tài khoản thanh toán, hình ảnh Markdown zero-click exfiltration, cú pháp gọi tool JSON); và (iii)~quét che mờ DLP. Ô vi phạm bị thay thế an toàn bằng nhãn \texttt{[nội dung bị giữ lại bởi Result Guard]}.
-    \item \textbf{Kiểm soát công cụ theo phòng ban và Hàng chờ phê duyệt (\emph{Leader Approval Queue}):} Trong \texttt{app/company\_agent/}, mỗi phòng ban chỉ được phép gọi tập công cụ trong allowlist; mọi đầu ra của công cụ đều đi qua Result/RAG Guard; các hành động có tác động ghi hoặc gửi thông tin ra ngoài (như \texttt{send\_email}, \texttt{create\_ticket} nhạy cảm) bị chặn thực thi trực tiếp và đưa vào hàng chờ phê duyệt yêu cầu quyền \texttt{leader}, đồng thời giới hạn cứng tối đa 5 bước lặp công cụ.
+    \item \textbf{SQLite \texttt{EXPLAIN} + Authorizer AST Guard (\texttt{app/\allowbreak sql\_\allowbreak agent/\allowbreak guard.\allowbreak py}):} Thay vì chỉ dựa vào biểu thức chính quy dễ bị vượt qua bởi bí danh (alias), bảng tạm (CTE), truy vấn con (subquery), \texttt{UNION} hoặc \texttt{SELECT *}, hệ thống biên dịch thử câu lệnh SQL bằng chính trình biên dịch của SQLite (\texttt{EXPLAIN}, không thực thi dữ liệu) trên một bản sao lược đồ rỗng trong bộ nhớ, đồng thời gắn hàm callback \texttt{sqlite3.\allowbreak set\_\allowbreak authorizer}. Trình biên dịch SQLite báo cáo chính xác mọi hành động \texttt{SQLITE\_\allowbreak READ(table, column)} và \texttt{SQLITE\_\allowbreak FUNCTION(func)}; nếu câu lệnh chạm vào bảng cấm (\texttt{internal\_\allowbreak secrets}, \texttt{sqlite\_\allowbreak master}, \texttt{pragma\_*}), vượt phạm vi bảng/cột được phép của cặp \emph{(phòng ban, vai trò)}, dùng hàm ngoài danh sách an toàn (\texttt{load\_\allowbreak extension}, \texttt{randomblob}, \texttt{char}) hoặc không phải câu lệnh chỉ đọc \texttt{SELECT/\allowbreak WITH}, SQL Guard chặn ngay lập tức và tự động bao bọc giới hạn \texttt{LIMIT $\le$ 50}.
+    \item \textbf{Thực thi chỉ đọc cô lập (\texttt{app/\allowbreak sql\_\allowbreak agent/\allowbreak executor.\allowbreak py}):} Câu lệnh SQL hợp lệ được thực thi qua kết nối URI \texttt{mode=ro} kèm cờ \texttt{PRAGMA query\_\allowbreak only = ON}, gắn lại cùng bộ Authorizer AST và giới hạn thời gian/số dòng trả về.
+    \item \textbf{Indirect Data-Cell Result Guard (\texttt{app/\allowbreak sql\_\allowbreak agent/\allowbreak result\_\allowbreak guard.\allowbreak py}):} Mọi ô văn bản tự do trả về từ cơ sở dữ liệu (như \texttt{orders.\allowbreak note}, \texttt{product\_\allowbreak reviews.\allowbreak comment}, \texttt{support\_\allowbreak tickets.\allowbreak content}) đều được xem là dữ liệu không đáng tin cậy và phải đi qua ba bộ lọc trước khi đưa vào lần gọi LLM thứ hai: (i)~chuẩn hoá bỏ ký tự ẩn zero-width, giải nhiễu gạch nối (\texttt{b-ỏ q-u-a}) và giải mã Base64 nhúng trong ô dữ liệu; (ii)~quét qua RAG Context Guard và bộ luật tiêm nhiễm SQL gián tiếp (\texttt{injection\_\allowbreak rules.\allowbreak py}: bắt thẻ giả mạo \texttt{[INST]}, lệnh đổi số tài khoản thanh toán, hình ảnh Markdown zero-click exfiltration, cú pháp gọi tool JSON); và (iii)~quét che mờ DLP. Ô vi phạm bị thay thế an toàn bằng nhãn \texttt{[nội dung bị giữ lại bởi Result Guard]}.
+    \item \textbf{Kiểm soát công cụ theo phòng ban và Hàng chờ phê duyệt (\emph{Leader Approval Queue}):} Trong \texttt{app/\allowbreak company\_\allowbreak agent/}, mỗi phòng ban chỉ được phép gọi tập công cụ trong allowlist; mọi đầu ra của công cụ đều đi qua Result/RAG Guard; các hành động có tác động ghi hoặc gửi thông tin ra ngoài (như \texttt{send\_\allowbreak email}, \texttt{create\_\allowbreak ticket} nhạy cảm) bị chặn thực thi trực tiếp và đưa vào hàng chờ phê duyệt yêu cầu quyền \texttt{leader}, đồng thời giới hạn cứng tối đa 5 bước lặp công cụ.
 \end{enumerate}
 
-\begin{figure}[H]
+\begin{figure}[!htbp]
 \centering
 \includegraphics[width=0.95\linewidth]{figures/fig-sql-agent-architecture.png}
 \caption{Kiến trúc phòng thủ chiều sâu cho Multi-Tool Agent và Text-to-SQL (Shield AI P4 $\times$ P5)}
@@ -191,21 +191,21 @@ $D$ phép nhân--cộng) bằng một phép nhân ma trận được thư viện
 
 Để đánh giá tác dụng của tường lửa, hệ thống cung cấp hai luồng chat: \emph{có
 tường} (Guarded, qua workspace store + ACL và toàn bộ chuỗi guard) và \emph{không
-tường} (Unguarded, qua \texttt{unguarded\_store} và \emph{không} guard). Đây là
+tường} (Unguarded, qua \texttt{unguarded\_\allowbreak store} và \emph{không} guard). Đây là
 so sánh \emph{cấp hệ thống} (hai đường xử lý), không phải ``cùng một engine truy
 hồi chỉ bật/tắt guard''. Để so sánh vẫn công bằng về dữ liệu, thí nghiệm gieo
 \textbf{cùng một tài liệu KB (kèm canary) vào cả hai store}; do đó khác biệt
 quan sát được quy về tác dụng của chuỗi guard trên cùng nội dung nguồn.
 
 Cụ thể, luồng ``có tường'' đi qua chuỗi guard + workspace
-store/ACL, còn luồng ``không tường'' đi qua \texttt{unguarded\_store} và bỏ qua
+store/ACL, còn luồng ``không tường'' đi qua \texttt{unguarded\_\allowbreak store} và bỏ qua
 guard; cả hai được gieo \emph{cùng} tài liệu KB và cùng gọi một mô hình. Vì là so
 sánh cấp hệ thống (hai luồng truy hồi riêng, không phải cùng một cơ chế truy hồi),
 khác biệt quan sát được phản ánh tác dụng của chuỗi guard trên cùng nội dung nguồn.
 
 \section{Luồng hoạt động của hệ thống}
 
-\begin{figure}[H]
+\begin{figure}[!htbp]
 \centering
 \includegraphics[width=0.6\linewidth]{figures/fig-phong-thu.png}
 \caption{Chuỗi phòng thủ nhiều lớp và điểm quyết định fail-closed}

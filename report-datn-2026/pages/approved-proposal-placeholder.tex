@@ -1,41 +1,48 @@
 \clearpage
 \thispagestyle{empty}
 \begin{center}
-  {\fontsize{14pt}{18pt}\selectfont\bfseries PHIẾU PHÊ DUYỆT, GIAO NHIỆM VỤ ĐỀ TÀI\\ĐỒ ÁN TỐT NGHIỆP ĐẠI HỌC}
+  {\fontsize{14pt}{17pt}\selectfont\bfseries PHIẾU PHÊ DUYỆT, GIAO NHIỆM VỤ ĐỀ TÀI\\ĐỒ ÁN TỐT NGHIỆP ĐẠI HỌC}
 \end{center}
 
-\vspace{0.5cm}
+\vspace{0.15cm}
 
 \begin{center}
 \fbox{
   \begin{minipage}{0.92\textwidth}
     \centering
-    \vspace{0.4cm}
-    {\itshape Trang này dùng để chèn bản Phiếu phê duyệt, giao nhiệm vụ đề tài Đồ án tốt nghiệp có đầy đủ chữ ký của Khoa / Bộ môn và Giáo viên hướng dẫn khi in đóng quyển.}
-    \vspace{0.4cm}
+    \vspace{0.2cm}
+    {\small\itshape Trang này dùng để chèn bản Phiếu phê duyệt, giao nhiệm vụ đề tài Đồ án tốt nghiệp có đầy đủ chữ ký của Khoa / Bộ môn và Giáo viên hướng dẫn khi in đóng quyển.}
+    \vspace{0.2cm}
   \end{minipage}
 }
 \end{center}
 
-\vspace{0.4cm}
+\vspace{0.15cm}
 
 \noindent
 \textbf{Thông tin nhiệm vụ đề tài Đồ án tốt nghiệp (theo bảng phân công của GVHD):}
 
+{\small
 \begin{itemize}
-  \setlength{\itemsep}{3pt}
+  \setlength{\itemsep}{1pt}
+  \setlength{\parskip}{1pt}
+  \setlength{\topsep}{2pt}
   \item \textbf{Tên đề tài Đồ án tốt nghiệp:} \textbf{``\titlethesis''}
   \item \textbf{Mã nhóm:} \textbf{Thanh\_01 (A06)} \quad \textbf{Nhóm trưởng:} \textbf{\studentname}
   \item \textbf{Nhóm sinh viên thực hiện:}
   \begin{itemize}
+    \setlength{\itemsep}{0pt}
+    \setlength{\parskip}{0pt}
+    \setlength{\topsep}{1pt}
     \item \textbf{\studentname} --- Mã SV: \textbf{\mssv} --- Lớp: \textbf{\classid} (Nhóm trưởng)
     \item \textbf{\studentnametwo} --- Mã SV: \textbf{\mssvtwo} --- Lớp: \textbf{\classid}
   \end{itemize}
-  \item \textbf{Ngành:} \major \quad \textbf{Khoa:} \faculty
-  \item \textbf{Giáo viên hướng dẫn:} \textbf{\supervisor}
+  \item \textbf{Ngành:} \major \quad \textbf{Khoa:} \faculty \quad \textbf{GVHD:} \textbf{\supervisor}
   \item \textbf{Nội dung lý thuyết:}
   \begin{enumerate}
-    \setlength{\itemsep}{2pt}
+    \setlength{\itemsep}{1pt}
+    \setlength{\parskip}{0pt}
+    \setlength{\topsep}{1pt}
     \item Tổng quan kiến trúc RAG và bề mặt tấn công tại thời điểm suy luận: Prompt injection trực tiếp, injection gián tiếp qua tài liệu truy hồi, đầu độc ngữ cảnh và rò rỉ dữ liệu theo OWASP Top~10 for LLM Applications.
     \item Nghiên cứu kiến trúc Guardrails đa lớp theo nguyên tắc fail-closed (mặc định chặn khi không đủ cơ sở kết luận an toàn): kiểm duyệt đầu vào, kiểm soát truy cập trước truy hồi, làm sạch ngữ cảnh và lọc đầu ra.
     \item Khảo sát các giải pháp Guardrails mã nguồn mở (\texttt{Llama Guard}, \texttt{NeMo Guardrails} hoặc tương đương) và các bộ dữ liệu tấn công công khai.
@@ -44,7 +51,9 @@
   \end{enumerate}
   \item \textbf{Nội dung thực hành:}
   \begin{enumerate}
-    \setlength{\itemsep}{2pt}
+    \setlength{\itemsep}{1pt}
+    \setlength{\parskip}{0pt}
+    \setlength{\topsep}{1pt}
     \item Xây dựng chatbot RAG doanh nghiệp mô phỏng chứa dữ liệu nhạy cảm giả lập, cung cấp cổng truy cập (gateway) phục vụ kiểm thử.
     \item Triển khai lớp Guardrails đa lớp theo luồng đầu vào $\rightarrow$ truy hồi $\rightarrow$ ngữ cảnh $\rightarrow$ đầu ra, áp dụng nguyên tắc fail-closed.
     \item Xây dựng bộ kiểm thử tấn công kết hợp dữ liệu công khai và kịch bản tự xây; tách và khóa tập holdout trước khi tinh chỉnh luật để tránh đánh giá khép kín.
@@ -53,3 +62,4 @@
     \item Lập bảng đối sánh định lượng với \texttt{Llama Guard} và \texttt{NeMo Guardrails} trên cùng bộ kiểm thử và cùng cấu hình phần cứng; phân tích kết quả và các hạn chế về tính hợp lệ của thực nghiệm.
   \end{enumerate}
 \end{itemize}
+}

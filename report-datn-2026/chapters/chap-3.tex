@@ -7,11 +7,11 @@ Hệ thống được phát triển trên Windows với Python 3.x trong môi tr
 
 \section{Công nghệ và công cụ sử dụng}
 
-\begin{table}[H]
+\begin{table}[!htbp]
 \centering
 \caption{Công nghệ, mô hình và công cụ kiểm thử độc lập sử dụng trong đồ án}
 \label{tab:tech}
-\begin{tabular}{@{}p{0.28\linewidth}p{0.62\linewidth}@{}}
+\begin{tabular}{@{}L{0.28\linewidth}L{0.62\linewidth}@{}}
 \toprule
 \textbf{Thành phần} & \textbf{Lựa chọn} \\
 \midrule
@@ -19,9 +19,9 @@ Ngôn ngữ \& Môi trường & Python 3.13, Windows 11, NVIDIA GeForce RTX~4050
 API Gateway & FastAPI / Starlette / Uvicorn \\
 Lưu trữ \& Truy hồi lai & SQLite FTS5 (BM25) kết hợp embedding vector \texttt{float32} BLOB + nhân ma trận \texttt{numpy} \\
 Kiểm soát truy cập & Pre-retrieval RBAC (tài liệu RAG) + SQLite \texttt{EXPLAIN} \& Authorizer AST (bảng/cột SQL) \\
-Mô hình LLM \& Judge cục bộ & Ollama 0.40.11: \texttt{gemma4:e2b-it-q4\_K\_M} (Semantic Judge 2B tối ưu \texttt{think=False}), \texttt{gemma4:e4b-it-qat}, \texttt{qwen3:4b-instruct} (Multi-Tool Agent) và \texttt{claude-sonnet-5-5} adapter \\
-Giải pháp đối sánh (Baselines) & Meta \texttt{llama-guard3:1b} (Ollama), NVIDIA \texttt{NeMo Guardrails} (\texttt{self\_check\_input} rail) \\
-Công cụ \& Benchmark độc lập & NVIDIA \texttt{garak v0.17.1} ($2.048$ REST probes), \texttt{PyRIT} Converter \& Adaptive Multi-Turn, HuggingFace \texttt{deepset/prompt-injections} ($662$ mẫu) \\
+Mô hình LLM \& Judge cục bộ & Ollama 0.40.11: \texttt{gemma4:e2b-\allowbreak it-\allowbreak q4\_\allowbreak K\_\allowbreak M} (Semantic Judge 2B tối ưu \texttt{think=False}), \texttt{gemma4:e4b-\allowbreak it-\allowbreak qat}, \texttt{qwen3:4b-\allowbreak instruct} (Multi-Tool Agent) và \texttt{claude-\allowbreak sonnet-\allowbreak 5-\allowbreak 5} adapter \\
+Giải pháp đối sánh (Baselines) & Meta \texttt{llama-\allowbreak guard3:1b} (Ollama), NVIDIA \texttt{NeMo Guardrails} (\texttt{self\_\allowbreak check\_\allowbreak input} rail) \\
+Công cụ \& Benchmark độc lập & NVIDIA \texttt{garak v0.\allowbreak 17.\allowbreak 1} ($2.048$ REST probes), \texttt{PyRIT} Converter \& Adaptive Multi-Turn, HuggingFace \texttt{deepset/\allowbreak prompt-\allowbreak injections} ($662$ mẫu) \\
 Kiểm thử tự động & \texttt{pytest} ($469+$ unit \& integration tests trên nhánh hợp nhất) \\
 \bottomrule
 \end{tabular}
@@ -39,17 +39,17 @@ truy hồi mà ít ảnh hưởng tới phần còn lại của hệ thống.
 
 \section{Xây dựng chuỗi guard phòng thủ}
 
-Chuỗi guard được hiện thực thành các module độc lập trong \texttt{app/guards/},
+Chuỗi guard được hiện thực thành các module độc lập trong \texttt{app/\allowbreak guards/},
 mỗi module trả về quyết định trong tập \{Allow, Block, Sanitize, Human-review,
 Log\} theo thứ tự mức độ nghiêm trọng cố định (\emph{fail-closed}: quyết định
 nghiêm khắc nhất thắng).
 
 \begin{itemize}
-    \item \textbf{Input Guard kết hợp Tầng tiền giải mã (\emph{Payload De-obfuscation Pre-decoder}):} Trước khi đối chiếu bộ luật regex, hàm \texttt{\_expand\_deobfuscated\_views()} trong \texttt{app/guards/input\_guard.py} thực hiện chuẩn hoá Unicode NFKC, loại bỏ ký tự ẩn zero-width (\texttt{U+200B..\allowbreak U+FEFF}), gấp đồng hình Cyrillic về Latin, giải nhiễu Leetspeak (\texttt{4->a, 3->e, 1->i, 0->o, 5->s, 7->t}), tự động phát hiện và giải mã các khối Base64 sang UTF-8, cũng như dịch ngược ROT13 khi có tín hiệu mã hoá. Nhờ đó, bộ luật cấu trúc đa ngôn ngữ (Việt/Anh/Đức/Tây Ban Nha) nhìn thấy trực tiếp cả lớp vỏ bọc lẫn mệnh lệnh độc hại ẩn bên trong.
-    \item \textbf{RAG Context Guard \& Provenance Guard:} Kiểm tra nguồn gốc tài liệu do máy chủ gán (\texttt{source\_policy.py}) và đối chiếu luật trên từng đoạn ngữ cảnh truy hồi nhằm phát hiện chỉ thị ẩn trong bình luận HTML, giả mạo thẻ hệ thống và mẫu đầu độc kho tri thức; hỗ trợ làm sạch (sanitize) từng đoạn và fail-closed khi bằng chứng tốt nhất bị vô hiệu hoá.
-    \item \textbf{SQLite Authorizer AST Guard \& Indirect Result Guard:} Trong \texttt{app/sql\_agent/}, câu lệnh SQL do mô hình sinh ra được kiểm tra bằng \texttt{EXPLAIN} + \texttt{set\_authorizer} trên lược đồ rỗng để cưỡng chế phân quyền tới từng bảng/cột và ép \texttt{LIMIT $\le$ 50}; kết quả trả về từ CSDL tiếp tục được quét từng ô qua \texttt{result\_guard.py} (giải nhiễu gạch nối \texttt{b-ỏ q-u-a}, bắt thẻ \texttt{[INST]}, chặn đổi số tài khoản và che mờ DLP) trước khi đưa vào lần gọi mô hình thứ hai.
+    \item \textbf{Input Guard kết hợp Tầng tiền giải mã (\emph{Payload De-obfuscation Pre-decoder}):} Trước khi đối chiếu bộ luật regex, hàm \texttt{\_\allowbreak expand\_\allowbreak deobfuscated\_\allowbreak views()} trong \texttt{app/\allowbreak guards/\allowbreak input\_\allowbreak guard.\allowbreak py} thực hiện chuẩn hoá Unicode NFKC, loại bỏ ký tự ẩn zero-width (\texttt{U+200B..\allowbreak U+FEFF}), gấp đồng hình Cyrillic về Latin, giải nhiễu Leetspeak (\texttt{4->a, 3->e, 1->i, 0->o, 5->s, 7->t}), tự động phát hiện và giải mã các khối Base64 sang UTF-8, cũng như dịch ngược ROT13 khi có tín hiệu mã hoá. Nhờ đó, bộ luật cấu trúc đa ngôn ngữ (Việt/Anh/Đức/Tây Ban Nha) nhìn thấy trực tiếp cả lớp vỏ bọc lẫn mệnh lệnh độc hại ẩn bên trong.
+    \item \textbf{RAG Context Guard \& Provenance Guard:} Kiểm tra nguồn gốc tài liệu do máy chủ gán (\texttt{source\_\allowbreak policy.\allowbreak py}) và đối chiếu luật trên từng đoạn ngữ cảnh truy hồi nhằm phát hiện chỉ thị ẩn trong bình luận HTML, giả mạo thẻ hệ thống và mẫu đầu độc kho tri thức; hỗ trợ làm sạch (sanitize) từng đoạn và fail-closed khi bằng chứng tốt nhất bị vô hiệu hoá.
+    \item \textbf{SQLite Authorizer AST Guard \& Indirect Result Guard:} Trong \texttt{app/\allowbreak sql\_\allowbreak agent/}, câu lệnh SQL do mô hình sinh ra được kiểm tra bằng \texttt{EXPLAIN} + \texttt{set\_\allowbreak authorizer} trên lược đồ rỗng để cưỡng chế phân quyền tới từng bảng/cột và ép \texttt{LIMIT $\le$ 50}; kết quả trả về từ CSDL tiếp tục được quét từng ô qua \texttt{result\_\allowbreak guard.\allowbreak py} (giải nhiễu gạch nối \texttt{b-ỏ q-u-a}, bắt thẻ \texttt{[INST]}, chặn đổi số tài khoản và che mờ DLP) trước khi đưa vào lần gọi mô hình thứ hai.
     \item \textbf{Output Guard / DLP:} Rà mẫu bí mật (khoá API, JWT, mật khẩu), thông tin định danh cá nhân (PII), liên kết/hình ảnh Markdown thất thoát dữ liệu ra tên miền lạ và mã canary seed từ kho trên phản hồi trước khi trả về người dùng.
-    \item \textbf{Semantic Judge cục bộ tối ưu độ trễ (\texttt{gemma4:e2b-it-q4\_K\_M}):} Trong \texttt{app/guards/semantic\_guard.py}, yêu cầu đi qua bộ lọc nhanh (\emph{fast heuristic pre-screen}, $< 0{,}2\,\text{ms}$) và cơ chế \emph{benign short-circuit}; chỉ các truy vấn nằm ở vùng nghi ngờ mới gọi tới mô hình Judge 2B qua Ollama với tham số \texttt{"think": False} và \texttt{num\_predict: 8}, giữ độ trễ mỗi lần gọi Judge ở mức trung vị $\text{p50} = 99{,}79\,\text{ms}$ thay vì hàng nghìn mili-giây như các cấu hình sinh chuỗi suy nghĩ ngầm.
+    \item \textbf{Semantic Judge cục bộ tối ưu độ trễ (\texttt{gemma4:e2b-\allowbreak it-\allowbreak q4\_\allowbreak K\_\allowbreak M}):} Trong \texttt{app/\allowbreak guards/\allowbreak semantic\_\allowbreak guard.\allowbreak py}, yêu cầu đi qua bộ lọc nhanh (\emph{fast heuristic pre-screen}, $< 0{,}2\,\text{ms}$) và cơ chế \emph{benign short-circuit}; chỉ các truy vấn nằm ở vùng nghi ngờ mới gọi tới mô hình Judge 2B qua Ollama với tham số \texttt{"think": False} và \texttt{num\_\allowbreak predict: 8}, giữ độ trễ mỗi lần gọi Judge ở mức trung vị $\text{p50} = 99{,}79\,\text{ms}$ thay vì hàng nghìn mili-giây như các cấu hình sinh chuỗi suy nghĩ ngầm.
 \end{itemize}
 
 \section{Xây dựng cơ chế truy hồi vectorized}
@@ -66,7 +66,7 @@ Kiểm soát truy cập (RBAC) được áp \emph{trước} bước truy hồi: 
 vai trò/phòng ban và mức nhạy cảm; người dùng chỉ truy hồi được tài liệu trong
 phạm vi quyền, độc lập với các guard nội dung.
 
-\begin{figure}[H]
+\begin{figure}[!htbp]
 \centering
 \includegraphics[width=0.78\linewidth]{figures/fig-rag-rbac.png}
 \caption{Cơ chế truy hồi lai (BM25 + embedding) kết hợp kiểm soát truy cập RBAC}
