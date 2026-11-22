@@ -197,6 +197,29 @@ Artifact sau tối ưu: `reports/p5/redteam_external/20261122T022713Z-619459/sum
 | **PyRIT Converter Matrix (35 biến thể mã hóa)** | **Rule-Only chặn** | 17/35 (48.6%) | **30/35 (85.7%)** *(Base64 5/5, ROT13 5/5, Leet 4/5)* | **+37.1 điểm %** |
 | **PyRIT Converter Matrix (35 biến thể mã hóa)** | **Rule + Judge chặn** | 28/35 (80.0%) | **35/35 (100.0%)** *(Chặn 100% cả 7/7 họ biến đổi)* | **+20.0 điểm % (Đạt 100%)** |
 
+---
+
+## 5. Kết quả hợp nhất P5 × P4 (Text-to-SQL Guard, Indirect DB Result Guard & Multi-Tool Company Agent "Nhà Mộc Việt")
+
+Script tái lập: [`scripts/p5/eval_sql_and_agent.py`](../../scripts/p5/eval_sql_and_agent.py)  
+Artifact: `reports/p5/sql_agent_eval/20261122T024828Z-c245d1/summary.json`
+
+Trên nhánh hợp nhất `feat-p5-integrated-thesis` (gộp toàn bộ P3 + P5 với nhánh `feat/claude-provider-sql-guard` của Nghĩa — **469/469 unit test tích hợp PASS**), nhóm đã đo hiệu năng phát hiện và độ trễ `p50 / p95 / p99` cho 2 lớp bảo vệ dữ liệu có cấu trúc mới:
+
+### 5.1. Direct P2SQL & RBAC SQL Guard (`app.sql_agent.guard.evaluate_sql` — SQLite `EXPLAIN` + Authorizer AST)
+
+| Tập mẫu | TP / Mal | FP / Ben | TPR (Recall) | FPR | F1 | Số lượt đo (`n`) | Latency p50 (ms) | Latency p95 (ms) | Latency p99 (ms) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `redteam/sql/p2sql-direct` (38 tấn công) + `p2sql-benign` (31 benign) | 38/38 | 0/31 | **100.0%** | **0.0%** | **100.0%** | 345 | **0.48 ms** | **0.59 ms** | **0.76 ms** |
+
+### 5.2. Indirect P2SQL Data-Cell Result Guard (`app.sql_agent.result_guard.guard_rows` — RAG Context Guard + SQL Injection Rules + DLP)
+
+| Tập mẫu | TP / Mal | FP / Ben | TPR (Recall) | FPR | F1 | Số lượt đo (`n`) | Latency p50 (ms) | Latency p95 (ms) | Latency p99 (ms) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `indirect-rows` (Dev split — 24 tấn công) | 24/24 | 0/32 | **100.0%** | **0.0%** | — | 350 | **0.17 ms** | **0.26 ms** | **0.36 ms** |
+| `indirect-rows` (Holdout split — 14 tấn công) | 9/14 | 0/32 | **64.3%** | **0.0%** | — | 350 | **0.17 ms** | **0.26 ms** | **0.36 ms** |
+| `indirect-rows` (Tổng hợp 70 mẫu: 38 tấn công + 32 hard-benign) | 33/38 | 0/32 | **86.8%** | **0.0%** | **93.0%** | 350 | **0.17 ms** | **0.26 ms** | **0.36 ms** |
+
 **Ý nghĩa quan trọng cho luận văn tốt nghiệp:**
 - Kết quả trên chứng minh nhận xét của giảng viên là **hoàn toàn chính xác**: trên tập template tĩnh (`v3` PyRIT family), hệ thống đạt 100%, nhưng khi đối mặt với:
   1. **Biến đổi mã hóa (Base64, ROT13, Leetspeak)** từ `garak` và `PyRIT Converter`: lớp Regex Input Guard giảm tỉ lệ chặn từ 80% xuống 0–20% (vì chưa có bộ giải mã Base64/ROT13 trước khi quét regex); bật Semantic Judge giúp nâng tỉ lệ chặn Converter từ **48.6% lên 80.0%**.

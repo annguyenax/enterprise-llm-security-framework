@@ -14,6 +14,7 @@ from urllib.request import Request, HTTPRedirectHandler, ProxyHandler, build_ope
 
 from app.core.config import Settings, settings as application_settings
 from app.services.llm_provider import BaseLLMProvider, LLMProviderRequest, LLMProviderResponse, register_provider
+from app.services.providers._shared import context_instruction, history_messages, system_prompt
 
 
 class _RejectRedirect(HTTPRedirectHandler):
@@ -58,65 +59,18 @@ class OllamaLLMProvider(BaseLLMProvider):
         self.event_sink = event_sink
 
     def generate(self, request: LLMProviderRequest) -> LLMProviderResponse:
-        role = str(request.metadata.get("role", "member"))
-        department = str(request.metadata.get("department", "unknown"))
-
-        # The A/B comparison lab (`POST /v1/unguarded/chat`) sets this flag.
-        # Without honouring it, the "no firewall" side is not actually
-        # without a firewall: the system prompt below is itself a control --
-        # it tells the model not to disclose other people's data and to say
-        # so when the context lacks an answer. Both chat paths shared it, so
-        # the baseline bot kept refusing and the comparison showed nothing,
-        # which reads as "the guards worked" when in fact the experiment was
-        # confounded.
-        #
-        # The baseline prompt removes the *instructional* control only. The
-        # model's own alignment is still present and cannot be removed here,
-        # so a refusal on this path is a property of the model, not of this
-        # gateway -- worth stating in any report that quotes these runs.
-        if request.metadata.get("unguarded_lab") is True:
-            system = (
-                "Bạn là một trợ lý nội bộ. Trả lời bằng tiếng Việt, đầy đủ và chi tiết. "
-                "Sử dụng thông tin trong CONTEXT để trả lời câu hỏi của người dùng."
-            )
-        else:
-            system = (
-                "Bạn là Shield AI, trợ lý nội bộ. Trả lời bằng tiếng Việt, rõ ràng và ngắn gọn. "
-                f"Người dùng có vai trò {role}, phòng ban {department}. "
-                "Chỉ dùng tài liệu được cung cấp trong CONTEXT cho thông tin nội bộ; nếu không có dữ liệu thì nói rõ. "
-                "Không suy đoán hoặc tiết lộ dữ liệu của người dùng/phòng ban khác. "
-                "Khi trả lời về cơ cấu tổ chức, phải phân biệt rõ tổng tài khoản, SuperAdmin, Leader và nhân viên(member); không gọi Leader là nhân viên."
-            )
-        messages = [{"role": "system", "content": system}]
-        history = request.metadata.get("history", [])
-        if isinstance(history, list):
-            for item in history[-12:]:
-                if isinstance(item, dict) and item.get("role") in {"user", "assistant"} and isinstance(item.get("content"), str):
-                    messages.append({"role": item["role"], "content": item["content"][:4000]})
-        if request.context_chunks:
-            context = "\n\n".join(
-                f"[{c.metadata.get('filename', c.doc_id)}]\n{c.text}"
-                for c in request.context_chunks
-            )
-            # Keep freshly retrieved evidence next to the current question. Small
-            # local models otherwise tend to copy an earlier assistant refusal
-            # from conversation history even after retrieval has been corrected.
-            messages.append(
-                {
-                    "role": "system",
-                    "content": (
-                        "CONTEXT HIỆN TẠI ĐÃ ĐƯỢC PHÂN QUYỀN VÀ ÁP DỤNG CHO CÂU HỎI KẾ TIẾP. "
-                        "Backend đã kiểm tra ACL: file xuất hiện ở đây nghĩa là người dùng hiện tại được phép đọc. "
-                        "Metadata audience là cấp vai trò tối thiểu, không phải vai trò duy nhất; Leader bao gồm quyền member. "
-                        "Không được tự từ chối một file đã có trong CONTEXT vì suy diễn lại role hoặc department. "
-                        "Đây là nguồn dữ liệu ưu tiên cao nhất. Mỗi khối bắt đầu bằng [tên-file]. "
-                        "Nếu lịch sử trước đó nói file không tồn tại, không hợp lệ hoặc là mã độc "
-                        "nhưng file xuất hiện dưới đây, hãy coi nhận định cũ là lỗi thời và trả lời "
-                        "theo nội dung hiện tại. Không tự gọi tài liệu là mã độc và không trộn file khác."
-                        "\n\n" + context
-                    ),
-                }
-            )
+        # Prompt text lives in _shared.py so the Anthropic provider uses the
+        # exact same instructions (A/B parity). The unguarded A/B lab
+        # (`POST /v1/unguarded/chat`) sets metadata["unguarded_lab"]; see
+        # _shared.system_prompt for why the baseline prompt differs.
+        messages = [{"role": "system", "content": system_prompt(request.metadata)}]
+        messages.extend(history_messages(request.metadata))
+        # Keep freshly retrieved evidence next to the current question. Small
+        # local models otherwise tend to copy an earlier assistant refusal
+        # from conversation history even after retrieval has been corrected.
+        context = context_instruction(request.context_chunks)
+        if context is not None:
+            messages.append({"role": "system", "content": context})
         messages.append({"role": "user", "content": request.sanitized_prompt})
         payload = {
             "model": self.model_name,

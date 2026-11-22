@@ -310,7 +310,9 @@ if ($ReleaseReadiness) {
 Write-Section "1. Python compile"
 # ---------------------------------------------------------------------------
 $changed = @(git diff --name-only) + @(git ls-files --others --exclude-standard)
-$pyFiles = $changed | Where-Object { $_ -like "*.py" -and (Test-Path $_) } | Select-Object -Unique
+# @(...) keeps a single result an array; splatting a bare string passes it
+# character by character (py_compile then receives "s", "c", ...).
+$pyFiles = @($changed | Where-Object { $_ -like "*.py" -and (Test-Path $_) } | Select-Object -Unique)
 if ($pyFiles.Count -eq 0) {
     Record "compile" $true "khong co file .py thay doi"
 } else {

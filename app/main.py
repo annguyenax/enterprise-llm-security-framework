@@ -17,6 +17,8 @@ from typing import AsyncIterator
 from fastapi import FastAPI
 
 from app.api.routes import router
+from app.api.agent_routes import router as agent_router
+from app.api.sql_routes import router as sql_router
 from app.core.config import settings
 from app.workspace import store as workspace_store
 from app.workspace.routes import router as workspace_router
@@ -25,6 +27,10 @@ from app.workspace.routes import router as workspace_router
 # registers it through the existing ADR-004 provider seam.
 if settings.llm_provider.strip().lower() == "ollama":
     from app.services.providers import ollama as _ollama  # noqa: F401
+# Anthropic (Claude) is a paid cloud provider; enabled only explicitly and
+# only after maintainer approval (AGENT_RULES rule 4).
+if settings.llm_provider.strip().lower() == "anthropic":
+    from app.services.providers import anthropic as _anthropic  # noqa: F401
 
 
 @asynccontextmanager
@@ -50,4 +56,6 @@ app = FastAPI(
 )
 
 app.include_router(router)
+app.include_router(sql_router)
+app.include_router(agent_router)
 app.include_router(workspace_router)
